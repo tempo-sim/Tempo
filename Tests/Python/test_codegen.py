@@ -289,6 +289,53 @@ def drift(w: E.Widget) -> None:
         assert errors, "{} should be a type error".format(source)
 
 
+def test_the_async_forms_are_typed_as_the_blocking_ones(generated, tmp_path):
+    """Each blocking function is derived from its `_async` twin, and must keep its types doing so:
+    a checker that saw a coroutine there, as it does for tempo_world's dual-mode names, or saw
+    `Any`, would pass every misuse."""
+    errors = check(generated, """
+from typing import List
+import fixture_classes.Engine as E
+from tempo_sim import world
+
+def blocking() -> None:
+    found: List[E.Widget] = world.get_actors(E.Widget)
+    one: E.Widget = world.get_actor("A", E.Widget)
+    world.destroy_actor(found[0])
+
+async def awaited(w: E.Widget) -> None:
+    found: List[E.Widget] = await world.get_actors_async(E.Widget)
+    one: E.Widget = await world.get_actor_async("A", E.Widget)
+    await world.destroy_actor_async(one)
+    flag: bool = await world.get_async(lambda: w.bEnabled)
+    resized: bool = await world.call_async(lambda: w.Resize(4))
+    async with world.batch() as b:
+        w.bEnabled = True
+        later = b.get(lambda: w.bEnabled)
+    also: bool = later.value
+    async with w.snapshot_async("bEnabled"):
+        print(w.bEnabled)
+    async for state in world.stream_actor_state_async(w):
+        print(state)
+""", tmp_path)
+    assert errors == [], "the async forms should type-check: {}".format(errors)
+
+    for source in ("s: str = world.get_actors(E.Widget)",
+                   "world.destroy_actor(\"A\")",
+                   "s: str = await world.get_async(lambda: w.bEnabled)",
+                   "await world.get_async(lambda: w.bEnabledd)",
+                   "found: str = await world.get_actors_async(E.Widget)",
+                   "world.destroy_actor_async(w).name"):
+        errors = check(generated, """
+import fixture_classes.Engine as E
+from tempo_sim import world
+
+async def drift(w: E.Widget) -> None:
+    {}
+""".format(source), tmp_path)
+        assert errors, "{} should be a type error".format(source)
+
+
 def test_out_parameters_are_typed_by_name(generated, tmp_path):
     """With out parameters a method returns every result keyed by name, and the stub has to say so.
 

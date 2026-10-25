@@ -703,6 +703,31 @@ def test_a_typed_batch_defers_and_orders(sim_server):
         tw.destroy_actor(actor=spawned.actor)
 
 
+def test_a_coroutine_writes_and_reads_through_the_typed_classes(sim_server):
+    """The async forms against a real sim: spawn and destroy awaited, writes queued in an async
+    batch -- accessor write included -- and reads awaited through a deferred lambda."""
+    import asyncio
+
+    StaticMeshActor = registered().python_class(SPAWNABLE)
+
+    async def scenario():
+        spawned = await world.spawn_actor_async(StaticMeshActor)
+        try:
+            async with world.batch() as b:
+                spawned.bCanBeDamaged = False
+                spawned.NetUpdateFrequency = 30.0
+                damaged = b.get(lambda: spawned.bCanBeDamaged)
+            frequency = await world.get_async(lambda: spawned.NetUpdateFrequency)
+            tagged = await world.call_async(lambda: spawned.ActorHasTag("nope"))
+            async with spawned.snapshot_async("bCanBeDamaged"):
+                snapshot = spawned.bCanBeDamaged
+            return damaged.value, frequency, tagged, snapshot
+        finally:
+            await world.destroy_actor_async(spawned)
+
+    assert asyncio.run(scenario()) == (False, pytest.approx(30.0), False, False)
+
+
 # -- the typed asset catalog -------------------------------------------------------------------------
 
 def _catalog(mount):

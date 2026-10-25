@@ -39,13 +39,18 @@ def run_async(coroutine):
     A helper function to run an async coroutine from a synchronous context.
     """
     try:
-        # If there is a running loop run the coroutine on it
-        running_loop = asyncio.get_running_loop()
-        future = asyncio.run_coroutine_threadsafe(coroutine, running_loop)
-        return future.result()
+        asyncio.get_running_loop()
     except RuntimeError:
         # No running loop, so this is a synchronous caller: run on the one loop kept for them.
         return _loop_for_sync_calls().run_until_complete(coroutine)
+    # A loop is running on this very thread, so this is a blocking call made from inside one of its
+    # coroutines. Waiting here would stop the loop the reply has to arrive on: a deadlock, every
+    # time, rather than a slow call.
+    coroutine.close()
+    raise RuntimeError(
+        "a blocking Tempo call was made from inside a coroutine, on its event loop's own thread, "
+        "where it can never finish. Await the call's async form instead."
+    )
 
 
 def default_socket_directory():

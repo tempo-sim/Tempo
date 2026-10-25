@@ -20,12 +20,13 @@
 # schema-free path is added it must land as a separate type, and any catch-all must be hidden from
 # the type checker by a .pyi that omits it.
 
+import asyncio
+import contextvars
 import difflib
 import json
 import os
-import threading
 
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 
 from dataclasses import dataclass, field
 
@@ -302,29 +303,51 @@ class Object:
         rather than the stale one.
         """
         wanted = list(names) if names else self._readable_names()
-        values = {}
+        response = None
         if wanted:
+            _require_blocking("a snapshot", "`async with handle.snapshot_async()`")
             response = _world().get_properties(
                 **self._target(), properties=wanted, native_units=True)
-            for entry in response.values:
-                # An unreadable property does not fail the call; it simply is not in the snapshot,
-                # and a read of it falls through to the server to report why.
-                if entry.code == 0:
-                    values[entry.name] = _from_value(entry.value)
-
-        snapshots = getattr(_state, "snapshots", None)
-        if snapshots is None:
-            snapshots = _state.snapshots = {}
-        key = _key(self._target())
-        previous = snapshots.get(key)
-        snapshots[key] = values
-        try:
+        with self._serving(response):
             yield self
+
+    @asynccontextmanager
+    async def snapshot_async(self, *names):
+        """`snapshot`, fetched without blocking the event loop:
+
+            async with truck.snapshot_async():
+                print(truck.MaxSpeed, truck.Mass)
+
+        The reads inside are plain attribute reads, served from the snapshot, so nothing in the
+        block waits. A read of something the snapshot does not hold is a round trip, and one made
+        inside a coroutine is refused rather than left to block the loop.
+        """
+        wanted = list(names) if names else self._readable_names()
+        response = None
+        if wanted:
+            response = await _world().get_properties(
+                **self._target(), properties=wanted, native_units=True)
+        with self._serving(response):
+            yield self
+
+    @contextmanager
+    def _serving(self, response):
+        """Serve this handle's reads from a GetProperties response for the length of the block."""
+        values = {}
+        for entry in response.values if response is not None else ():
+            # An unreadable property does not fail the call; it simply is not in the snapshot,
+            # and a read of it falls through to the server to report why.
+            if entry.code == 0:
+                values[entry.name] = _from_value(entry.value)
+        # A new mapping rather than an edit of the current one: the current one belongs to whichever
+        # context set it, and another task may be reading through it.
+        snapshots = dict(_snapshots.get())
+        snapshots[_key(self._target())] = values
+        token = _snapshots.set(snapshots)
+        try:
+            yield
         finally:
-            if previous is None:
-                snapshots.pop(key, None)
-            else:
-                snapshots[key] = previous
+            _snapshots.reset(token)
 
     def _readable_names(self):
         """Every property of this class that can be read as one value."""
@@ -355,14 +378,25 @@ class Object:
         against the class before the subscription opens, so a typo fails immediately rather than
         after the first tick.
         """
+        self._watchable(name)
+        _require_blocking("watch", "`async for value in handle.watch_async(name)`")
+        for message in _world().stream_property(**self._target(), property=name,
+                                                native_units=True):
+            yield _from_value(message)
+
+    async def watch_async(self, name):
+        """`watch`, for a coroutine: `async for speed in truck.watch_async("MaxSpeed")`."""
+        self._watchable(name)
+        async for message in _world().stream_property(**self._target(), property=name,
+                                                      native_units=True):
+            yield _from_value(message)
+
+    def _watchable(self, name):
         member = self._property(name)
         if member.get("variant") is None:
             raise AttributeError(
                 "{}.{} cannot be watched: it is not readable as one value".format(
                     type(self).__name__, name))
-        for message in _world().stream_property(**self._target(), property=name,
-                                                native_units=True):
-            yield _from_value(message)
 
     def _property(self, name):
         member = _classes.find_property(type(self).__tempo_class__, name)
@@ -966,10 +1000,15 @@ def _from_value(message):
     raise TypeError("no conversion from Value variant {!r}".format(variant))
 
 
-# The open batch, if any. Thread-local because the client is not thread-safe anyway -- the gRPC
-# channel is bound to the loop that created it -- so a batch opened on one thread has no business
-# capturing writes made on another.
-_state = threading.local()
+# The open batch, the deferred lambda being captured and the snapshots serving reads. Context
+# variables rather than thread-locals, because a thread is not the unit that owns them once
+# coroutines are involved: two tasks on one loop share a thread, and a batch one of them opened must
+# not capture the other's writes while it awaits. A thread has a context of its own as well, so a
+# batch opened on one thread still has no business capturing writes made on another.
+_batch: "contextvars.ContextVar[Batch | None]" = contextvars.ContextVar("tempo_batch", default=None)
+_capture: "contextvars.ContextVar[list | None]" = contextvars.ContextVar("tempo_capture",
+                                                                         default=None)
+_snapshots: "contextvars.ContextVar[dict]" = contextvars.ContextVar("tempo_snapshots", default={})
 
 # What a read or call made inside `Batch.get`/`Batch.call` returns in place of its value, which does
 # not exist yet. Nothing outside this module sees it: the Deferred is handed back instead.
@@ -981,7 +1020,24 @@ _ABORTED = 10
 
 
 def _open_batch():
-    return getattr(_state, "batch", None)
+    return _batch.get()
+
+
+def _require_blocking(what, instead):
+    """Refuse a round trip that would block the event loop it is made on.
+
+    Attribute access is synchronous, because assignment cannot be awaited. Made inside a coroutine
+    it would block the very loop the reply has to arrive on -- a deadlock, not a slow call -- so it
+    fails here, naming the form that works.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    raise RuntimeError(
+        "{} would block the event loop this coroutine runs on. Inside a coroutine, use {} -- "
+        "attribute access itself can only queue, in `async with world.batch()`, or be served by a "
+        "snapshot.".format(what, instead))
 
 
 def _worldcontrol():
@@ -1058,11 +1114,27 @@ class Batch:
 
     The server stops at the first failure and reports what it did not run, and the flush raises a
     BatchError naming the op that failed. Nothing is sent if the block raises before a flush.
+
+    `async with` is the same batch for a coroutine, flushed without blocking the event loop. Inside
+    it nothing is sent until the block ends, so a read or call is deferred through `get` or `call`
+    or not made at all: an immediate one would have to block. Writes are plain assignments, as
+    ever, since all they do in a batch is queue.
+
+        async with world.batch() as b:
+            truck.MaxSpeed = 1200.0
+            speed = b.get(lambda: truck.MaxSpeed)
+        print(speed.value)
+
+    A batch opened inside another joins it, so the whole block is still one flush, in order.
     """
 
     def __init__(self):
         self._ops = []
         self._depth = 0
+        self._token = None
+        self._asynchronous = False
+        # Per entry, the batch that entry joined, or None where this one opened itself.
+        self._joined = []
 
     def _add(self, op, description, on_result=None):
         self._ops.append((op, description, on_result))
@@ -1095,6 +1167,12 @@ class Batch:
 
     def run_now(self, op, description, decode):
         """Queue an op, send everything queued, and return the op's own result."""
+        if self._asynchronous:
+            raise TypeError(
+                "{} was made directly inside `async with world.batch()`, where nothing is sent "
+                "until the block ends. Defer it -- `b.get(lambda: ...)` or `b.call(lambda: ...)` -- "
+                "or await it on its own with world.get_async / world.call_async.".format(
+                    description))
         deferred = self.defer(op, description, decode)
         self.flush()
         return deferred.value
@@ -1108,12 +1186,12 @@ class Batch:
         return self._capture(invoke)
 
     def _capture(self, body):
-        previous = getattr(_state, "capture", None)
-        captured = _state.capture = []
+        captured = []
+        token = _capture.set(captured)
         try:
             returned = body()
         finally:
-            _state.capture = previous
+            _capture.reset(token)
         if not captured:
             # Answered without asking the server -- a snapshot served it. Nothing to wait for.
             deferred = Deferred()
@@ -1124,29 +1202,69 @@ class Batch:
                             "result unchanged; this one made {}".format(len(captured)))
         return captured[0]
 
-    def __enter__(self):
+    def _open(self, asynchronous):
+        outer = _batch.get()
+        if outer is not None and outer is not self:
+            # Joined rather than nested: an inner flush would send its ops ahead of the outer
+            # block's earlier ones.
+            self._joined.append(outer)
+            return outer
+        self._joined.append(None)
+        if self._depth == 0:
+            self._asynchronous = asynchronous
+            self._token = _batch.set(self)
         self._depth += 1
-        _state.batch = self
         return self
 
-    def __exit__(self, exc_type, exc, traceback):
+    def _close(self, failed):
+        """Leave one entry, and say whether it was the outermost and the batch should now be sent."""
+        if self._joined.pop() is not None:
+            return False
         self._depth -= 1
         if self._depth > 0:
-            # A nested batch joins the outer one rather than flushing early, so the whole block is
-            # still one flush.
             return False
-        _state.batch = None
-        if exc_type is None:
-            self.flush()
-        else:
+        if self._token is not None:
+            _batch.reset(self._token)
+        self._token = None
+        if failed:
             self._ops = []
+            return False
+        return True
+
+    def __enter__(self):
+        return self._open(asynchronous=False)
+
+    def __exit__(self, exc_type, exc, traceback):
+        if self._close(exc_type is not None):
+            self.flush()
+        return False
+
+    async def __aenter__(self):
+        return self._open(asynchronous=True)
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        if self._close(exc_type is not None):
+            await self.flush_async()
         return False
 
     def flush(self):
-        queued, self._ops = self._ops, []
-        if not queued:
+        if not self._ops:
             return
-        response = _world().run_batch(ops=[op for op, _, _ in queued], stop_on_failure=True)
+        _require_blocking("Sending a batch", "`async with world.batch()`")
+        queued, self._ops = self._ops, []
+        self._settle(queued, _world().run_batch(ops=[op for op, _, _ in queued],
+                                                stop_on_failure=True))
+
+    async def flush_async(self):
+        """Send what is queued without blocking the event loop."""
+        queued, self._ops = self._ops, []
+        if queued:
+            self._settle(queued, await _world().run_batch(ops=[op for op, _, _ in queued],
+                                                          stop_on_failure=True))
+
+    @staticmethod
+    def _settle(queued, response):
+        """Hand each queued op its result, and raise the first failure."""
         first_failure = None
         for index, ((_, description, on_result), result) in enumerate(zip(queued, response.results)):
             error = None
@@ -1159,6 +1277,29 @@ class Batch:
                 on_result(result, error)
         if first_failure is not None:
             raise first_failure
+
+
+async def get_async(read):
+    """One deferred read, awaited: `await get_async(lambda: truck.MaxSpeed)`.
+
+    How a coroutine reads a typed property, since an attribute read cannot itself be awaited. The
+    lambda is captured exactly as `Batch.get` captures it -- one read, returned unchanged -- and
+    sent as a batch of one.
+    """
+    if _batch.get() is not None:
+        raise TypeError("inside a batch, defer the read with b.get instead; the batch sends it")
+    async with Batch() as batch:
+        deferred = batch.get(read)
+    return deferred.value
+
+
+async def call_async(invoke):
+    """One deferred call, awaited: `await call_async(lambda: truck.TeleportTo(...))`."""
+    if _batch.get() is not None:
+        raise TypeError("inside a batch, defer the call with b.call instead; the batch sends it")
+    async with Batch() as batch:
+        deferred = batch.call(invoke)
+    return deferred.value
 
 
 def _describe(target):
@@ -1182,7 +1323,7 @@ def _key(target):
 def _read(target, address):
     # A snapshot serves reads for the handle that opened it, so a block reading several properties
     # costs one call rather than one per property.
-    cache = getattr(_state, "snapshots", {}).get(_key(target))
+    cache = _snapshots.get().get(_key(target))
     if cache is not None and address in cache:
         return cache[address]
 
@@ -1194,12 +1335,14 @@ def _read(target, address):
         op = WorldControl.BatchOp(get=WorldControl.GetPropertyRequest(
             **target, property=address, native_units=True))
         description = "read {}".format(_where(target, address))
-        capture = getattr(_state, "capture", None)
+        capture = _capture.get()
         if capture is not None:
             capture.append(batch.defer(op, description, lambda result: _from_value(result.value)))
             return _PENDING
         return batch.run_now(op, description, lambda result: _from_value(result.value))
 
+    _require_blocking("Reading {}".format(_where(target, address)),
+                      "`await world.get_async(lambda: ...)`")
     return _from_value(_world().get_property(**target, property=address, native_units=True))
 
 
@@ -1221,12 +1364,14 @@ def _write(target, address, member, value):
         if batch is not None:
             batch.add_call(target, setter, argument, member["variant"], value)
         else:
+            _require_blocking("Writing {}".format(_where(target, address)),
+                              "`async with world.batch()`")
             _world().call_function(**target, function=setter, native_units=True,
                                    args=[{"name": argument,
                                           "value": _to_value(member["variant"], value)}])
         return
 
-    cache = getattr(_state, "snapshots", {}).get(_key(target))
+    cache = _snapshots.get().get(_key(target))
     if cache is not None:
         # The snapshot is now stale for this property; drop it rather than serve the old value.
         cache.pop(address, None)
@@ -1235,6 +1380,7 @@ def _write(target, address, member, value):
         batch.add_write(target, address, member["variant"], value)
         return
 
+    _require_blocking("Writing {}".format(_where(target, address)), "`async with world.batch()`")
     _world().set_property(**target, property=address,
                           value=_to_value(member["variant"], value), native_units=True)
 
@@ -1311,12 +1457,14 @@ class BoundFunction:
             def decode(result):
                 return _function_result(result.call, signature)
 
-            capture = getattr(_state, "capture", None)
+            capture = _capture.get()
             if capture is not None:
                 capture.append(batch.defer(op, description, decode))
                 return _PENDING
             return batch.run_now(op, description, decode)
 
+        _require_blocking("Calling {}".format(_where(self._owner._target(), self._name)),
+                          "`await world.call_async(lambda: ...)`")
         response = _world().call_function(**self._owner._target(), function=self._name,
                                           args=arguments, native_units=True)
         return _function_result(response, self._signature)

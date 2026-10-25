@@ -111,6 +111,7 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
                     f.write(f"from {INFRA_PACKAGE} import run_async\n")
                     f.write("from curio.meta import awaitable\n")
                     f.write("import asyncio\n")
+                    f.write("import typing\n")
                     f.write("\n\n")
 
     for root_dir, namespace, _ in roots:
@@ -167,6 +168,9 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "    )\n" \
         "\n\n" \
 
+    # Every form of a stream is annotated AsyncIterator, the blocking generator included. curio's
+    # @awaitable refuses a pair whose signatures differ, return annotation and all, and the async
+    # form is the one bound to the name -- the one a type checker sees -- so it is that one's type.
     streaming_rpc_template = \
         "import " \
         "{% for import in imports %}" \
@@ -177,7 +181,7 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "{% for field in request.fields %}" \
         "    {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
-        ") -> {{ response.full_name }}:\n" \
+        ") -> typing.AsyncIterator[{{ response.full_name }}]:\n" \
         "    stub = await tempo_context().get_stub({{ service.module_name }}_grpc.{{ service.object_name }}Stub)\n" \
         "    request = {{ request.full_name }}(\n" \
         "{% for field in request.fields %}" \
@@ -191,7 +195,7 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "{% for field in request.fields %}" \
         "    {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
-        ") -> {{ response.full_name }}:\n" \
+        ") -> typing.AsyncIterator[{{ response.full_name }}]:\n" \
         "    async_gen = _{{ name }}(\n" \
         "{% for field in request.fields %}" \
         "        {{ field.name }}={{ field.name }}{% if not loop.last %},{% endif %}\n" \
@@ -208,7 +212,7 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "{% for field in request.fields %}" \
         "    {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
-        ") -> {{ response.full_name }}:\n" \
+        ") -> typing.AsyncIterator[{{ response.full_name }}]:\n" \
         "    async for response in _{{ name }}(\n" \
         "{% for field in request.fields %}" \
         "        {{ field.name }}={{ field.name }}{% if not loop.last %},{% endif %}\n" \

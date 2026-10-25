@@ -70,6 +70,34 @@ def classes(tmp_path_factory):
         sys.modules.update(installed)
 
 
+class _BothWays:
+    """A stand-in for a generated client module, answering as its functions do.
+
+    Each is curio's `@awaitable` pair there: a blocking caller gets the response, and a coroutine
+    gets something to await. `world` writes every function once, as a coroutine awaiting them, so a
+    stand-in that only answered the blocking way would fail every test of it.
+    """
+
+    def __init__(self, fake):
+        self._fake = fake
+
+    def __getattr__(self, name):
+        from curio.meta import awaitable
+
+        function = getattr(self._fake, name)
+        if not callable(function):
+            return function
+
+        def answer(*args, **kwargs):
+            return function(*args, **kwargs)
+
+        @awaitable(answer)
+        async def answer(*args, **kwargs):
+            return function(*args, **kwargs)
+
+        return answer
+
+
 @pytest.fixture
 def wire(monkeypatch):
     """Replace the two functions that reach the server, and record what they were asked to do."""
@@ -149,9 +177,9 @@ def requests(monkeypatch, classes):
                 results = [WorldControl.BatchOpResult() for _ in ops]
             return Response()
 
-    monkeypatch.setattr(unreal, "_world", lambda: FakeWorld)
+    monkeypatch.setattr(unreal, "_world", lambda: _BothWays(FakeWorld))
     import tempo_sim.world as world
-    monkeypatch.setattr(world, "_world", lambda: FakeWorld)
+    monkeypatch.setattr(world, "_world", lambda: _BothWays(FakeWorld))
     return sent
 
 
@@ -464,7 +492,7 @@ def world_calls(monkeypatch, classes):
                 return None
             return call
 
-    monkeypatch.setattr(world, "_world", lambda: FakeWorld())
+    monkeypatch.setattr(world, "_world", lambda: _BothWays(FakeWorld()))
     return sent
 
 
@@ -624,7 +652,7 @@ def fake_world(monkeypatch, classes):
                           for name in kwargs["properties"]]
             return Response()
 
-    monkeypatch.setattr(unreal, "_world", lambda: FakeWorld)
+    monkeypatch.setattr(unreal, "_world", lambda: _BothWays(FakeWorld))
     FakeWorld.failures = failures
     return calls
 
@@ -809,6 +837,163 @@ def test_the_snapshot_is_released_on_exit(classes, fake_world):
         _ = widget.bEnabled
     _ = widget.bEnabled
     assert fake_world[-1] == ("get_property", "bEnabled"), "a read after the block is not cached"
+
+
+def test_a_batch_opened_inside_another_joins_it(classes, fake_world):
+    """A second batch object, not the same one re-entered: its flush would go out ahead of the
+    outer block's earlier writes."""
+    from tempo_sim import world
+
+    widget = classes.Widget("MyActor")
+    with world.batch():
+        widget.bEnabled = True
+        with world.batch() as inner:
+            widget.Mode = "Simple"
+            mode = inner.get(lambda: widget.Mode)
+        assert fake_world == [], "the inner block joins the outer one rather than flushing"
+        widget.Tags = ["x"]
+    assert fake_world == [("run_batch", ["set bEnabled", "set Mode", "get Mode", "set Tags"])]
+    assert mode.value is True
+
+
+# -- from a coroutine -----------------------------------------------------------------------------
+#
+# Attribute access cannot be awaited, and a blocking round trip made on the event loop's own thread
+# can never finish. So a coroutine writes inside `async with world.batch()`, where assignment only
+# queues, and reads through a deferred lambda it awaits.
+
+
+def test_an_async_batch_sends_one_call_without_blocking(classes, fake_world):
+    import asyncio
+    from tempo_sim import world
+
+    widget = classes.Widget("MyActor")
+
+    async def scenario():
+        async with world.batch() as b:
+            widget.bEnabled = False
+            enabled = b.get(lambda: widget.bEnabled)
+            resized = b.call(lambda: widget.Resize(4))
+            assert fake_world == [], "nothing goes out until the block ends"
+        return enabled.value, resized.value
+
+    assert asyncio.run(scenario()) == (True, True)
+    assert fake_world == [("run_batch", ["set bEnabled", "get bEnabled", "call Resize"])]
+
+
+def test_an_immediate_read_inside_an_async_batch_is_refused(classes, fake_world):
+    """It would have to block, so it is refused by name, and the batch is not sent."""
+    import asyncio
+    from tempo_sim import world
+
+    widget = classes.Widget("MyActor")
+
+    async def scenario():
+        async with world.batch():
+            widget.bEnabled = True
+            _ = widget.Mode
+
+    with pytest.raises(TypeError, match=r"read MyActor\.Mode was made directly inside"):
+        asyncio.run(scenario())
+    assert fake_world == []
+
+
+def test_a_coroutine_awaits_one_read_or_call(classes, fake_world):
+    import asyncio
+    from tempo_sim import world
+
+    widget = classes.Widget("MyActor")
+
+    async def scenario():
+        return (await world.get_async(lambda: widget.bEnabled),
+                await world.call_async(lambda: widget.Resize(4)))
+
+    assert asyncio.run(scenario()) == (True, True)
+    assert fake_world == [("run_batch", ["get bEnabled"]), ("run_batch", ["call Resize"])]
+
+
+def test_attribute_access_in_a_coroutine_fails_rather_than_deadlocking(classes, fake_world):
+    """Blocking there waits on the loop the reply needs, forever. Each names the form that works."""
+    import asyncio
+
+    widget = classes.Widget("MyActor")
+
+    async def read():
+        return widget.bEnabled
+
+    async def write():
+        widget.bEnabled = True
+
+    async def call():
+        return widget.Resize(4)
+
+    async def batched():
+        from tempo_sim import world
+        with world.batch():
+            widget.bEnabled = True
+
+    for scenario, instead in ((read, "get_async"), (write, "async with world.batch"),
+                              (call, "call_async"), (batched, "async with world.batch")):
+        with pytest.raises(RuntimeError, match=instead):
+            asyncio.run(scenario())
+    assert fake_world == []
+
+
+def test_concurrent_coroutines_do_not_share_a_batch(classes, fake_world):
+    """One task's open batch must not capture another's writes while it awaits."""
+    import asyncio
+    from tempo_sim import world
+
+    first, second = classes.Widget("First"), classes.Widget("Second")
+
+    async def batching(opened):
+        async with world.batch():
+            first.bEnabled = True
+            opened.set()
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+
+    async def other(opened):
+        await opened.wait()
+        await world.get_async(lambda: second.Mode)
+
+    async def scenario():
+        opened = asyncio.Event()
+        await asyncio.gather(batching(opened), other(opened))
+
+    asyncio.run(scenario())
+    assert sorted(fake_world) == [("run_batch", ["get Mode"]), ("run_batch", ["set bEnabled"])]
+
+
+def test_an_async_snapshot_serves_plain_reads(classes, fake_world):
+    import asyncio
+
+    widget = classes.Widget("MyActor")
+
+    async def scenario():
+        async with widget.snapshot_async("bEnabled", "Mode"):
+            return widget.bEnabled, widget.Mode
+
+    assert asyncio.run(scenario()) == (True, True)
+    assert fake_world == [("get_properties", ["bEnabled", "Mode"])]
+
+
+def test_the_world_mirror_has_an_awaitable_twin(classes, world_calls):
+    import asyncio
+    import tempo_sim.unreal as unreal
+    import tempo_sim.world as world
+
+    actor = unreal.Object("Truck")
+
+    async def scenario():
+        await world.destroy_actor_async(actor)
+        return await world.get_components_async(actor, classes.Widget)
+
+    found = asyncio.run(scenario())
+    assert [handle.component for handle in found] == ["Other"]
+    assert [name for name, _ in world_calls] == ["destroy_actor", "get_all_components"]
+    assert world.destroy_actor.__name__ == "destroy_actor"
+    assert world.destroy_actor.__doc__ == world.destroy_actor_async.__doc__
 
 
 # -- calling functions ----------------------------------------------------------------------------
@@ -1139,7 +1324,7 @@ def describing(monkeypatch, classes):
                         pass
                     AssetsResponse.assets = [Asset(path, cls) for path, cls in reported_assets.items()]
                     return AssetsResponse
-            return FakeWorld
+            return _BothWays(FakeWorld)
 
         # `world` reaches the generated RPC module through its own `_world`, not the runtime's.
         monkeypatch.setattr(world, "_world", fake_world)

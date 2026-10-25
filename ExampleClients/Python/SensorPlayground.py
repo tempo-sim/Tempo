@@ -17,6 +17,10 @@ import tempo_sim.tempo_sensors as ts
 import tempo_sim.TempoSensors.Sensors_pb2 as Sensors
 import tempo_sim.TempoCore.Geometry_pb2 as Geometry
 import tempo_sim.tempo_world as tw
+from tempo_sim import world
+from tempo_sim.reflected.Engine import SceneCaptureComponent2D
+from tempo_sim.reflected.structs import FVector4
+from tempo_sim.unreal import BatchError
 import tempo_sim.TempoImageUtils as tiu
 import tempo_sim.TempoLidarUtils as tlu
 
@@ -204,23 +208,28 @@ def measurement_type_string(type):
 
 
 async def randomize_camera_post_process(camera_name, owner):
-    await tw.set_bool_property(actor=owner, component=camera_name, property="PostProcessSettings.bOverride_WhiteTemp", value=True)
-    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.WhiteTemp", value=random.uniform(2000.0, 700.0))
+    # Typed: a renamed or retyped post-process setting is a type error here, not a failed call.
+    # Every Tempo camera is a SceneCaptureComponent2D, which is where PostProcessSettings lives.
+    camera = SceneCaptureComponent2D(owner, camera_name)
+    # One round trip for all of it, applied between two ticks of the sim. Inside an async batch an
+    # assignment only queues, which is what lets a coroutine write by assignment at all.
+    async with world.batch():
+        settings = camera.PostProcessSettings
+        settings.bOverride_WhiteTemp = True
+        settings.WhiteTemp = random.uniform(2000.0, 700.0)
 
-    await tw.set_bool_property(actor=owner, component=camera_name, property="PostProcessSettings.bOverride_BloomIntensity", value=True)
-    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.BloomIntensity", value=random.uniform(0.0, 1.0))
+        settings.bOverride_BloomIntensity = True
+        settings.BloomIntensity = random.uniform(0.0, 1.0)
 
-    await tw.set_bool_property(actor=owner, component=camera_name, property="PostProcessSettings.bOverride_AutoExposureSpeedUp", value=True)
-    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.AutoExposureSpeedUp", value=random.uniform(1.0, 20.0))
+        settings.bOverride_AutoExposureSpeedUp = True
+        settings.AutoExposureSpeedUp = random.uniform(1.0, 20.0)
 
-    await tw.set_bool_property(actor=owner, component=camera_name, property="PostProcessSettings.bOverride_AutoExposureSpeedDown", value=True)
-    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.AutoExposureSpeedDown", value=random.uniform(1.0, 20.0))
+        settings.bOverride_AutoExposureSpeedDown = True
+        settings.AutoExposureSpeedDown = random.uniform(1.0, 20.0)
 
-    await tw.set_bool_property(actor=owner, component=camera_name, property="PostProcessSettings.bOverride_ColorSaturation", value=True)
-    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.ColorSaturation.X", value=random.uniform(0.0, 1.0))
-    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.ColorSaturation.Y", value=random.uniform(0.0, 1.0))
-    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.ColorSaturation.Z", value=random.uniform(0.0, 1.0))
-    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.ColorSaturation.W", value=random.uniform(0.0, 1.0))
+        settings.bOverride_ColorSaturation = True
+        settings.ColorSaturation = FVector4(X=random.uniform(0.0, 1.0), Y=random.uniform(0.0, 1.0),
+                                            Z=random.uniform(0.0, 1.0), W=random.uniform(0.0, 1.0))
 
 
 # ---------------------------------------------------------------------------
@@ -364,7 +373,7 @@ async def flow_randomize_post_process():
     try:
         await randomize_camera_post_process(selection.name, selection.owner)
         print(f"\n  Randomized post-process on {selection}")
-    except grpc.aio._call.AioRpcError as e:
+    except (grpc.aio._call.AioRpcError, BatchError) as e:
         print(f"  Error while setting sensor properties: {e}")
 
 
