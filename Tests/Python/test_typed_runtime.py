@@ -441,6 +441,94 @@ def test_conversions_refuse_what_they_cannot_convert(classes):
         ue_to_si(Geometry.Vector())
 
 
+@pytest.fixture
+def world_calls(monkeypatch, classes):
+    """Every tempo_world call `world` makes, as (name, keyword arguments), answered with stand-ins."""
+    import tempo_sim.world as world
+    import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+    sent = []
+
+    class FakeWorld:
+        def __getattr__(self, name):
+            def call(**kwargs):
+                sent.append((name, kwargs))
+                if name == "add_component":
+                    return WorldControl.AddComponentResponse(name=kwargs["name"] + "_0")
+                if name == "get_all_components":
+                    return WorldControl.GetAllComponentsResponse(components=[
+                        WorldControl.ComponentDescriptor(actor=kwargs["actor"], name="Mesh",
+                                                         class_path="/Script/Engine.MeshThing"),
+                        WorldControl.ComponentDescriptor(actor=kwargs["actor"], name="Other",
+                                                         class_path="/Script/Engine.Widget")])
+                return None
+            return call
+
+    monkeypatch.setattr(world, "_world", lambda: FakeWorld())
+    return sent
+
+
+def test_the_world_mirror_sends_names_for_handles(classes, world_calls):
+    """world is tempo_world given handles: each sends the names tempo_world takes, SI untouched."""
+    import tempo_sim.unreal as unreal
+    import tempo_sim.world as world
+
+    actor = unreal.Object("Truck")
+    other = unreal.Object("Marker")
+    component = unreal.Object("Truck", "Body")
+    location = world.Vector(x=1.0)
+
+    world.destroy_actor(actor)
+    world.set_actor_location(actor, location, relative_to_actor=other)
+    world.set_component_rotation(component, world.Rotation(y=0.5), relative_to_world=True)
+    world.get_component_transform(component, relative_to_component=unreal.Object("Truck", "Root"))
+    world.raycast(world.Vector(), location, ignored_actors=[actor, other])
+    assert world_calls == [
+        ("destroy_actor", {"actor": "Truck"}),
+        ("set_actor_location", {"actor": "Truck", "location": location,
+                                "relative_to_actor": "Marker"}),
+        ("set_component_rotation", {"actor": "Truck", "component": "Body",
+                                    "rotation": world.Rotation(y=0.5), "relative_to_world": True}),
+        ("get_component_transform", {"actor": "Truck", "component": "Body", "frame": 0,
+                                     "relative_to_component": "Root", "socket": ""}),
+        ("raycast", {"start": world.Vector(), "end": location, "collision_channel": 0,
+                     "ignored_actors": ["Truck", "Marker"]}),
+    ]
+
+
+def test_the_world_mirror_refuses_the_wrong_kind_of_handle(classes, world_calls):
+    """A component where an actor is wanted, or the other way round, fails before anything is sent."""
+    import tempo_sim.unreal as unreal
+    import tempo_sim.world as world
+
+    with pytest.raises(TypeError, match="must be an actor"):
+        world.destroy_actor(unreal.Object("Truck", "Body"))
+    with pytest.raises(TypeError, match="must be a component"):
+        world.destroy_component(unreal.Object("Truck"))
+    with pytest.raises(TypeError, match="relative_to_actor must be an actor"):
+        world.set_actor_location(unreal.Object("Truck"), world.Vector(),
+                                 relative_to_actor=unreal.Object("Truck", "Body"))
+    assert world_calls == []
+
+
+def test_adding_and_finding_components_is_typed(classes, world_calls):
+    import tempo_sim.unreal as unreal
+    import tempo_sim.world as world
+
+    actor = unreal.Object("Truck")
+    added = world.add_component(classes.MeshThing, actor, name="Light",
+                                parent=unreal.Object("Truck", "Body"))
+    assert type(added) is classes.MeshThing
+    assert (added.actor, added.component) == ("Truck", "Light_0"), "the name the sim gave it"
+    assert world_calls[0] == ("add_component", {
+        "component_type": "/Script/Engine.MeshThing", "actor": "Truck", "name": "Light",
+        "parent": "Body", "transform": None, "socket": ""})
+
+    found = world.get_components(actor, classes.MeshThing)
+    assert [(type(c), c.component) for c in found] == [(classes.MeshThing, "Mesh")], \
+        "only the components that are MeshThings, by their real class"
+
+
 def test_enum_values_travel_as_their_authored_name(classes):
     import tempo_sim.unreal as unreal
     import fixture_classes.enums as enums

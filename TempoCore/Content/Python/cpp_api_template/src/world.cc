@@ -7,6 +7,7 @@
 #include <grpcpp/client_context.h>
 
 #include "tempo/context.h"
+#include "tempo/tempo_world.h"
 
 #include "TempoWorld/WorldControl.grpc.pb.h"
 
@@ -66,9 +67,72 @@ std::string examples(const std::vector<const Finding*>& findings) {
     return shown;
 }
 
+// The names tempo_world wants, from handles, refusing the wrong kind of handle: a component where an
+// actor is wanted is a mistake the server would report less clearly, or not at all.
+Result<std::string> actor_name(const unreal::Handle& handle, std::string_view role) {
+    const unreal::ObjectRef& object = handle.object();
+    if (!object.component_name().empty() || !object.subsystem_class().empty()) {
+        return TempoError::protocol(std::string(role) + " must be an actor, not " + object.reference_name());
+    }
+    return object.actor_name();
+}
+
+Result<std::string> optional_actor(const unreal::Handle* handle, std::string_view role) {
+    if (handle == nullptr) return std::string();
+    return actor_name(*handle, role);
+}
+
+Result<std::pair<std::string, std::string>> component_names(const unreal::Handle& handle, std::string_view role) {
+    const unreal::ObjectRef& object = handle.object();
+    if (object.component_name().empty()) {
+        return TempoError::protocol(std::string(role) + " must be a component, not " + object.reference_name());
+    }
+    return std::pair{object.actor_name(), object.component_name()};
+}
+
+Result<std::string> optional_component(const unreal::Handle* handle, std::string_view role) {
+    if (handle == nullptr) return std::string();
+    auto names = component_names(*handle, role);
+    if (!names) return std::move(names).error();
+    return names.value().second;
+}
+
+template <typename T>
+Result<void> discard(Result<T> result) {
+    if (!result) return std::move(result).error();
+    return {};
+}
+
 }  // namespace
 
 namespace detail {
+
+Result<std::vector<unreal::ObjectRef>> components_of_class(const unreal::Handle& actor, std::string_view class_path) {
+    auto owner = actor_name(actor, "actor");
+    if (!owner) return std::move(owner).error();
+    auto response = tempo_world::get_all_components(owner.value());
+    if (!response) return std::move(response).error();
+    std::vector<unreal::ObjectRef> components;
+    for (const auto& descriptor : response.value().components()) {
+        unreal::ObjectRef object =
+            unreal::ObjectRef::component(descriptor.actor(), descriptor.name()).with_class(descriptor.class_path());
+        if (object.is_a(class_path)) components.push_back(std::move(object));
+    }
+    return components;
+}
+
+Result<unreal::ObjectRef> add(std::string_view class_path, const unreal::Handle& actor, std::string_view name,
+                              const unreal::Handle* parent, const std::optional<Transform>& transform,
+                              std::string_view socket) {
+    auto owner = actor_name(actor, "actor");
+    if (!owner) return std::move(owner).error();
+    auto parent_name = optional_component(parent, "parent");
+    if (!parent_name) return std::move(parent_name).error();
+    auto response = tempo_world::add_component(std::string(class_path), owner.value(), std::string(name),
+                                               parent_name.value(), transform, std::string(socket));
+    if (!response) return std::move(response).error();
+    return unreal::ObjectRef::component(owner.value(), response.value().name()).with_class(std::string(class_path));
+}
 
 Result<std::vector<unreal::ObjectRef>> actors_of_class(std::string_view class_path) {
     auto response = of_class(class_path);
@@ -120,14 +184,16 @@ Result<void> resolve_subsystem(std::string_view class_path) {
 }
 
 Result<std::string> spawn(std::string_view class_path, bool deferred,
-                          const std::optional<Transform>& transform, std::string_view relative_to) {
+                          const std::optional<Transform>& transform, const unreal::Handle* relative_to_actor) {
+    auto relative = optional_actor(relative_to_actor, "relative_to_actor");
+    if (!relative) return std::move(relative).error();
     auto client = stub();
     if (!client) return std::move(client).error();
     TempoWorld::SpawnActorRequest request;
     request.set_actor_type(std::string(class_path));
     request.set_deferred(deferred);
     *request.mutable_transform() = transform.value_or(Transform{});
-    request.set_relative_to_actor(std::string(relative_to));
+    request.set_relative_to_actor(relative.value());
     TempoWorld::SpawnActorResponse response;
     grpc::ClientContext context;
     grpc::Status status = client.value()->SpawnActor(&context, request, &response);
@@ -208,6 +274,237 @@ Result<unreal::ObjectRef> find_actor(std::string_view name) {
         }
     }
     return TempoError::protocol("no actor named \"" + std::string(name) + "\"");
+}
+
+Result<void> destroy_actor(const unreal::Handle& actor) {
+    auto name = actor_name(actor, "actor");
+    if (!name) return std::move(name).error();
+    return discard(tempo_world::destroy_actor(name.value()));
+}
+
+namespace {
+
+template <typename Call>
+Result<void> on_component(const unreal::Handle& component, Call call) {
+    auto names = component_names(component, "component");
+    if (!names) return std::move(names).error();
+    return discard(call(names.value().first, names.value().second));
+}
+
+}  // namespace
+
+Result<void> destroy_component(const unreal::Handle& component) {
+    return on_component(component, [](const std::string& a, const std::string& c) {
+        return tempo_world::destroy_component(a, c);
+    });
+}
+
+Result<void> activate_component(const unreal::Handle& component) {
+    return on_component(component, [](const std::string& a, const std::string& c) {
+        return tempo_world::activate_component(a, c);
+    });
+}
+
+Result<void> deactivate_component(const unreal::Handle& component) {
+    return on_component(component, [](const std::string& a, const std::string& c) {
+        return tempo_world::deactivate_component(a, c);
+    });
+}
+
+Result<void> set_actor_transform(const unreal::Handle& actor, const Transform& transform,
+                                 const unreal::Handle* relative_to_actor, const std::optional<Vector>& scale) {
+    auto name = actor_name(actor, "actor");
+    if (!name) return std::move(name).error();
+    auto relative = optional_actor(relative_to_actor, "relative_to_actor");
+    if (!relative) return std::move(relative).error();
+    return discard(tempo_world::set_actor_transform(name.value(), transform, relative.value(), scale));
+}
+
+Result<void> set_actor_location(const unreal::Handle& actor, const Vector& location,
+                                const unreal::Handle* relative_to_actor) {
+    auto name = actor_name(actor, "actor");
+    if (!name) return std::move(name).error();
+    auto relative = optional_actor(relative_to_actor, "relative_to_actor");
+    if (!relative) return std::move(relative).error();
+    return discard(tempo_world::set_actor_location(name.value(), location, relative.value()));
+}
+
+Result<void> set_actor_rotation(const unreal::Handle& actor, const Rotation& rotation,
+                                const unreal::Handle* relative_to_actor) {
+    auto name = actor_name(actor, "actor");
+    if (!name) return std::move(name).error();
+    auto relative = optional_actor(relative_to_actor, "relative_to_actor");
+    if (!relative) return std::move(relative).error();
+    return discard(tempo_world::set_actor_rotation(name.value(), rotation, relative.value()));
+}
+
+Result<void> set_actor_scale3d(const unreal::Handle& actor, const Vector& scale) {
+    auto name = actor_name(actor, "actor");
+    if (!name) return std::move(name).error();
+    return discard(tempo_world::set_actor_scale3d(name.value(), scale));
+}
+
+Result<void> set_component_transform(const unreal::Handle& component, const Transform& transform,
+                                     bool relative_to_world, const std::optional<Vector>& scale) {
+    return on_component(component, [&](const std::string& a, const std::string& c) {
+        return tempo_world::set_component_transform(a, c, transform, relative_to_world, scale);
+    });
+}
+
+Result<void> set_component_location(const unreal::Handle& component, const Vector& location, bool relative_to_world) {
+    return on_component(component, [&](const std::string& a, const std::string& c) {
+        return tempo_world::set_component_location(a, c, location, relative_to_world);
+    });
+}
+
+Result<void> set_component_rotation(const unreal::Handle& component, const Rotation& rotation, bool relative_to_world) {
+    return on_component(component, [&](const std::string& a, const std::string& c) {
+        return tempo_world::set_component_rotation(a, c, rotation, relative_to_world);
+    });
+}
+
+Result<void> set_component_scale3d(const unreal::Handle& component, const Vector& scale, bool relative_to_world) {
+    return on_component(component, [&](const std::string& a, const std::string& c) {
+        return tempo_world::set_component_scale3d(a, c, scale, relative_to_world);
+    });
+}
+
+namespace {
+
+template <typename Response, typename Call>
+Result<Response> actor_query(const unreal::Handle& actor, const unreal::Handle* relative_to_actor, Call call) {
+    auto name = actor_name(actor, "actor");
+    if (!name) return std::move(name).error();
+    auto relative = optional_actor(relative_to_actor, "relative_to_actor");
+    if (!relative) return std::move(relative).error();
+    return call(name.value(), relative.value());
+}
+
+template <typename Response, typename Call>
+Result<Response> component_query(const unreal::Handle& component, const unreal::Handle* relative_to_component,
+                                 Call call) {
+    auto names = component_names(component, "component");
+    if (!names) return std::move(names).error();
+    auto relative = optional_component(relative_to_component, "relative_to_component");
+    if (!relative) return std::move(relative).error();
+    return call(names.value().first, names.value().second, relative.value());
+}
+
+}  // namespace
+
+Result<TempoWorld::GetTransformResponse> get_actor_transform(const unreal::Handle& actor,
+                                                             const unreal::Handle* relative_to_actor) {
+    return actor_query<TempoWorld::GetTransformResponse>(actor, relative_to_actor,
+        [](const std::string& a, const std::string& r) { return tempo_world::get_actor_transform(a, r); });
+}
+
+Result<TempoWorld::GetLocationResponse> get_actor_location(const unreal::Handle& actor,
+                                                           const unreal::Handle* relative_to_actor) {
+    return actor_query<TempoWorld::GetLocationResponse>(actor, relative_to_actor,
+        [](const std::string& a, const std::string& r) { return tempo_world::get_actor_location(a, r); });
+}
+
+Result<TempoWorld::GetRotationResponse> get_actor_rotation(const unreal::Handle& actor,
+                                                           const unreal::Handle* relative_to_actor) {
+    return actor_query<TempoWorld::GetRotationResponse>(actor, relative_to_actor,
+        [](const std::string& a, const std::string& r) { return tempo_world::get_actor_rotation(a, r); });
+}
+
+Result<TempoWorld::GetScale3DResponse> get_actor_scale3d(const unreal::Handle& actor) {
+    auto name = actor_name(actor, "actor");
+    if (!name) return std::move(name).error();
+    return tempo_world::get_actor_scale3d(name.value());
+}
+
+Result<TempoWorld::GetTransformResponse> get_component_transform(const unreal::Handle& component,
+                                                                 TempoWorld::ComponentFrame frame,
+                                                                 const unreal::Handle* relative_to_component,
+                                                                 std::string_view socket) {
+    return component_query<TempoWorld::GetTransformResponse>(component, relative_to_component,
+        [&](const std::string& a, const std::string& c, const std::string& r) {
+            return tempo_world::get_component_transform(a, c, frame, r, std::string(socket));
+        });
+}
+
+Result<TempoWorld::GetLocationResponse> get_component_location(const unreal::Handle& component,
+                                                               TempoWorld::ComponentFrame frame,
+                                                               const unreal::Handle* relative_to_component,
+                                                               std::string_view socket) {
+    return component_query<TempoWorld::GetLocationResponse>(component, relative_to_component,
+        [&](const std::string& a, const std::string& c, const std::string& r) {
+            return tempo_world::get_component_location(a, c, frame, r, std::string(socket));
+        });
+}
+
+Result<TempoWorld::GetRotationResponse> get_component_rotation(const unreal::Handle& component,
+                                                               TempoWorld::ComponentFrame frame,
+                                                               const unreal::Handle* relative_to_component,
+                                                               std::string_view socket) {
+    return component_query<TempoWorld::GetRotationResponse>(component, relative_to_component,
+        [&](const std::string& a, const std::string& c, const std::string& r) {
+            return tempo_world::get_component_rotation(a, c, frame, r, std::string(socket));
+        });
+}
+
+Result<TempoWorld::GetScale3DResponse> get_component_scale3d(const unreal::Handle& component,
+                                                             TempoWorld::ComponentFrame frame,
+                                                             const unreal::Handle* relative_to_component,
+                                                             std::string_view socket) {
+    return component_query<TempoWorld::GetScale3DResponse>(component, relative_to_component,
+        [&](const std::string& a, const std::string& c, const std::string& r) {
+            return tempo_world::get_component_scale3d(a, c, frame, r, std::string(socket));
+        });
+}
+
+Result<TempoWorld::ActorState> get_current_actor_state(const unreal::Handle& actor, bool include_hidden_components) {
+    auto name = actor_name(actor, "actor");
+    if (!name) return std::move(name).error();
+    return tempo_world::get_current_actor_state(name.value(), include_hidden_components);
+}
+
+Result<ServerStream<TempoWorld::ActorState>> stream_actor_state(const unreal::Handle& actor,
+                                                                bool include_hidden_components) {
+    auto name = actor_name(actor, "actor");
+    if (!name) return std::move(name).error();
+    return tempo_world::stream_actor_state(name.value(), include_hidden_components);
+}
+
+Result<TempoWorld::ActorStates> get_current_actor_states_near(const unreal::Handle& near_actor, float search_radius_m,
+                                                              bool include_static, bool include_hidden_actors,
+                                                              bool include_hidden_components) {
+    auto name = actor_name(near_actor, "near_actor");
+    if (!name) return std::move(name).error();
+    return tempo_world::get_current_actor_states_near(name.value(), search_radius_m, include_static,
+                                                      include_hidden_actors, include_hidden_components);
+}
+
+Result<ServerStream<TempoWorld::ActorStates>> stream_actor_states_near(const unreal::Handle& near_actor,
+                                                                       float search_radius_m, bool include_static,
+                                                                       bool include_hidden_actors,
+                                                                       bool include_hidden_components) {
+    auto name = actor_name(near_actor, "near_actor");
+    if (!name) return std::move(name).error();
+    return tempo_world::stream_actor_states_near(name.value(), search_radius_m, include_static,
+                                                 include_hidden_actors, include_hidden_components);
+}
+
+Result<ServerStream<TempoWorld::OverlapEventResponse>> stream_overlap_events(const unreal::Handle& actor) {
+    auto name = actor_name(actor, "actor");
+    if (!name) return std::move(name).error();
+    return tempo_world::stream_overlap_events(name.value());
+}
+
+Result<TempoWorld::RaycastResponse> raycast(const Vector& start, const Vector& end,
+                                            TempoWorld::CollisionChannel collision_channel,
+                                            const std::vector<const unreal::Handle*>& ignored_actors) {
+    std::vector<std::string> ignored;
+    for (const unreal::Handle* actor : ignored_actors) {
+        if (actor == nullptr) continue;
+        auto name = actor_name(*actor, "ignored_actors");
+        if (!name) return std::move(name).error();
+        ignored.push_back(name.value());
+    }
+    return tempo_world::raycast(start, end, collision_channel, ignored);
 }
 
 Result<void> check_schema() {

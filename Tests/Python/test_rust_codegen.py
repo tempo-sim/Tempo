@@ -438,6 +438,28 @@ def test_a_function_is_callable(workspace):
 """) == []
 
 
+def test_the_world_mirror_takes_handles_and_si(workspace):
+    """world is tempo_world given handles: the same functions, SI arguments, typed results where
+    something is made."""
+    assert check(workspace, """
+    use tempo_sim::proto::tempo_world::{CollisionChannel, ComponentFrame};
+    world::destroy_actor(&widget)?;
+    let light: MeshThing = world::add_component::<MeshThing>(&widget, "Light", Some(mesh.as_object()), None, "")?;
+    let meshes: Vec<MeshThing> = world::get_components::<MeshThing>(&widget)?;
+    world::set_actor_location(&widget, world::Vector::default(), Some(mesh.as_object()))?;
+    world::set_component_rotation(&mesh, world::Rotation::default(), true)?;
+    let _ = world::get_component_transform(&mesh, ComponentFrame::CfActor, None, "")?;
+    let _ = world::get_current_actor_state(&widget, false)?;
+    let _ = world::raycast(world::Vector::default(), world::Vector::default(),
+                           CollisionChannel::CcVisibility, &[widget.as_object(), mesh.as_object()])?;
+    let _ = world::stream_actor_state(&widget, false)?;
+    let _ = async { world::set_actor_scale3d_async(&widget, world::Vector::default()).await };
+""") == []
+    assert check(workspace, """
+    world::set_actor_location(&widget, FVector::default(), None)?;
+"""), "world takes SI types, as tempo_world does, not Unreal's"
+
+
 def test_a_setter_names_the_argument_it_sends(workspace):
     """A BlueprintSetter write has to carry the setter's own parameter name.
 

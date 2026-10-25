@@ -73,7 +73,7 @@ project defines no services. Importing it is what registers the classes with the
 
 | | `tempo-sim` (`tempo_sim`, `tempo_sim::`) | Your project's package (`tempo_sample`, `tempo_sample::`) |
 |---|---|---|
-| **Runtime** | `unreal` (the handle classes, Unreal's value types, `AssetRef`), `world` (`get_actors`, `spawn_actor`, `get_subsystem`, `batch`, `check_schema`; SI, as `tempo_world` is), `conversion` | none; it uses tempo-sim's |
+| **Runtime** | `unreal` (the handle classes, Unreal's value types, `AssetRef`), `world` (the typed mirror of `tempo_world`: discovery, spawning, components, transforms, world state, `batch`, `check_schema`; SI, as `tempo_world` is), `conversion` | none; it uses tempo-sim's |
 | **Types** | `reflected`: the *published* types, for the modules every build has, which are the engine's always-loaded modules and Tempo's plugins | `reflected`: every class in *this* build, including its C++ modules, its Blueprints, the plugins it enables and every engine module it loads |
 | **Asset catalog** | none, since what is cooked depends on the project | `reflected.assets`, everything this build cooked |
 | **Generated from** | the newest engine Tempo supports | this project's packaged build |
@@ -401,7 +401,13 @@ A path that comes from data — a config file, a command line — can still be u
 `world.check_schema()` also compares the catalog against the sim's own asset registry, and names any
 asset the package has and the sim does not.
 
-## Spawning
+## The world module
+
+`world` is the typed counterpart of `tempo_world`, and mirrors it: the same functions, the same
+arguments in the same SI units — metres, radians, right-handed — with a handle wherever
+`tempo_world` takes an actor's or a component's name, and a class wherever it takes a class's. Each
+returns what its `tempo_world` namesake returns, except that what makes a thing hands back a typed
+handle to it.
 
 ```python
 t = world.Transform(location=world.Vector(z=5.0))        # SI, as tempo_world takes it: 5 m up
@@ -409,10 +415,30 @@ truck = world.spawn_actor(BP_Cat745_C, transform=t)       # -> BP_Cat745_C
 
 with world.spawn_actor_deferred(BP_Cat745_C, transform=t) as truck:
     truck.InitialTerrainHeight = 1.0      # before the construction script and BeginPlay run
+
+light = world.add_component(PointLightComponent, truck, name="Beacon")   # -> PointLightComponent
+world.set_actor_location(truck, world.Vector(x=10.0), relative_to_actor=marker)
+pose = world.get_actor_transform(truck).transform          # a TempoCore Transform, in SI
+world.destroy_component(light)
+world.destroy_actor(truck)
 ```
 
 The deferred form is the only way to set a property that something reads during construction — a
 plain spawn has already run both by the time you have a handle.
+
+| | `world` |
+|---|---|
+| Discovery | `get_actors(Cls)`, `get_actor(name, Cls)`, `get_components(actor, Cls)`, `get_subsystem(Cls)`; untyped, `get_actor(name)` (Python) or `find_actor(name)` (Rust, C++) |
+| Actors and components | `spawn_actor`, `spawn_actor_deferred`, `destroy_actor`, `add_component`, `destroy_component`, `activate_component`, `deactivate_component` |
+| Transforms | `set_`/`get_` `actor_`/`component_` `transform`, `location`, `rotation`, `scale3d` |
+| World state | `get_current_actor_state`, `stream_actor_state`, `get_current_actor_states_near`, `stream_actor_states_near`, `stream_overlap_events`, `raycast` |
+| Batching and checking | `batch`, `defer` (Rust, C++), `check_schema` |
+
+`world` also re-exports the TempoCore types it takes — `world.Vector`, `world.Rotation`,
+`world.Transform`, `world.Vector2D` — so a scenario using it needs no proto import. A handle of the
+wrong kind is refused before anything is sent: a component where an actor is wanted, or the other
+way round. The units are the one thing to keep straight: `world` is SI like `tempo_world`, and the
+generated classes are Unreal's own; `ue_to_si` and `si_to_ue` move between them.
 
 ## Checking that the classes match the sim
 

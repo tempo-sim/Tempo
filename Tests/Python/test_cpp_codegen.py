@@ -337,9 +337,33 @@ def test_discovery_and_spawning_are_typed(generated, tmp_path):
     at.mutable_location()->set_z(1.0);   // SI, as tempo_world takes it: a meter up
     Result<Widget> spawned = world::spawn_actor<Widget>(at);
     Result<Widget> deferred = world::spawn_actor_deferred<Widget>(
-        std::nullopt, "", [](const Widget& w) { return w.set_b_enabled(false); });
+        std::nullopt, nullptr, [](const Widget& w) { return w.set_b_enabled(false); });
     bool is_object = widget.is_a<Object>();
 """, tmp_path) == []
+
+
+def test_the_world_mirror_takes_handles_and_si(generated, tmp_path):
+    """world is tempo_world given handles: the same functions, SI arguments, typed results where
+    something is made."""
+    assert check(generated, """
+    Result<void> destroyed = world::destroy_actor(widget);
+    Result<MeshThing> light = world::add_component<MeshThing>(widget, "Light", &mesh);
+    Result<std::vector<MeshThing>> meshes = world::get_components<MeshThing>(widget);
+    Result<void> moved = world::set_actor_location(widget, world::Vector(), &mesh);
+    Result<void> turned = world::set_component_rotation(mesh, world::Rotation(), true);
+    Result<TempoWorld::GetTransformResponse> pose =
+        world::get_component_transform(mesh, TempoWorld::CF_ACTOR, nullptr, "");
+    Result<TempoWorld::ActorState> state = world::get_current_actor_state(widget);
+    Result<TempoWorld::RaycastResponse> hit =
+        world::raycast(world::Vector(), world::Vector(), TempoWorld::CC_VISIBILITY, {&widget, &mesh});
+    auto stream = world::stream_actor_state(widget);
+""", tmp_path) == []
+    assert check(generated, """
+    auto r = world::set_actor_location(widget, FVector{});
+""", tmp_path), "world takes SI types, as tempo_world does, not Unreal's"
+    assert check(generated, """
+    auto r = world::add_component<FWidgetSettings>(widget);
+""", tmp_path), "only a class can be added as a component"
 
 
 def test_a_setter_names_the_argument_it_sends(generated):

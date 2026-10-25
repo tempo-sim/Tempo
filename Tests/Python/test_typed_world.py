@@ -592,6 +592,36 @@ def test_a_transform_travels_in_unreals_shape(sim_server):
         tw.destroy_actor(actor=spawned.actor)
 
 
+@requires_classes
+def test_the_world_mirror_works_on_handles(sim_server):
+    """world is tempo_world given handles: add a component and find it by class, move an actor in
+    SI and read it back, then take the component away."""
+    StaticMeshActor = registered().python_class(SPAWNABLE)
+    StaticMeshComponent = registered().python_class("/Script/Engine.StaticMeshComponent")
+    spawned = world.spawn_actor(StaticMeshActor)
+    try:
+        added = world.add_component(StaticMeshComponent, spawned, name="MirrorMesh")
+        assert type(added) is StaticMeshComponent and added.actor == spawned.actor
+        found = world.get_components(spawned, StaticMeshComponent)
+        assert added.component in [c.component for c in found]
+
+        root = next(c for c in world.get_components(spawned, StaticMeshComponent)
+                    if c.component != added.component)
+        tw.set_enum_property(actor=spawned.actor, component=root.component, property="Mobility",
+                             value="Movable")
+        world.set_actor_location(spawned, world.Vector(x=2.0, y=1.0, z=0.5))   # meters, right-handed
+        location = world.get_actor_location(spawned).location
+        assert (location.x, location.y, location.z) == pytest.approx((2.0, 1.0, 0.5), abs=1e-4)
+        # The same place in Unreal's terms, through the generated class.
+        assert spawned.K2_GetActorLocation().Y == pytest.approx(-100.0, abs=1e-2)
+
+        world.destroy_component(added)
+        assert added.component not in [c.component
+                                        for c in world.get_components(spawned, StaticMeshComponent)]
+    finally:
+        world.destroy_actor(spawned)
+
+
 # -- one ordered batch ------------------------------------------------------------------------------
 
 def _set_op(actor, prop, **value):

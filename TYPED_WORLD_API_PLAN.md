@@ -1813,7 +1813,13 @@ counterpart and are not converted.
 **`world` speaks SI.** It is the typed counterpart of `tempo_world` and mirrors it: what
 `tempo_world` takes in metres and radians, `world` takes too, with handles where `tempo_world`
 takes names, and it re-exports the TempoCore types (`world.Transform`, `world::Vector`). The
-generated classes are what speak Unreal's units.
+generated classes are what speak Unreal's units. The mirror covers every actor- or
+component-addressed RPC — destroying actors, adding, destroying, activating and finding
+components, every transform getter and setter, actor state and its streams, overlap events and
+raycasts — each returning what `tempo_world` returns, except that what makes a thing hands back a
+typed handle. A handle of the wrong kind (a component where an actor is wanted) is refused before
+anything is sent. Not mirrored: the property and function RPCs, which the generated classes are,
+and the reflection metadata.
 
 **The stubs it needed.** A `_pb2` module builds its classes at import time, so without stubs Pyright
 sees no `Geometry_pb2.Vector` at all; every message type was `Unknown`, and the first overload of

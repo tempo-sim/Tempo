@@ -167,7 +167,12 @@ fails under Pyright instead of at runtime. See `TYPED_WORLD_API_PLAN.md`.
   are snake_case there, which is the one deliberate divergence from Python's verbatim ones. See
   `TYPED_WORLD_API_PLAN.md` §15.
 - **`tempo_sim.unreal`** is the hand-written runtime; `tempo_sim.world` has the entry points
-  (`get_actors`, `get_actor`, `spawn_actor`, `spawn_actor_deferred`, `batch`, `check_schema`).
+  (`get_actors`, `get_actor`, `spawn_actor`, `spawn_actor_deferred`, `batch`, `check_schema`) and
+  is otherwise **the typed mirror of `tempo_world`**: the same functions, names and SI arguments,
+  with handles where `tempo_world` takes names (`destroy_actor`, `add_component`,
+  `set_actor_location`, `get_component_transform`, `stream_actor_state`, `raycast`, …). Keep it
+  mirroring: a new actor- or component-addressed TempoWorld RPC gets a `world` twin in all three
+  clients.
   `tempo_sim::unreal` / `tempo_sim::world` are the Rust mirrors, hand-written in the same
   `Content/Rust/API/src` the generator otherwise owns (whitelisted in its `.gitignore`, as
   `context.rs` is). The typed Rust surface has two `unsafe` reinterpretations, both of a

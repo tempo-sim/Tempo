@@ -12,7 +12,7 @@
 
 use std::time::{Duration, Instant};
 
-use project::reflected::classes::engine::{Actor, StaticMeshActor};
+use project::reflected::classes::engine::{Actor, StaticMeshActor, StaticMeshComponent};
 use project::reflected::enums::EWalkableSlopeBehavior;
 use project::reflected::structs::FWalkableSlopeOverride;
 use tempo_sim::conversion::{quat_of, rotator_of};
@@ -82,7 +82,7 @@ fn make_movable(actor: &Spawned) {
 fn spawn() -> Spawned {
     // StaticMeshActor is an engine class, so it is present whatever the host project is, and it
     // spawns with no mesh or collision so nothing moves it afterwards.
-    Spawned(world::spawn_actor::<StaticMeshActor>(None, "").expect("spawn_actor"))
+    Spawned(world::spawn_actor::<StaticMeshActor>(None, None).expect("spawn_actor"))
 }
 
 #[test]
@@ -286,6 +286,40 @@ fn a_transform_travels_in_unreals_shape() {
     );
     assert!(close(got.translation.x, 100.0) && close(got.translation.z, 50.0), "{got:?}");
     assert!(close(rotator_of(&got.rotation).yaw, 90.0), "{got:?}");
+}
+
+#[test]
+fn the_world_mirror_works_on_handles() {
+    connect();
+    let actor = spawn();
+    make_movable(&actor);
+
+    // world is tempo_world given handles: add a component and find it by class, move an actor in SI
+    // and read it back, then take the component away.
+    let added: StaticMeshComponent =
+        world::add_component(actor.actor(), "MirrorMesh", None, None, "").expect("add_component");
+    let names = |found: Vec<StaticMeshComponent>| -> Vec<String> {
+        found.iter().map(|c| c.as_object().component_name().to_string()).collect()
+    };
+    let before =
+        names(world::get_components::<StaticMeshComponent>(actor.actor()).expect("get_components"));
+    assert!(before.contains(&added.as_object().component_name().to_string()), "{before:?}");
+
+    world::set_actor_location(actor.actor(), world::Vector { x: 2.0, y: 1.0, z: 0.5 }, None)
+        .expect("set_actor_location");
+    let location = world::get_actor_location(actor.actor(), None)
+        .expect("get_actor_location")
+        .location
+        .expect("a location");
+    assert!((location.x - 2.0).abs() < 1e-4 && (location.y - 1.0).abs() < 1e-4, "{location:?}");
+    // The same place in Unreal's terms, through the generated class.
+    let unreal = actor.actor().k2_get_actor_location().expect("K2_GetActorLocation");
+    assert!((unreal.y + 100.0).abs() < 1e-2, "{unreal:?}");
+
+    world::destroy_component(&added).expect("destroy_component");
+    let after =
+        names(world::get_components::<StaticMeshComponent>(actor.actor()).expect("get_components"));
+    assert!(!after.contains(&added.as_object().component_name().to_string()), "{after:?}");
 }
 
 #[test]

@@ -193,19 +193,19 @@ pub fn find_actor(name: &str) -> Result<ObjectRef, TempoError> {
     }
 }
 
-/// Spawn one actor of a class and return a handle to it.
+/// Spawn one actor of a class and return a handle to it: `tempo_world::spawn_actor`, typed.
 ///
 /// Typed for free: the RPC already takes the class, so there is nothing to infer.
 pub fn spawn_actor<T: Class>(
     transform: Option<Transform>,
-    relative_to: &str,
+    relative_to_actor: Option<&ObjectRef>,
 ) -> Result<T, TempoError> {
     note_origin::<T>();
     let response = crate::tempo_world::spawn_actor(
         T::PATH.to_string(),
         false,
         transform,
-        relative_to.to_string(),
+        optional_actor(relative_to_actor, "relative_to_actor")?,
     )?;
     Ok(T::from_object(ObjectRef::actor(response.name).with_class(T::PATH)))
 }
@@ -213,14 +213,14 @@ pub fn spawn_actor<T: Class>(
 /// Spawn one actor of a class, without blocking.
 pub async fn spawn_actor_async<T: Class>(
     transform: Option<Transform>,
-    relative_to: &str,
+    relative_to_actor: Option<&ObjectRef>,
 ) -> Result<T, TempoError> {
     note_origin::<T>();
     let response = crate::tempo_world::spawn_actor_async(
         T::PATH.to_string(),
         false,
         transform,
-        relative_to.to_string(),
+        optional_actor(relative_to_actor, "relative_to_actor")?,
     )
     .await?;
     Ok(T::from_object(ObjectRef::actor(response.name).with_class(T::PATH)))
@@ -257,7 +257,7 @@ pub async fn spawn_actor_async<T: Class>(
 /// #     }
 /// # }
 /// # fn main() -> Result<(), tempo_sim::TempoError> {
-/// let truck = world::spawn_actor_deferred::<BP_Cat745_C, _>(None, "", |truck| {
+/// let truck = world::spawn_actor_deferred::<BP_Cat745_C, _>(None, None, |truck| {
 ///     truck.set_initial_terrain_height(1.0)
 /// })?;
 /// # let _ = truck;
@@ -270,7 +270,7 @@ pub async fn spawn_actor_async<T: Class>(
 /// `configure` is what comes back.
 pub fn spawn_actor_deferred<T, F>(
     transform: Option<Transform>,
-    relative_to: &str,
+    relative_to_actor: Option<&ObjectRef>,
     configure: F,
 ) -> Result<T, TempoError>
 where
@@ -282,7 +282,7 @@ where
         T::PATH.to_string(),
         true,
         transform,
-        relative_to.to_string(),
+        optional_actor(relative_to_actor, "relative_to_actor")?,
     )?;
     let handle = T::from_object(ObjectRef::actor(&response.name).with_class(T::PATH));
 
@@ -292,6 +292,531 @@ where
     configured?;
     finished?;
     Ok(handle)
+}
+
+// -- the rest of tempo_world, given handles ----------------------------------------------------
+//
+// Each is the `tempo_world` function of the same name, taking a handle where it takes a name and
+// returning what it returns -- except that what creates a thing hands back a typed handle to it.
+// SI throughout, as `tempo_world` is: meters, radians, right-handed. A scale is a ratio, and rides
+// beside a transform rather than in it, as it does there.
+
+fn actor_name(handle: &ObjectRef, role: &str) -> Result<String, TempoError> {
+    if !handle.component_name().is_empty() || !handle.subsystem_class().is_empty() {
+        return Err(TempoError::Protocol(format!("{} must be an actor, not {:?}", role, handle)));
+    }
+    Ok(handle.actor_name().to_string())
+}
+
+fn optional_actor(handle: Option<&ObjectRef>, role: &str) -> Result<String, TempoError> {
+    handle.map_or(Ok(String::new()), |handle| actor_name(handle, role))
+}
+
+fn component_names(handle: &ObjectRef, role: &str) -> Result<(String, String), TempoError> {
+    if handle.component_name().is_empty() {
+        return Err(TempoError::Protocol(format!("{} must be a component, not {:?}", role, handle)));
+    }
+    Ok((handle.actor_name().to_string(), handle.component_name().to_string()))
+}
+
+fn optional_component(handle: Option<&ObjectRef>, role: &str) -> Result<String, TempoError> {
+    handle.map_or(Ok(String::new()), |handle| Ok(component_names(handle, role)?.1))
+}
+
+/// `tempo_world::destroy_actor`, given a handle.
+pub fn destroy_actor(actor: &impl Class) -> Result<(), TempoError> {
+    crate::tempo_world::destroy_actor(actor_name(actor.as_object(), "actor")?)?;
+    Ok(())
+}
+
+/// `tempo_world::destroy_actor`, given a handle, without blocking.
+pub async fn destroy_actor_async(actor: &impl Class) -> Result<(), TempoError> {
+    crate::tempo_world::destroy_actor_async(actor_name(actor.as_object(), "actor")?).await?;
+    Ok(())
+}
+
+/// The actor's components of this class, or of a class derived from it, as handles of it.
+///
+/// `tempo_world::get_all_components`, filtered by class as [`get_actors`] is: matched on each
+/// component's real class through the generated hierarchy, so a subclass counts and a name never
+/// has to.
+pub fn get_components<T: Class>(actor: &impl Class) -> Result<Vec<T>, TempoError> {
+    note_origin::<T>();
+    let response = crate::tempo_world::get_all_components(actor_name(actor.as_object(), "actor")?)?;
+    Ok(components_of(response))
+}
+
+/// The actor's components of this class, without blocking.
+pub async fn get_components_async<T: Class>(actor: &impl Class) -> Result<Vec<T>, TempoError> {
+    note_origin::<T>();
+    let response =
+        crate::tempo_world::get_all_components_async(actor_name(actor.as_object(), "actor")?).await?;
+    Ok(components_of(response))
+}
+
+fn components_of<T: Class>(response: crate::proto::tempo_world::GetAllComponentsResponse) -> Vec<T> {
+    response
+        .components
+        .into_iter()
+        .map(|d| ObjectRef::component(d.actor, d.name).with_class(d.class_path))
+        .filter(|object| object.is_a(T::PATH))
+        .map(T::from_object)
+        .collect()
+}
+
+/// Add a component of this class to an actor and return a handle to it: `tempo_world::add_component`,
+/// typed. The handle carries the name the sim gave it, which is `name` unless that was taken or
+/// empty.
+pub fn add_component<T: Class>(
+    actor: &impl Class,
+    name: &str,
+    parent: Option<&ObjectRef>,
+    transform: Option<Transform>,
+    socket: &str,
+) -> Result<T, TempoError> {
+    note_origin::<T>();
+    let owner = actor_name(actor.as_object(), "actor")?;
+    let response = crate::tempo_world::add_component(
+        T::PATH.to_string(),
+        owner.clone(),
+        name.to_string(),
+        optional_component(parent, "parent")?,
+        transform,
+        socket.to_string(),
+    )?;
+    Ok(T::from_object(ObjectRef::component(owner, response.name).with_class(T::PATH)))
+}
+
+/// Add a component of this class to an actor, without blocking.
+pub async fn add_component_async<T: Class>(
+    actor: &impl Class,
+    name: &str,
+    parent: Option<&ObjectRef>,
+    transform: Option<Transform>,
+    socket: &str,
+) -> Result<T, TempoError> {
+    note_origin::<T>();
+    let owner = actor_name(actor.as_object(), "actor")?;
+    let response = crate::tempo_world::add_component_async(
+        T::PATH.to_string(),
+        owner.clone(),
+        name.to_string(),
+        optional_component(parent, "parent")?,
+        transform,
+        socket.to_string(),
+    )
+    .await?;
+    Ok(T::from_object(ObjectRef::component(owner, response.name).with_class(T::PATH)))
+}
+
+macro_rules! component_call {
+    ($(#[$doc:meta])* $name:ident, $async_name:ident) => {
+        $(#[$doc])*
+        pub fn $name(component: &impl Class) -> Result<(), TempoError> {
+            let (actor, name) = component_names(component.as_object(), "component")?;
+            crate::tempo_world::$name(actor, name)?;
+            Ok(())
+        }
+
+        $(#[$doc])*
+        /// Without blocking.
+        pub async fn $async_name(component: &impl Class) -> Result<(), TempoError> {
+            let (actor, name) = component_names(component.as_object(), "component")?;
+            crate::tempo_world::$async_name(actor, name).await?;
+            Ok(())
+        }
+    };
+}
+
+component_call!(
+    /// `tempo_world::destroy_component`, given a handle.
+    destroy_component, destroy_component_async);
+component_call!(
+    /// `tempo_world::activate_component`, given a handle.
+    activate_component, activate_component_async);
+component_call!(
+    /// `tempo_world::deactivate_component`, given a handle.
+    deactivate_component, deactivate_component_async);
+
+/// `tempo_world::set_actor_transform`, given handles.
+pub fn set_actor_transform(
+    actor: &impl Class,
+    transform: Transform,
+    relative_to_actor: Option<&ObjectRef>,
+    scale: Option<Vector>,
+) -> Result<(), TempoError> {
+    crate::tempo_world::set_actor_transform(
+        actor_name(actor.as_object(), "actor")?,
+        transform,
+        optional_actor(relative_to_actor, "relative_to_actor")?,
+        scale,
+    )?;
+    Ok(())
+}
+
+/// `tempo_world::set_actor_transform`, given handles, without blocking.
+pub async fn set_actor_transform_async(
+    actor: &impl Class,
+    transform: Transform,
+    relative_to_actor: Option<&ObjectRef>,
+    scale: Option<Vector>,
+) -> Result<(), TempoError> {
+    crate::tempo_world::set_actor_transform_async(
+        actor_name(actor.as_object(), "actor")?,
+        transform,
+        optional_actor(relative_to_actor, "relative_to_actor")?,
+        scale,
+    )
+    .await?;
+    Ok(())
+}
+
+macro_rules! actor_set {
+    ($(#[$doc:meta])* $name:ident, $async_name:ident, $field:ident: $ty:ty) => {
+        $(#[$doc])*
+        pub fn $name(
+            actor: &impl Class,
+            $field: $ty,
+            relative_to_actor: Option<&ObjectRef>,
+        ) -> Result<(), TempoError> {
+            crate::tempo_world::$name(
+                actor_name(actor.as_object(), "actor")?,
+                $field,
+                optional_actor(relative_to_actor, "relative_to_actor")?,
+            )?;
+            Ok(())
+        }
+
+        $(#[$doc])*
+        /// Without blocking.
+        pub async fn $async_name(
+            actor: &impl Class,
+            $field: $ty,
+            relative_to_actor: Option<&ObjectRef>,
+        ) -> Result<(), TempoError> {
+            crate::tempo_world::$async_name(
+                actor_name(actor.as_object(), "actor")?,
+                $field,
+                optional_actor(relative_to_actor, "relative_to_actor")?,
+            )
+            .await?;
+            Ok(())
+        }
+    };
+}
+
+actor_set!(
+    /// `tempo_world::set_actor_location`, given handles.
+    set_actor_location, set_actor_location_async, location: Vector);
+actor_set!(
+    /// `tempo_world::set_actor_rotation`, given handles.
+    set_actor_rotation, set_actor_rotation_async, rotation: Rotation);
+
+/// `tempo_world::set_actor_scale3d`, given a handle.
+pub fn set_actor_scale3d(actor: &impl Class, scale: Vector) -> Result<(), TempoError> {
+    crate::tempo_world::set_actor_scale3d(actor_name(actor.as_object(), "actor")?, scale)?;
+    Ok(())
+}
+
+/// `tempo_world::set_actor_scale3d`, given a handle, without blocking.
+pub async fn set_actor_scale3d_async(actor: &impl Class, scale: Vector) -> Result<(), TempoError> {
+    crate::tempo_world::set_actor_scale3d_async(actor_name(actor.as_object(), "actor")?, scale)
+        .await?;
+    Ok(())
+}
+
+/// `tempo_world::set_component_transform`, given a handle.
+pub fn set_component_transform(
+    component: &impl Class,
+    transform: Transform,
+    relative_to_world: bool,
+    scale: Option<Vector>,
+) -> Result<(), TempoError> {
+    let (actor, name) = component_names(component.as_object(), "component")?;
+    crate::tempo_world::set_component_transform(actor, name, transform, relative_to_world, scale)?;
+    Ok(())
+}
+
+/// `tempo_world::set_component_transform`, given a handle, without blocking.
+pub async fn set_component_transform_async(
+    component: &impl Class,
+    transform: Transform,
+    relative_to_world: bool,
+    scale: Option<Vector>,
+) -> Result<(), TempoError> {
+    let (actor, name) = component_names(component.as_object(), "component")?;
+    crate::tempo_world::set_component_transform_async(actor, name, transform, relative_to_world, scale)
+        .await?;
+    Ok(())
+}
+
+macro_rules! component_set {
+    ($(#[$doc:meta])* $name:ident, $async_name:ident, $field:ident: $ty:ty) => {
+        $(#[$doc])*
+        pub fn $name(component: &impl Class, $field: $ty, relative_to_world: bool) -> Result<(), TempoError> {
+            let (actor, name) = component_names(component.as_object(), "component")?;
+            crate::tempo_world::$name(actor, name, $field, relative_to_world)?;
+            Ok(())
+        }
+
+        $(#[$doc])*
+        /// Without blocking.
+        pub async fn $async_name(
+            component: &impl Class,
+            $field: $ty,
+            relative_to_world: bool,
+        ) -> Result<(), TempoError> {
+            let (actor, name) = component_names(component.as_object(), "component")?;
+            crate::tempo_world::$async_name(actor, name, $field, relative_to_world).await?;
+            Ok(())
+        }
+    };
+}
+
+component_set!(
+    /// `tempo_world::set_component_location`, given a handle.
+    set_component_location, set_component_location_async, location: Vector);
+component_set!(
+    /// `tempo_world::set_component_rotation`, given a handle.
+    set_component_rotation, set_component_rotation_async, rotation: Rotation);
+component_set!(
+    /// `tempo_world::set_component_scale3d`, given a handle.
+    set_component_scale3d, set_component_scale3d_async, scale: Vector);
+
+macro_rules! actor_get {
+    ($(#[$doc:meta])* $name:ident, $async_name:ident, $response:ident) => {
+        $(#[$doc])*
+        pub fn $name(
+            actor: &impl Class,
+            relative_to_actor: Option<&ObjectRef>,
+        ) -> Result<crate::proto::tempo_world::$response, TempoError> {
+            crate::tempo_world::$name(
+                actor_name(actor.as_object(), "actor")?,
+                optional_actor(relative_to_actor, "relative_to_actor")?,
+            )
+        }
+
+        $(#[$doc])*
+        /// Without blocking.
+        pub async fn $async_name(
+            actor: &impl Class,
+            relative_to_actor: Option<&ObjectRef>,
+        ) -> Result<crate::proto::tempo_world::$response, TempoError> {
+            crate::tempo_world::$async_name(
+                actor_name(actor.as_object(), "actor")?,
+                optional_actor(relative_to_actor, "relative_to_actor")?,
+            )
+            .await
+        }
+    };
+}
+
+actor_get!(
+    /// `tempo_world::get_actor_transform`, given handles.
+    get_actor_transform, get_actor_transform_async, GetTransformResponse);
+actor_get!(
+    /// `tempo_world::get_actor_location`, given handles.
+    get_actor_location, get_actor_location_async, GetLocationResponse);
+actor_get!(
+    /// `tempo_world::get_actor_rotation`, given handles.
+    get_actor_rotation, get_actor_rotation_async, GetRotationResponse);
+
+/// `tempo_world::get_actor_scale3d`, given a handle.
+pub fn get_actor_scale3d(
+    actor: &impl Class,
+) -> Result<crate::proto::tempo_world::GetScale3DResponse, TempoError> {
+    crate::tempo_world::get_actor_scale3d(actor_name(actor.as_object(), "actor")?)
+}
+
+/// `tempo_world::get_actor_scale3d`, given a handle, without blocking.
+pub async fn get_actor_scale3d_async(
+    actor: &impl Class,
+) -> Result<crate::proto::tempo_world::GetScale3DResponse, TempoError> {
+    crate::tempo_world::get_actor_scale3d_async(actor_name(actor.as_object(), "actor")?).await
+}
+
+macro_rules! component_get {
+    ($(#[$doc:meta])* $name:ident, $async_name:ident, $response:ident) => {
+        $(#[$doc])*
+        /// `frame` is a `ComponentFrame`.
+        pub fn $name(
+            component: &impl Class,
+            frame: crate::proto::tempo_world::ComponentFrame,
+            relative_to_component: Option<&ObjectRef>,
+            socket: &str,
+        ) -> Result<crate::proto::tempo_world::$response, TempoError> {
+            let (actor, name) = component_names(component.as_object(), "component")?;
+            crate::tempo_world::$name(
+                actor,
+                name,
+                frame as i32,
+                optional_component(relative_to_component, "relative_to_component")?,
+                socket.to_string(),
+            )
+        }
+
+        $(#[$doc])*
+        /// Without blocking.
+        pub async fn $async_name(
+            component: &impl Class,
+            frame: crate::proto::tempo_world::ComponentFrame,
+            relative_to_component: Option<&ObjectRef>,
+            socket: &str,
+        ) -> Result<crate::proto::tempo_world::$response, TempoError> {
+            let (actor, name) = component_names(component.as_object(), "component")?;
+            crate::tempo_world::$async_name(
+                actor,
+                name,
+                frame as i32,
+                optional_component(relative_to_component, "relative_to_component")?,
+                socket.to_string(),
+            )
+            .await
+        }
+    };
+}
+
+component_get!(
+    /// `tempo_world::get_component_transform`, given handles.
+    get_component_transform, get_component_transform_async, GetTransformResponse);
+component_get!(
+    /// `tempo_world::get_component_location`, given handles.
+    get_component_location, get_component_location_async, GetLocationResponse);
+component_get!(
+    /// `tempo_world::get_component_rotation`, given handles.
+    get_component_rotation, get_component_rotation_async, GetRotationResponse);
+component_get!(
+    /// `tempo_world::get_component_scale3d`, given handles.
+    get_component_scale3d, get_component_scale3d_async, GetScale3DResponse);
+
+/// `tempo_world::get_current_actor_state`, given a handle.
+pub fn get_current_actor_state(
+    actor: &impl Class,
+    include_hidden_components: bool,
+) -> Result<crate::proto::tempo_world::ActorState, TempoError> {
+    crate::tempo_world::get_current_actor_state(
+        actor_name(actor.as_object(), "actor")?,
+        include_hidden_components,
+    )
+}
+
+/// `tempo_world::get_current_actor_state`, given a handle, without blocking.
+pub async fn get_current_actor_state_async(
+    actor: &impl Class,
+    include_hidden_components: bool,
+) -> Result<crate::proto::tempo_world::ActorState, TempoError> {
+    crate::tempo_world::get_current_actor_state_async(
+        actor_name(actor.as_object(), "actor")?,
+        include_hidden_components,
+    )
+    .await
+}
+
+/// `tempo_world::stream_actor_state`, given a handle: an `ActorState` per tick.
+pub fn stream_actor_state(
+    actor: &impl Class,
+    include_hidden_components: bool,
+) -> Result<
+    impl Iterator<Item = Result<crate::proto::tempo_world::ActorState, tonic::Status>>,
+    TempoError,
+> {
+    crate::tempo_world::stream_actor_state(
+        actor_name(actor.as_object(), "actor")?,
+        include_hidden_components,
+    )
+}
+
+/// `tempo_world::get_current_actor_states_near`, given a handle.
+pub fn get_current_actor_states_near(
+    near_actor: &impl Class,
+    search_radius_m: f32,
+    include_static: bool,
+    include_hidden_actors: bool,
+    include_hidden_components: bool,
+) -> Result<crate::proto::tempo_world::ActorStates, TempoError> {
+    crate::tempo_world::get_current_actor_states_near(
+        actor_name(near_actor.as_object(), "near_actor")?,
+        search_radius_m,
+        include_static,
+        include_hidden_actors,
+        include_hidden_components,
+    )
+}
+
+/// `tempo_world::get_current_actor_states_near`, given a handle, without blocking.
+pub async fn get_current_actor_states_near_async(
+    near_actor: &impl Class,
+    search_radius_m: f32,
+    include_static: bool,
+    include_hidden_actors: bool,
+    include_hidden_components: bool,
+) -> Result<crate::proto::tempo_world::ActorStates, TempoError> {
+    crate::tempo_world::get_current_actor_states_near_async(
+        actor_name(near_actor.as_object(), "near_actor")?,
+        search_radius_m,
+        include_static,
+        include_hidden_actors,
+        include_hidden_components,
+    )
+    .await
+}
+
+/// `tempo_world::stream_actor_states_near`, given a handle: `ActorStates` per tick.
+pub fn stream_actor_states_near(
+    near_actor: &impl Class,
+    search_radius_m: f32,
+    include_static: bool,
+    include_hidden_actors: bool,
+    include_hidden_components: bool,
+) -> Result<
+    impl Iterator<Item = Result<crate::proto::tempo_world::ActorStates, tonic::Status>>,
+    TempoError,
+> {
+    crate::tempo_world::stream_actor_states_near(
+        actor_name(near_actor.as_object(), "near_actor")?,
+        search_radius_m,
+        include_static,
+        include_hidden_actors,
+        include_hidden_components,
+    )
+}
+
+/// `tempo_world::stream_overlap_events`, given a handle: `OverlapEventResponse`s as they happen.
+pub fn stream_overlap_events(
+    actor: &impl Class,
+) -> Result<
+    impl Iterator<Item = Result<crate::proto::tempo_world::OverlapEventResponse, tonic::Status>>,
+    TempoError,
+> {
+    crate::tempo_world::stream_overlap_events(actor_name(actor.as_object(), "actor")?)
+}
+
+/// `tempo_world::raycast`, ignoring actors given as handles.
+pub fn raycast(
+    start: Vector,
+    end: Vector,
+    collision_channel: crate::proto::tempo_world::CollisionChannel,
+    ignored_actors: &[&ObjectRef],
+) -> Result<crate::proto::tempo_world::RaycastResponse, TempoError> {
+    let ignored = ignored_actors
+        .iter()
+        .map(|actor| actor_name(actor, "ignored_actors"))
+        .collect::<Result<Vec<_>, _>>()?;
+    crate::tempo_world::raycast(start, end, collision_channel as i32, ignored)
+}
+
+/// `tempo_world::raycast`, ignoring actors given as handles, without blocking.
+pub async fn raycast_async(
+    start: Vector,
+    end: Vector,
+    collision_channel: crate::proto::tempo_world::CollisionChannel,
+    ignored_actors: &[&ObjectRef],
+) -> Result<crate::proto::tempo_world::RaycastResponse, TempoError> {
+    let ignored = ignored_actors
+        .iter()
+        .map(|actor| actor_name(actor, "ignored_actors"))
+        .collect::<Result<Vec<_>, _>>()?;
+    crate::tempo_world::raycast_async(start, end, collision_channel as i32, ignored).await
 }
 
 /// Compare the linked generated classes against the sim's own reflection, class by class.
