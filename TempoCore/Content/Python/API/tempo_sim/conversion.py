@@ -1,6 +1,6 @@
 # Copyright Tempo Simulation, LLC. All Rights Reserved
 #
-# Conversions between the typed World API's values, which are Unreal-native (centimeters, degrees,
+# Conversions between the typed World API's values, which are Unreal's own (centimeters, degrees,
 # left-handed), and the TempoCore geometry messages the rest of Tempo's API speaks (meters, radians,
 # right-handed).
 #
@@ -8,24 +8,31 @@
 # (see tempo_sim.unreal). Calling one of these is the caller saying so. Each applies the server's
 # own rule, from TempoConversion.h:
 #
-#   UnrealVector     <-> Vector      a length: cm <-> m, Y negated
-#   UnrealVector2D   <-> Vector2D    likewise
-#   UnrealRotator    <-> Rotation    degrees <-> radians, pitch and yaw negated, roll kept
-#   UnrealTransform  <-> Transform   its location and rotation, each as above
+#   float         <-> float       a length: cm <-> m
+#   FVector       <-> Vector      a length: cm <-> m, Y negated
+#   FVector2D     <-> Vector2D    likewise
+#   FRotator      <-> Rotation    degrees <-> radians, pitch and yaw negated, roll kept
+#   FQuat          -> Rotation    as the FRotator Unreal's FQuat::Rotator() makes of it
+#   FTransform    <-> Transform   its translation and rotation, each as above; see below for scale
 #
 # A rate converts as its quantity does, so a velocity in cm/s is a length here. A vector that is
 # not a length at all -- a direction, a normal, a unit axis -- must not be scaled, so it has
-# functions of its own, unreal_direction_to_si and si_direction_to_unreal, which change the
-# handedness and nothing else.
+# functions of its own, ue_direction_to_si and si_direction_to_ue, which change the handedness and
+# nothing else. Likewise an angle on its own is not converted here: a bare float is a length.
 #
-# UnrealQuat, UnrealIntVector, UnrealIntPoint and UnrealColor have no TempoCore counterpart, so
-# nothing here converts them.
+# TempoCore.Transform has no scale -- Tempo's RPCs carry a scale beside a transform, never in one --
+# so ue_to_si drops an FTransform's, and si_to_ue makes one of scale 1. Its rotation is a
+# quaternion, and goes through the rotator Unreal itself would make of it, by Unreal's own
+# formulas, reproduced below.
+#
+# FIntVector, FIntPoint, FColor and FLinearColor have no TempoCore counterpart, so nothing here
+# converts them.
 
 import math
 
 from typing import TYPE_CHECKING, overload
 
-from .unreal import UnrealRotator, UnrealTransform, UnrealVector, UnrealVector2D
+from .unreal import FQuat, FRotator, FTransform, FVector, FVector2D
 
 if TYPE_CHECKING:
     from .TempoCore.Geometry_pb2 import Rotation, Transform, Vector, Vector2D
@@ -40,72 +47,128 @@ def _geometry():
     return Geometry
 
 
-@overload
-def unreal_to_si(value: UnrealVector) -> "Vector": ...
-@overload
-def unreal_to_si(value: UnrealVector2D) -> "Vector2D": ...
-@overload
-def unreal_to_si(value: UnrealRotator) -> "Rotation": ...
-@overload
-def unreal_to_si(value: UnrealTransform) -> "Transform": ...
+def _normalize_axis(degrees):
+    """FRotator::NormalizeAxis: an angle in (-180, 180]."""
+    degrees = math.fmod(degrees, 360.0)
+    if degrees < 0.0:
+        degrees += 360.0
+    return degrees - 360.0 if degrees > 180.0 else degrees
 
 
-def unreal_to_si(value):
-    """An Unreal-native value as the TempoCore message for the same quantity, in SI units.
+def rotator_of(quat: FQuat) -> FRotator:
+    """The FRotator Unreal makes of an FQuat: FQuat4d::Rotator(), formula for formula."""
+    x, y, z, w = quat.X, quat.Y, quat.Z, quat.W
+    singularity = z * x - w * y
+    yaw_y = 2.0 * (w * z + x * y)
+    yaw_x = 1.0 - 2.0 * (y * y + z * z)
+    threshold = 0.4999995
+    if singularity < -threshold:
+        return FRotator(Pitch=-90.0, Yaw=_normalize_axis(-2.0 * math.degrees(math.atan2(x, w))),
+                        Roll=0.0)
+    if singularity > threshold:
+        return FRotator(Pitch=90.0, Yaw=_normalize_axis(2.0 * math.degrees(math.atan2(x, w))),
+                        Roll=0.0)
+    return FRotator(Pitch=math.degrees(math.asin(2.0 * singularity)),
+                    Yaw=math.degrees(math.atan2(yaw_y, yaw_x)),
+                    Roll=math.degrees(math.atan2(-2.0 * (w * x + y * z),
+                                                 1.0 - 2.0 * (x * x + y * y))))
 
-    A vector is taken to be a length; use unreal_direction_to_si for one that is not.
+
+def quat_of(rotator: FRotator) -> FQuat:
+    """The FQuat Unreal makes of an FRotator: FRotator3d::Quaternion(), formula for formula."""
+    def sin_cos(degrees):
+        half_angle = math.fmod(degrees, 360.0) * math.pi / 180.0 / 2.0
+        return math.sin(half_angle), math.cos(half_angle)
+
+    sp, cp = sin_cos(rotator.Pitch)
+    sy, cy = sin_cos(rotator.Yaw)
+    sr, cr = sin_cos(rotator.Roll)
+    return FQuat(X=cr * sp * sy - sr * cp * cy,
+                 Y=-cr * sp * cy - sr * cp * sy,
+                 Z=cr * cp * sy - sr * sp * cy,
+                 W=cr * cp * cy + sr * sp * sy)
+
+
+@overload
+def ue_to_si(value: float) -> float: ...
+@overload
+def ue_to_si(value: FVector) -> "Vector": ...
+@overload
+def ue_to_si(value: FVector2D) -> "Vector2D": ...
+@overload
+def ue_to_si(value: FRotator) -> "Rotation": ...
+@overload
+def ue_to_si(value: FQuat) -> "Rotation": ...
+@overload
+def ue_to_si(value: FTransform) -> "Transform": ...
+
+
+def ue_to_si(value):
+    """An Unreal value as the TempoCore message for the same quantity, in SI units.
+
+    A float or a vector is taken to be a length; use ue_direction_to_si for a vector that is not.
     """
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value / _CM_PER_M
     geometry = _geometry()
-    if isinstance(value, UnrealVector):
+    if isinstance(value, FVector):
         return geometry.Vector(x=value.X / _CM_PER_M, y=-value.Y / _CM_PER_M,
                                z=value.Z / _CM_PER_M)
-    if isinstance(value, UnrealVector2D):
+    if isinstance(value, FVector2D):
         return geometry.Vector2D(x=value.X / _CM_PER_M, y=-value.Y / _CM_PER_M)
-    if isinstance(value, UnrealRotator):
+    if isinstance(value, FRotator):
         return geometry.Rotation(r=math.radians(value.Roll), p=-math.radians(value.Pitch),
                                  y=-math.radians(value.Yaw))
-    if isinstance(value, UnrealTransform):
-        return geometry.Transform(location=unreal_to_si(value.Location),
-                                  rotation=unreal_to_si(value.Rotation))
-    raise TypeError("unreal_to_si takes an UnrealVector, UnrealVector2D, UnrealRotator or "
-                    "UnrealTransform, not {}".format(type(value).__name__))
-
-
-@overload
-def si_to_unreal(value: "Vector") -> UnrealVector: ...
-@overload
-def si_to_unreal(value: "Vector2D") -> UnrealVector2D: ...
-@overload
-def si_to_unreal(value: "Rotation") -> UnrealRotator: ...
-@overload
-def si_to_unreal(value: "Transform") -> UnrealTransform: ...
-
-
-def si_to_unreal(value):
-    """A TempoCore message as the Unreal-native value for the same quantity.
-
-    A vector is taken to be a length; use si_direction_to_unreal for one that is not.
-    """
-    geometry = _geometry()
-    if isinstance(value, geometry.Vector):
-        return UnrealVector(X=value.x * _CM_PER_M, Y=-value.y * _CM_PER_M, Z=value.z * _CM_PER_M)
-    if isinstance(value, geometry.Vector2D):
-        return UnrealVector2D(X=value.x * _CM_PER_M, Y=-value.y * _CM_PER_M)
-    if isinstance(value, geometry.Rotation):
-        return UnrealRotator(Roll=math.degrees(value.r), Pitch=-math.degrees(value.p),
-                             Yaw=-math.degrees(value.y))
-    if isinstance(value, geometry.Transform):
-        return UnrealTransform(Location=si_to_unreal(value.location),
-                               Rotation=si_to_unreal(value.rotation))
-    raise TypeError("si_to_unreal takes a TempoCore Vector, Vector2D, Rotation or Transform, "
+    if isinstance(value, FQuat):
+        return ue_to_si(rotator_of(value))
+    if isinstance(value, FTransform):
+        # TempoCore.Transform has no scale; see the top of this module.
+        return geometry.Transform(location=ue_to_si(value.Translation),
+                                  rotation=ue_to_si(value.Rotation))
+    raise TypeError("ue_to_si takes a float, FVector, FVector2D, FRotator, FQuat or FTransform, "
                     "not {}".format(type(value).__name__))
 
 
-def unreal_direction_to_si(value: UnrealVector) -> "Vector":
-    """An Unreal-native direction as a right-handed one, unscaled."""
+@overload
+def si_to_ue(value: float) -> float: ...
+@overload
+def si_to_ue(value: "Vector") -> FVector: ...
+@overload
+def si_to_ue(value: "Vector2D") -> FVector2D: ...
+@overload
+def si_to_ue(value: "Rotation") -> FRotator: ...
+@overload
+def si_to_ue(value: "Transform") -> FTransform: ...
+
+
+def si_to_ue(value):
+    """A TempoCore message as the Unreal value for the same quantity.
+
+    A float or a vector is taken to be a length; use si_direction_to_ue for a vector that is not. A
+    Transform becomes an FTransform of scale 1, since it carries none.
+    """
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value * _CM_PER_M
+    geometry = _geometry()
+    if isinstance(value, geometry.Vector):
+        return FVector(X=value.x * _CM_PER_M, Y=-value.y * _CM_PER_M, Z=value.z * _CM_PER_M)
+    if isinstance(value, geometry.Vector2D):
+        return FVector2D(X=value.x * _CM_PER_M, Y=-value.y * _CM_PER_M)
+    if isinstance(value, geometry.Rotation):
+        return FRotator(Pitch=-math.degrees(value.p), Yaw=-math.degrees(value.y),
+                        Roll=math.degrees(value.r))
+    if isinstance(value, geometry.Transform):
+        return FTransform(Rotation=quat_of(si_to_ue(value.rotation)),
+                          Translation=si_to_ue(value.location))
+    raise TypeError("si_to_ue takes a float or a TempoCore Vector, Vector2D, Rotation or "
+                    "Transform, not {}".format(type(value).__name__))
+
+
+def ue_direction_to_si(value: FVector) -> "Vector":
+    """An Unreal direction as a right-handed one, unscaled."""
     return _geometry().Vector(x=value.X, y=-value.Y, z=value.Z)
 
 
-def si_direction_to_unreal(value: "Vector") -> UnrealVector:
-    """A right-handed direction as an Unreal-native one, unscaled."""
-    return UnrealVector(X=value.x, Y=-value.y, Z=value.z)
+def si_direction_to_ue(value: "Vector") -> FVector:
+    """A right-handed direction as an Unreal one, unscaled."""
+    return FVector(X=value.x, Y=-value.y, Z=value.z)

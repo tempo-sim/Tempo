@@ -50,7 +50,7 @@ bool FTempoWorldReflectionStructKindsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("FVector"), StructKindForCPPName(TEXT("FVector")), EValueKind::Vector);
 	TestEqual(TEXT("FRotator"), StructKindForCPPName(TEXT("FRotator")), EValueKind::Rotator);
 	TestEqual(TEXT("FColor"), StructKindForCPPName(TEXT("FColor")), EValueKind::Color);
-	TestEqual(TEXT("FLinearColor"), StructKindForCPPName(TEXT("FLinearColor")), EValueKind::Color);
+	TestEqual(TEXT("FLinearColor"), StructKindForCPPName(TEXT("FLinearColor")), EValueKind::LinearColor);
 	TestEqual(TEXT("FIntVector"), StructKindForCPPName(TEXT("FIntVector")), EValueKind::IntVector);
 	TestEqual(TEXT("FIntPoint"), StructKindForCPPName(TEXT("FIntPoint")), EValueKind::IntPoint);
 
@@ -79,7 +79,7 @@ bool FTempoWorldReflectionValueExpressibleTest::RunTest(const FString& Parameter
 		EValueKind::Float, EValueKind::Double, EValueKind::String, EValueKind::Enum,
 		EValueKind::Vector, EValueKind::Vector2D, EValueKind::IntVector, EValueKind::IntPoint,
 		EValueKind::Rotator, EValueKind::Quat, EValueKind::Transform, EValueKind::Color,
-		EValueKind::Class, EValueKind::Asset, EValueKind::Actor, EValueKind::Component })
+		EValueKind::LinearColor, EValueKind::Class, EValueKind::Asset, EValueKind::Actor, EValueKind::Component })
 	{
 		if (!Scalar(Kind).IsValueExpressible())
 		{

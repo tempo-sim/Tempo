@@ -9,10 +9,11 @@
 //! tagging, so converting them would be guesswork; the typed API therefore does not convert at all
 //! and says so here rather than per property.
 //!
-//! Which is why every value type here is named `Unreal...`: [`UnrealVector`] is centimeters and
-//! left-handed, as Unreal stores it, and [`crate::proto::tempo_core::Vector`] is meters and
-//! right-handed, as every other Tempo RPC speaks. They are not interchangeable, and a shared name
-//! made them easy to mistake for one another. [`crate::conversion`] converts between the two.
+//! Which is why the value types here are Unreal's own, named and shaped as Unreal's are --
+//! [`FVector`], [`FRotator`] in pitch-yaw-roll order, [`FTransform`] with its quaternion and scale --
+//! and not the TempoCore messages every other Tempo RPC speaks, which are meters, radians and
+//! right-handed. [`crate::proto::tempo_core::Vector`] is not an `FVector`. [`crate::conversion`]
+//! converts between the two.
 //!
 //! Unlike the Python runtime, nothing here consults a metadata table. A generated Rust method
 //! already knows its property's type, its `Value` variant and its `BlueprintSetter`, because all
@@ -28,69 +29,107 @@ use crate::proto::tempo_world as pb;
 
 // -- value types ---------------------------------------------------------------------------------
 
-/// A location or direction in centimeters, left-handed.
+/// Unreal's `FVector`: a location or direction in centimeters, left-handed.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct UnrealVector {
+pub struct FVector {
     pub x: f64,
     pub y: f64,
     pub z: f64,
 }
 
+/// Unreal's `FVector2D`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct UnrealVector2D {
+pub struct FVector2D {
     pub x: f64,
     pub y: f64,
 }
 
+/// Unreal's `FIntVector`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct UnrealIntVector {
+pub struct FIntVector {
     pub x: i32,
     pub y: i32,
     pub z: i32,
 }
 
+/// Unreal's `FIntPoint`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct UnrealIntPoint {
+pub struct FIntPoint {
     pub x: i32,
     pub y: i32,
 }
 
-/// An orientation in degrees, left-handed.
+/// Unreal's `FRotator`: an orientation in degrees, left-handed, in Unreal's own order -- pitch, yaw,
+/// roll.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct UnrealRotator {
-    pub roll: f64,
+pub struct FRotator {
     pub pitch: f64,
     pub yaw: f64,
+    pub roll: f64,
 }
 
-/// A rotation, left-handed.
+/// Unreal's `FQuat`: a rotation, left-handed.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct UnrealQuat {
+pub struct FQuat {
     pub x: f64,
     pub y: f64,
     pub z: f64,
     pub w: f64,
 }
 
-impl Default for UnrealQuat {
+impl Default for FQuat {
     fn default() -> Self {
         Self { x: 0.0, y: 0.0, z: 0.0, w: 1.0 }
     }
 }
 
-/// A pose: centimeters and degrees, left-handed.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct UnrealTransform {
-    pub location: UnrealVector,
-    pub rotation: UnrealRotator,
+/// Unreal's `FTransform`: a rotation as a quaternion, a translation in centimeters and a 3D scale,
+/// left-handed. The default is the identity, scale 1, as Unreal's is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FTransform {
+    pub rotation: FQuat,
+    pub translation: FVector,
+    pub scale3d: FVector,
 }
 
-/// 8-bit RGB.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct UnrealColor {
+impl Default for FTransform {
+    fn default() -> Self {
+        Self {
+            rotation: FQuat::default(),
+            translation: FVector::default(),
+            scale3d: FVector { x: 1.0, y: 1.0, z: 1.0 },
+        }
+    }
+}
+
+/// Unreal's `FColor`: 8-bit RGBA, sRGB. The default is opaque black.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FColor {
     pub r: u8,
     pub g: u8,
     pub b: u8,
+    pub a: u8,
+}
+
+impl Default for FColor {
+    fn default() -> Self {
+        Self { r: 0, g: 0, b: 0, a: 255 }
+    }
+}
+
+/// Unreal's `FLinearColor`: floating-point RGBA, linear. The default is opaque black.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FLinearColor {
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+    pub a: f32,
+}
+
+impl Default for FLinearColor {
+    fn default() -> Self {
+        Self { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }
+    }
 }
 
 // -- references ----------------------------------------------------------------------------------
@@ -408,16 +447,16 @@ impl ToValue for f64 {
     }
 }
 
-impl FromValue for UnrealVector {
+impl FromValue for FVector {
     fn from_value(value: &pb::Value) -> Result<Self, TempoError> {
         match variant(value)? {
-            pb::value::Value::VectorValue(v) => Ok(UnrealVector { x: v.x, y: v.y, z: v.z }),
+            pb::value::Value::VectorValue(v) => Ok(FVector { x: v.x, y: v.y, z: v.z }),
             _ => Err(wrong(value, "a vector")),
         }
     }
 }
 
-impl ToValue for UnrealVector {
+impl ToValue for FVector {
     fn to_value(&self) -> pb::Value {
         pb::Value {
             value: Some(pb::value::Value::VectorValue(crate::proto::tempo_core::Vector {
@@ -429,16 +468,16 @@ impl ToValue for UnrealVector {
     }
 }
 
-impl FromValue for UnrealVector2D {
+impl FromValue for FVector2D {
     fn from_value(value: &pb::Value) -> Result<Self, TempoError> {
         match variant(value)? {
-            pb::value::Value::Vector2dValue(v) => Ok(UnrealVector2D { x: v.x, y: v.y }),
+            pb::value::Value::Vector2dValue(v) => Ok(FVector2D { x: v.x, y: v.y }),
             _ => Err(wrong(value, "a 2D vector")),
         }
     }
 }
 
-impl ToValue for UnrealVector2D {
+impl ToValue for FVector2D {
     fn to_value(&self) -> pb::Value {
         pb::Value {
             value: Some(pb::value::Value::Vector2dValue(crate::proto::tempo_core::Vector2D {
@@ -449,16 +488,16 @@ impl ToValue for UnrealVector2D {
     }
 }
 
-impl FromValue for UnrealIntVector {
+impl FromValue for FIntVector {
     fn from_value(value: &pb::Value) -> Result<Self, TempoError> {
         match variant(value)? {
-            pb::value::Value::IntVectorValue(v) => Ok(UnrealIntVector { x: v.x, y: v.y, z: v.z }),
+            pb::value::Value::IntVectorValue(v) => Ok(FIntVector { x: v.x, y: v.y, z: v.z }),
             _ => Err(wrong(value, "an int vector")),
         }
     }
 }
 
-impl ToValue for UnrealIntVector {
+impl ToValue for FIntVector {
     fn to_value(&self) -> pb::Value {
         pb::Value {
             value: Some(pb::value::Value::IntVectorValue(pb::IntVector {
@@ -470,16 +509,16 @@ impl ToValue for UnrealIntVector {
     }
 }
 
-impl FromValue for UnrealIntPoint {
+impl FromValue for FIntPoint {
     fn from_value(value: &pb::Value) -> Result<Self, TempoError> {
         match variant(value)? {
-            pb::value::Value::IntPointValue(v) => Ok(UnrealIntPoint { x: v.x, y: v.y }),
+            pb::value::Value::IntPointValue(v) => Ok(FIntPoint { x: v.x, y: v.y }),
             _ => Err(wrong(value, "an int point")),
         }
     }
 }
 
-impl ToValue for UnrealIntPoint {
+impl ToValue for FIntPoint {
     fn to_value(&self) -> pb::Value {
         pb::Value {
             value: Some(pb::value::Value::IntPointValue(pb::IntPoint { x: self.x, y: self.y })),
@@ -489,19 +528,17 @@ impl ToValue for UnrealIntPoint {
 
 // Carried in a message whose fields are named for radians and right-handed degrees, because that
 // is what every other RPC puts there. With `native_units` set the server does not convert, so
-// these are Unreal's own degrees and r/p/y map straight onto roll/pitch/yaw.
-impl FromValue for UnrealRotator {
+// these are Unreal's own degrees, and r/p/y are roll, pitch and yaw by name.
+impl FromValue for FRotator {
     fn from_value(value: &pb::Value) -> Result<Self, TempoError> {
         match variant(value)? {
-            pb::value::Value::RotatorValue(v) => {
-                Ok(UnrealRotator { roll: v.r, pitch: v.p, yaw: v.y })
-            }
+            pb::value::Value::RotatorValue(v) => Ok(FRotator { pitch: v.p, yaw: v.y, roll: v.r }),
             _ => Err(wrong(value, "a rotator")),
         }
     }
 }
 
-impl ToValue for UnrealRotator {
+impl ToValue for FRotator {
     fn to_value(&self) -> pb::Value {
         pb::Value {
             value: Some(pb::value::Value::RotatorValue(crate::proto::tempo_core::Rotation {
@@ -513,90 +550,107 @@ impl ToValue for UnrealRotator {
     }
 }
 
-impl FromValue for UnrealQuat {
+fn quat_from(v: &pb::Quat) -> FQuat {
+    FQuat { x: v.x as f64, y: v.y as f64, z: v.z as f64, w: v.w as f64 }
+}
+
+fn quat_to(q: &FQuat) -> pb::Quat {
+    pb::Quat { x: q.x as f32, y: q.y as f32, z: q.z as f32, w: q.w as f32 }
+}
+
+impl FromValue for FQuat {
     fn from_value(value: &pb::Value) -> Result<Self, TempoError> {
         match variant(value)? {
-            pb::value::Value::QuatValue(v) => Ok(UnrealQuat {
-                x: v.x as f64,
-                y: v.y as f64,
-                z: v.z as f64,
-                w: v.w as f64,
-            }),
+            pb::value::Value::QuatValue(v) => Ok(quat_from(v)),
             _ => Err(wrong(value, "a quaternion")),
         }
     }
 }
 
-impl ToValue for UnrealQuat {
+impl ToValue for FQuat {
     fn to_value(&self) -> pb::Value {
-        pb::Value {
-            value: Some(pb::value::Value::QuatValue(pb::Quat {
-                x: self.x as f32,
-                y: self.y as f32,
-                z: self.z as f32,
-                w: self.w as f32,
-            })),
-        }
+        pb::Value { value: Some(pb::value::Value::QuatValue(quat_to(self))) }
     }
 }
 
-impl FromValue for UnrealTransform {
+fn vector_from(v: &Option<crate::proto::tempo_core::Vector>) -> FVector {
+    v.as_ref().map(|v| FVector { x: v.x, y: v.y, z: v.z }).unwrap_or_default()
+}
+
+fn vector_to(v: &FVector) -> Option<crate::proto::tempo_core::Vector> {
+    Some(crate::proto::tempo_core::Vector { x: v.x, y: v.y, z: v.z })
+}
+
+// Unreal's own shape, which TempoCore's Transform does not have room for: see NativeTransform.
+impl FromValue for FTransform {
     fn from_value(value: &pb::Value) -> Result<Self, TempoError> {
         match variant(value)? {
-            pb::value::Value::TransformValue(t) => Ok(UnrealTransform {
-                location: t
-                    .location
-                    .as_ref()
-                    .map(|l| UnrealVector { x: l.x, y: l.y, z: l.z })
-                    .unwrap_or_default(),
-                rotation: t
-                    .rotation
-                    .as_ref()
-                    .map(|r| UnrealRotator { roll: r.r, pitch: r.p, yaw: r.y })
-                    .unwrap_or_default(),
+            pb::value::Value::NativeTransformValue(t) => Ok(FTransform {
+                rotation: t.rotation.as_ref().map(quat_from).unwrap_or_default(),
+                translation: vector_from(&t.translation),
+                scale3d: vector_from(&t.scale3d),
             }),
             _ => Err(wrong(value, "a transform")),
         }
     }
 }
 
-impl ToValue for UnrealTransform {
+impl ToValue for FTransform {
     fn to_value(&self) -> pb::Value {
         pb::Value {
-            value: Some(pb::value::Value::TransformValue(crate::proto::tempo_core::Transform {
-                location: Some(crate::proto::tempo_core::Vector {
-                    x: self.location.x,
-                    y: self.location.y,
-                    z: self.location.z,
-                }),
-                rotation: Some(crate::proto::tempo_core::Rotation {
-                    r: self.rotation.roll,
-                    p: self.rotation.pitch,
-                    y: self.rotation.yaw,
-                }),
+            value: Some(pb::value::Value::NativeTransformValue(pb::NativeTransform {
+                rotation: Some(quat_to(&self.rotation)),
+                translation: vector_to(&self.translation),
+                scale3d: vector_to(&self.scale3d),
             })),
         }
     }
 }
 
-impl FromValue for UnrealColor {
+impl FromValue for FColor {
     fn from_value(value: &pb::Value) -> Result<Self, TempoError> {
         match variant(value)? {
-            pb::value::Value::ColorValue(c) => {
-                Ok(UnrealColor { r: c.r as u8, g: c.g as u8, b: c.b as u8 })
-            }
+            pb::value::Value::ColorValue(c) => Ok(FColor {
+                r: c.r as u8,
+                g: c.g as u8,
+                b: c.b as u8,
+                a: c.a as u8,
+            }),
             _ => Err(wrong(value, "a color")),
         }
     }
 }
 
-impl ToValue for UnrealColor {
+impl ToValue for FColor {
     fn to_value(&self) -> pb::Value {
         pb::Value {
             value: Some(pb::value::Value::ColorValue(pb::Color {
                 r: self.r as i32,
                 g: self.g as i32,
                 b: self.b as i32,
+                a: self.a as i32,
+            })),
+        }
+    }
+}
+
+impl FromValue for FLinearColor {
+    fn from_value(value: &pb::Value) -> Result<Self, TempoError> {
+        match variant(value)? {
+            pb::value::Value::LinearColorValue(c) => Ok(FLinearColor { r: c.r, g: c.g, b: c.b, a: c.a }),
+            _ => Err(wrong(value, "a linear color")),
+        }
+    }
+}
+
+impl ToValue for FLinearColor {
+    fn to_value(&self) -> pb::Value {
+        pb::Value {
+            value: Some(pb::value::Value::LinearColorValue(pb::LinearColor {
+                r: self.r,
+                g: self.g,
+                b: self.b,
+                a: self.a,
             })),
         }
     }
@@ -2210,7 +2264,7 @@ mod tests {
 
     #[derive(Clone, Debug, Default, PartialEq)]
     struct Trim {
-        offset: Option<UnrealVector>,
+        offset: Option<FVector>,
         label: Option<String>,
     }
 
@@ -2236,7 +2290,7 @@ mod tests {
 
     #[test]
     fn a_struct_value_round_trips() {
-        let trim = Trim { offset: Some(UnrealVector { x: 1.0, y: 2.0, z: 3.0 }), label: Some("a".into()) };
+        let trim = Trim { offset: Some(FVector { x: 1.0, y: 2.0, z: 3.0 }), label: Some("a".into()) };
         assert_eq!(Trim::from_value(&trim.to_value()).unwrap(), trim);
     }
 

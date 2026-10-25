@@ -22,6 +22,7 @@ namespace
 		case EValueKind::Vector:  return TEXT("vector");
 		case EValueKind::Rotator: return TEXT("rotator");
 		case EValueKind::Color:   return TEXT("color");
+		case EValueKind::LinearColor: return TEXT("color");
 		default:                  return StructCPPName;
 		}
 	}
@@ -104,7 +105,9 @@ namespace
 // Note that the type string is not always the kind's name: FVector, FRotator, FColor and
 // FLinearColor have reported "vector", "rotator" and "color" since the first version of this
 // API, while the rest report their struct name. That asymmetry is published behavior, so it is
-// reproduced here rather than tidied.
+// reproduced here rather than tidied. FLinearColor is a kind of its own, "linearcolor" -- it reads
+// and writes as float RGBA under native_units, where FColor is 8-bit -- but its type string is still
+// "color".
 const TCHAR* GetKindName(EValueKind Kind)
 {
 	switch (Kind)
@@ -124,6 +127,7 @@ const TCHAR* GetKindName(EValueKind Kind)
 	case EValueKind::Quat:       return TEXT("quat");
 	case EValueKind::Transform:  return TEXT("transform");
 	case EValueKind::Color:      return TEXT("color");
+	case EValueKind::LinearColor: return TEXT("linearcolor");
 	case EValueKind::Class:      return TEXT("class");
 	case EValueKind::Asset:      return TEXT("asset");
 	case EValueKind::Actor:      return TEXT("actor");
@@ -177,7 +181,7 @@ EValueKind StructKindForCPPName(const FString& StructCPPName)
 	if (StructCPPName == TEXT("FVector"))      { return EValueKind::Vector; }
 	if (StructCPPName == TEXT("FRotator"))     { return EValueKind::Rotator; }
 	if (StructCPPName == TEXT("FColor"))       { return EValueKind::Color; }
-	if (StructCPPName == TEXT("FLinearColor")) { return EValueKind::Color; }
+	if (StructCPPName == TEXT("FLinearColor")) { return EValueKind::LinearColor; }
 	if (StructCPPName == TEXT("FVector2D"))    { return EValueKind::Vector2D; }
 	if (StructCPPName == TEXT("FIntVector"))   { return EValueKind::IntVector; }
 	if (StructCPPName == TEXT("FIntPoint"))    { return EValueKind::IntPoint; }

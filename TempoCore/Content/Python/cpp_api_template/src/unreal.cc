@@ -287,13 +287,13 @@ TempoWorld::Value ValueTraits<double>::to(const double& v) {
     return value;
 }
 
-Result<UnrealVector> ValueTraits<UnrealVector>::from(const TempoWorld::Value& value) {
+Result<FVector> ValueTraits<FVector>::from(const TempoWorld::Value& value) {
     if (value.value_case() != TempoWorld::Value::kVectorValue) return detail::wrong(value, "a vector");
     const auto& v = value.vector_value();
-    return UnrealVector{v.x(), v.y(), v.z()};
+    return FVector{v.x(), v.y(), v.z()};
 }
 
-TempoWorld::Value ValueTraits<UnrealVector>::to(const UnrealVector& v) {
+TempoWorld::Value ValueTraits<FVector>::to(const FVector& v) {
     TempoWorld::Value value;
     auto* out = value.mutable_vector_value();
     out->set_x(v.x);
@@ -302,13 +302,13 @@ TempoWorld::Value ValueTraits<UnrealVector>::to(const UnrealVector& v) {
     return value;
 }
 
-Result<UnrealVector2D> ValueTraits<UnrealVector2D>::from(const TempoWorld::Value& value) {
+Result<FVector2D> ValueTraits<FVector2D>::from(const TempoWorld::Value& value) {
     if (value.value_case() != TempoWorld::Value::kVector2DValue) return detail::wrong(value, "a 2D vector");
     const auto& v = value.vector2d_value();
-    return UnrealVector2D{v.x(), v.y()};
+    return FVector2D{v.x(), v.y()};
 }
 
-TempoWorld::Value ValueTraits<UnrealVector2D>::to(const UnrealVector2D& v) {
+TempoWorld::Value ValueTraits<FVector2D>::to(const FVector2D& v) {
     TempoWorld::Value value;
     auto* out = value.mutable_vector2d_value();
     out->set_x(v.x);
@@ -316,13 +316,13 @@ TempoWorld::Value ValueTraits<UnrealVector2D>::to(const UnrealVector2D& v) {
     return value;
 }
 
-Result<UnrealIntVector> ValueTraits<UnrealIntVector>::from(const TempoWorld::Value& value) {
+Result<FIntVector> ValueTraits<FIntVector>::from(const TempoWorld::Value& value) {
     if (value.value_case() != TempoWorld::Value::kIntVectorValue) return detail::wrong(value, "an int vector");
     const auto& v = value.int_vector_value();
-    return UnrealIntVector{v.x(), v.y(), v.z()};
+    return FIntVector{v.x(), v.y(), v.z()};
 }
 
-TempoWorld::Value ValueTraits<UnrealIntVector>::to(const UnrealIntVector& v) {
+TempoWorld::Value ValueTraits<FIntVector>::to(const FIntVector& v) {
     TempoWorld::Value value;
     auto* out = value.mutable_int_vector_value();
     out->set_x(v.x);
@@ -331,13 +331,13 @@ TempoWorld::Value ValueTraits<UnrealIntVector>::to(const UnrealIntVector& v) {
     return value;
 }
 
-Result<UnrealIntPoint> ValueTraits<UnrealIntPoint>::from(const TempoWorld::Value& value) {
+Result<FIntPoint> ValueTraits<FIntPoint>::from(const TempoWorld::Value& value) {
     if (value.value_case() != TempoWorld::Value::kIntPointValue) return detail::wrong(value, "an int point");
     const auto& v = value.int_point_value();
-    return UnrealIntPoint{v.x(), v.y()};
+    return FIntPoint{v.x(), v.y()};
 }
 
-TempoWorld::Value ValueTraits<UnrealIntPoint>::to(const UnrealIntPoint& v) {
+TempoWorld::Value ValueTraits<FIntPoint>::to(const FIntPoint& v) {
     TempoWorld::Value value;
     auto* out = value.mutable_int_point_value();
     out->set_x(v.x);
@@ -347,14 +347,14 @@ TempoWorld::Value ValueTraits<UnrealIntPoint>::to(const UnrealIntPoint& v) {
 
 // Carried in a message whose fields are named for radians and right-handed degrees, because that is
 // what every other RPC puts there. With native_units set the server does not convert, so these are
-// Unreal's own degrees and r/p/y map straight onto roll/pitch/yaw.
-Result<UnrealRotator> ValueTraits<UnrealRotator>::from(const TempoWorld::Value& value) {
+// Unreal's own degrees, and r/p/y are roll, pitch and yaw by name.
+Result<FRotator> ValueTraits<FRotator>::from(const TempoWorld::Value& value) {
     if (value.value_case() != TempoWorld::Value::kRotatorValue) return detail::wrong(value, "a rotator");
     const auto& v = value.rotator_value();
-    return UnrealRotator{v.r(), v.p(), v.y()};
+    return FRotator{v.p(), v.y(), v.r()};
 }
 
-TempoWorld::Value ValueTraits<UnrealRotator>::to(const UnrealRotator& v) {
+TempoWorld::Value ValueTraits<FRotator>::to(const FRotator& v) {
     TempoWorld::Value value;
     auto* out = value.mutable_rotator_value();
     out->set_r(v.roll);
@@ -363,54 +363,86 @@ TempoWorld::Value ValueTraits<UnrealRotator>::to(const UnrealRotator& v) {
     return value;
 }
 
-Result<UnrealQuat> ValueTraits<UnrealQuat>::from(const TempoWorld::Value& value) {
+namespace {
+
+FQuat quat_from(const TempoWorld::Quat& v) { return FQuat{v.x(), v.y(), v.z(), v.w()}; }
+
+void quat_to(const FQuat& q, TempoWorld::Quat* out) {
+    out->set_x(static_cast<float>(q.x));
+    out->set_y(static_cast<float>(q.y));
+    out->set_z(static_cast<float>(q.z));
+    out->set_w(static_cast<float>(q.w));
+}
+
+void vector_to(const FVector& v, TempoCore::Vector* out) {
+    out->set_x(v.x);
+    out->set_y(v.y);
+    out->set_z(v.z);
+}
+
+}  // namespace
+
+Result<FQuat> ValueTraits<FQuat>::from(const TempoWorld::Value& value) {
     if (value.value_case() != TempoWorld::Value::kQuatValue) return detail::wrong(value, "a quaternion");
-    const auto& v = value.quat_value();
-    return UnrealQuat{v.x(), v.y(), v.z(), v.w()};
+    return quat_from(value.quat_value());
 }
 
-TempoWorld::Value ValueTraits<UnrealQuat>::to(const UnrealQuat& v) {
+TempoWorld::Value ValueTraits<FQuat>::to(const FQuat& v) {
     TempoWorld::Value value;
-    auto* out = value.mutable_quat_value();
-    out->set_x(static_cast<float>(v.x));
-    out->set_y(static_cast<float>(v.y));
-    out->set_z(static_cast<float>(v.z));
-    out->set_w(static_cast<float>(v.w));
+    quat_to(v, value.mutable_quat_value());
     return value;
 }
 
-Result<UnrealTransform> ValueTraits<UnrealTransform>::from(const TempoWorld::Value& value) {
-    if (value.value_case() != TempoWorld::Value::kTransformValue) return detail::wrong(value, "a transform");
-    const auto& t = value.transform_value();
-    return UnrealTransform{UnrealVector{t.location().x(), t.location().y(), t.location().z()},
-                           UnrealRotator{t.rotation().r(), t.rotation().p(), t.rotation().y()}};
+// Unreal's own shape, which TempoCore's Transform does not have room for: see NativeTransform.
+Result<FTransform> ValueTraits<FTransform>::from(const TempoWorld::Value& value) {
+    if (value.value_case() != TempoWorld::Value::kNativeTransformValue) {
+        return detail::wrong(value, "a transform");
+    }
+    const auto& t = value.native_transform_value();
+    return FTransform{t.has_rotation() ? quat_from(t.rotation()) : FQuat{},
+                      FVector{t.translation().x(), t.translation().y(), t.translation().z()},
+                      FVector{t.scale3d().x(), t.scale3d().y(), t.scale3d().z()}};
 }
 
-TempoWorld::Value ValueTraits<UnrealTransform>::to(const UnrealTransform& v) {
+TempoWorld::Value ValueTraits<FTransform>::to(const FTransform& v) {
     TempoWorld::Value value;
-    auto* out = value.mutable_transform_value();
-    out->mutable_location()->set_x(v.location.x);
-    out->mutable_location()->set_y(v.location.y);
-    out->mutable_location()->set_z(v.location.z);
-    out->mutable_rotation()->set_r(v.rotation.roll);
-    out->mutable_rotation()->set_p(v.rotation.pitch);
-    out->mutable_rotation()->set_y(v.rotation.yaw);
+    auto* out = value.mutable_native_transform_value();
+    quat_to(v.rotation, out->mutable_rotation());
+    vector_to(v.translation, out->mutable_translation());
+    vector_to(v.scale3d, out->mutable_scale3d());
     return value;
 }
 
-Result<UnrealColor> ValueTraits<UnrealColor>::from(const TempoWorld::Value& value) {
+Result<FColor> ValueTraits<FColor>::from(const TempoWorld::Value& value) {
     if (value.value_case() != TempoWorld::Value::kColorValue) return detail::wrong(value, "a color");
     const auto& c = value.color_value();
-    return UnrealColor{static_cast<std::uint8_t>(c.r()), static_cast<std::uint8_t>(c.g()),
-                       static_cast<std::uint8_t>(c.b())};
+    return FColor{static_cast<std::uint8_t>(c.r()), static_cast<std::uint8_t>(c.g()),
+                  static_cast<std::uint8_t>(c.b()), static_cast<std::uint8_t>(c.a())};
 }
 
-TempoWorld::Value ValueTraits<UnrealColor>::to(const UnrealColor& v) {
+TempoWorld::Value ValueTraits<FColor>::to(const FColor& v) {
     TempoWorld::Value value;
     auto* out = value.mutable_color_value();
     out->set_r(v.r);
     out->set_g(v.g);
     out->set_b(v.b);
+    out->set_a(v.a);
+    return value;
+}
+
+Result<FLinearColor> ValueTraits<FLinearColor>::from(const TempoWorld::Value& value) {
+    if (value.value_case() != TempoWorld::Value::kLinearColorValue) return detail::wrong(value, "a linear color");
+    const auto& c = value.linear_color_value();
+    return FLinearColor{c.r(), c.g(), c.b(), c.a()};
+}
+
+TempoWorld::Value ValueTraits<FLinearColor>::to(const FLinearColor& v) {
+    TempoWorld::Value value;
+    auto* out = value.mutable_linear_color_value();
+    out->set_r(v.r);
+    out->set_g(v.g);
+    out->set_b(v.b);
+    out->set_a(v.a);
     return value;
 }
 

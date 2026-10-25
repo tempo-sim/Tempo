@@ -248,9 +248,9 @@ def test_reading_an_expressible_struct_still_returns_a_live_proxy(classes, wire)
 
     widget = classes.Widget("MyActor")
     assert isinstance(widget.Settings, unreal.StructProxy)
-    widget.Settings.Inner.Offset = unreal.UnrealVector(1.0, 2.0, 3.0)
+    widget.Settings.Inner.Offset = unreal.FVector(1.0, 2.0, 3.0)
     assert wire["writes"] == [
-        ("MyActor", "", "Settings.Inner.Offset", unreal.UnrealVector(1.0, 2.0, 3.0))]
+        ("MyActor", "", "Settings.Inner.Offset", unreal.FVector(1.0, 2.0, 3.0))]
 
 
 def test_a_member_nothing_can_read_is_not_offered(classes, wire):
@@ -337,24 +337,35 @@ def test_scalar_and_container_values_round_trip(classes, variant, value):
 def test_structured_values_round_trip(classes):
     import tempo_sim.unreal as unreal
 
-    for original in (unreal.UnrealVector(1.0, 2.0, 3.0),
-                     unreal.UnrealVector2D(4.0, 5.0),
-                     unreal.UnrealIntVector(1, 2, 3),
-                     unreal.UnrealIntPoint(6, 7),
-                     unreal.UnrealRotator(10.0, 20.0, 30.0),
-                     unreal.UnrealQuat(0.0, 0.0, 0.0, 1.0),
-                     unreal.UnrealColor(1, 2, 3)):
-        variant = {
-            "UnrealVector": "vector_value", "UnrealVector2D": "vector2d_value",
-            "UnrealIntVector": "int_vector_value", "UnrealIntPoint": "int_point_value",
-            "UnrealRotator": "rotator_value", "UnrealQuat": "quat_value",
-            "UnrealColor": "color_value",
-        }[type(original).__name__]
-        assert unreal._from_value(unreal._to_value(variant, original)) == original
+    # Values a 32-bit float holds exactly where the wire is 32-bit, so equality is exact.
+    for variant, original in (
+            ("vector_value", unreal.FVector(1.0, 2.0, 3.0)),
+            ("vector2d_value", unreal.FVector2D(4.0, 5.0)),
+            ("int_vector_value", unreal.FIntVector(1, 2, 3)),
+            ("int_point_value", unreal.FIntPoint(6, 7)),
+            ("rotator_value", unreal.FRotator(10.0, 20.0, 30.0)),
+            ("quat_value", unreal.FQuat(0.0, 0.0, 0.5, 0.5)),
+            ("color_value", unreal.FColor(1, 2, 3, 4)),
+            ("linear_color_value", unreal.FLinearColor(0.25, 0.5, 0.75, 0.125)),
+            ("native_transform_value", unreal.FTransform(unreal.FQuat(0.0, 0.0, 0.5, 0.5),
+                                                         unreal.FVector(1.0, 2.0, 3.0),
+                                                         unreal.FVector(2.0, 2.0, 2.0)))):
+        assert unreal._from_value(unreal._to_value(variant, original)) == original, variant
 
-    pose = unreal.UnrealTransform(unreal.UnrealVector(1.0, 2.0, 3.0),
-                                  unreal.UnrealRotator(4.0, 5.0, 6.0))
-    assert unreal._from_value(unreal._to_value("transform_value", pose)) == pose
+
+def test_value_types_have_unreals_shapes(classes):
+    """Constructed in Unreal's own order, and carried by name rather than by position."""
+    import tempo_sim.unreal as unreal
+
+    rotator = unreal.FRotator(10.0, 20.0, 30.0)
+    assert (rotator.Pitch, rotator.Yaw, rotator.Roll) == (10.0, 20.0, 30.0)
+    wire = unreal._to_value("rotator_value", rotator).rotator_value
+    assert (wire.r, wire.p, wire.y) == (30.0, 10.0, 20.0), "r/p/y are roll, pitch and yaw"
+
+    identity = unreal.FTransform()
+    assert identity.Rotation == unreal.FQuat(0.0, 0.0, 0.0, 1.0)
+    assert identity.Scale3D == unreal.FVector(1.0, 1.0, 1.0), "Unreal's default scale is 1"
+    assert unreal.FColor().A == 255 and unreal.FLinearColor().A == 1.0, "opaque by default"
 
 
 def _flat(value):
@@ -367,46 +378,67 @@ def test_conversions_apply_the_servers_rule(classes):
     # The expected numbers are TempoConversion.h's: cm -> m with Y negated for a length, degrees ->
     # radians with pitch and yaw negated for a rotation, and a direction's handedness alone.
     import tempo_sim.unreal as unreal
-    from tempo_sim.conversion import (si_direction_to_unreal, si_to_unreal,
-                                      unreal_direction_to_si, unreal_to_si)
+    from tempo_sim.conversion import (quat_of, si_direction_to_ue, si_to_ue,
+                                      ue_direction_to_si, ue_to_si)
 
-    v = unreal_to_si(unreal.UnrealVector(100.0, 50.0, -25.0))
+    assert ue_to_si(250.0) == 2.5 and si_to_ue(2.5) == 250.0, "a bare number is a length"
+    v = ue_to_si(unreal.FVector(100.0, 50.0, -25.0))
     assert (v.x, v.y, v.z) == (1.0, -0.5, -0.25)
-    v2 = unreal_to_si(unreal.UnrealVector2D(100.0, 50.0))
+    v2 = ue_to_si(unreal.FVector2D(100.0, 50.0))
     assert (v2.x, v2.y) == (1.0, -0.5)
-    r = unreal_to_si(unreal.UnrealRotator(Roll=90.0, Pitch=45.0, Yaw=180.0))
+    r = ue_to_si(unreal.FRotator(Pitch=45.0, Yaw=180.0, Roll=90.0))
     assert (r.r, r.p, r.y) == pytest.approx((math.pi / 2, -math.pi / 4, -math.pi))
-    t = unreal_to_si(unreal.UnrealTransform(unreal.UnrealVector(100.0, 50.0, 0.0),
-                                            unreal.UnrealRotator(Yaw=90.0)))
+    q = ue_to_si(quat_of(unreal.FRotator(Yaw=90.0)))
+    assert (q.r, q.p, q.y) == pytest.approx((0.0, 0.0, -math.pi / 2))
+    t = ue_to_si(unreal.FTransform(quat_of(unreal.FRotator(Yaw=90.0)),
+                                   unreal.FVector(100.0, 50.0, 0.0), unreal.FVector(2.0, 2.0, 2.0)))
     assert (t.location.x, t.location.y, t.rotation.y) == pytest.approx((1.0, -0.5, -math.pi / 2))
 
-    d = unreal_direction_to_si(unreal.UnrealVector(0.0, 1.0, 0.0))
+    d = ue_direction_to_si(unreal.FVector(0.0, 1.0, 0.0))
     assert (d.x, d.y, d.z) == (0.0, -1.0, 0.0)
-    assert si_direction_to_unreal(d) == unreal.UnrealVector(0.0, 1.0, 0.0)
+    assert si_direction_to_ue(d) == unreal.FVector(0.0, 1.0, 0.0)
 
-    for value in (unreal.UnrealVector(1.0, 2.0, 3.0), unreal.UnrealVector2D(4.0, 5.0),
-                  unreal.UnrealRotator(10.0, 20.0, 30.0),
-                  unreal.UnrealTransform(unreal.UnrealVector(1.0, 2.0, 3.0),
-                                         unreal.UnrealRotator(4.0, 5.0, 6.0))):
-        back = si_to_unreal(unreal_to_si(value))
+    for value in (unreal.FVector(1.0, 2.0, 3.0), unreal.FVector2D(4.0, 5.0),
+                  unreal.FRotator(10.0, 20.0, 30.0),
+                  # Scale 1: TempoCore.Transform carries none, so a round trip comes back with 1.
+                  unreal.FTransform(quat_of(unreal.FRotator(4.0, 5.0, 6.0)),
+                                    unreal.FVector(1.0, 2.0, 3.0))):
+        back = si_to_ue(ue_to_si(value))
         assert type(back) is type(value)
         assert _flat(back) == pytest.approx(_flat(value)), (value, back)
+
+
+def test_the_rotation_math_is_unreals(classes):
+    """quat_of and rotator_of reproduce FRotator::Quaternion and FQuat::Rotator, singularities
+    included, so a transform's rotation means what it does in the sim."""
+    import tempo_sim.unreal as unreal
+    from tempo_sim.conversion import quat_of, rotator_of
+
+    quarter = math.sqrt(0.5)
+    assert _flat(quat_of(unreal.FRotator(Yaw=90.0))) == pytest.approx([0.0, 0.0, quarter, quarter])
+    assert _flat(quat_of(unreal.FRotator(Pitch=90.0))) == pytest.approx([0.0, -quarter, 0.0, quarter])
+    for rotator in (unreal.FRotator(10.0, 20.0, 30.0), unreal.FRotator(-45.0, 170.0, -120.0),
+                    unreal.FRotator(0.0, -179.0, 0.0), unreal.FRotator(89.9, 10.0, 5.0)):
+        assert _flat(rotator_of(quat_of(rotator))) == pytest.approx(_flat(rotator)), rotator
+    # At the pole Unreal folds roll into yaw, and so does this.
+    assert _flat(rotator_of(quat_of(unreal.FRotator(90.0, 30.0, 0.0)))) == pytest.approx(
+        [90.0, 30.0, 0.0])
 
 
 def test_conversions_refuse_what_they_cannot_convert(classes):
     import tempo_sim.TempoCore.Geometry_pb2 as Geometry
     import tempo_sim.unreal as unreal
-    from tempo_sim.conversion import si_to_unreal, unreal_to_si
+    from tempo_sim.conversion import si_to_ue, ue_to_si
 
     # No TempoCore counterpart, and an integer vector cannot be scaled to meters anyway.
-    for value in (unreal.UnrealQuat(), unreal.UnrealIntVector(), unreal.UnrealIntPoint(),
-                  unreal.UnrealColor()):
-        with pytest.raises(TypeError, match="unreal_to_si"):
-            unreal_to_si(value)
-    with pytest.raises(TypeError, match="si_to_unreal"):
-        si_to_unreal(unreal.UnrealVector())
-    with pytest.raises(TypeError, match="unreal_to_si"):
-        unreal_to_si(Geometry.Vector())
+    for value in (unreal.FIntVector(), unreal.FIntPoint(), unreal.FColor(), unreal.FLinearColor(),
+                  True):
+        with pytest.raises(TypeError, match="ue_to_si"):
+            ue_to_si(value)
+    with pytest.raises(TypeError, match="si_to_ue"):
+        si_to_ue(unreal.FVector())
+    with pytest.raises(TypeError, match="ue_to_si"):
+        ue_to_si(Geometry.Vector())
 
 
 def test_enum_values_travel_as_their_authored_name(classes):
@@ -1206,7 +1238,7 @@ def test_struct_values_round_trip_with_nesting(classes):
     import fixture_classes.structs as structs
 
     original = structs.FWidgetSettings(
-        Scale=1.5, Inner=structs.FWidgetTrim(Offset=unreal.UnrealVector(1.0, 2.0, 3.0)))
+        Scale=1.5, Inner=structs.FWidgetTrim(Offset=unreal.FVector(1.0, 2.0, 3.0)))
     back = unreal._from_value(unreal._to_value("struct_value", original))
     # The generated value type, not a bare one: it is what the stub promised a read returns.
     assert type(back) is structs.FWidgetSettings

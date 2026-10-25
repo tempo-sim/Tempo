@@ -305,7 +305,7 @@ def test_writing_a_read_only_property_is_refused_before_the_wire(sim_server):
     # RelativeLocation is BlueprintReadOnly, and the refusal happens client-side -- which is why it
     # does not matter that this handle addresses nothing.
     with pytest.raises(AttributeError, match="read-only"):
-        handle.RelativeLocation = unreal.UnrealVector(1.0, 2.0, 3.0)
+        handle.RelativeLocation = unreal.FVector(1.0, 2.0, 3.0)
 
 
 @requires_classes
@@ -390,9 +390,10 @@ def test_call_function_returns_typed_results(root_component):
     returned = next(r for r in response.results if r.name == "ReturnValue")
     # The legacy string form is still there, and still a string.
     assert returned.value
-    # The typed form needs no parsing and can be fed straight back in.
+    # The typed form needs no parsing and can be fed straight back in. Under native_units a
+    # transform is Unreal's own shape, quaternion and scale included.
     assert returned.HasField("typed_value")
-    assert returned.typed_value.WhichOneof("value") == "transform_value"
+    assert returned.typed_value.WhichOneof("value") == "native_transform_value"
 
 
 def test_a_typed_result_matches_the_property_it_reports(root_component):
@@ -415,7 +416,7 @@ def test_a_typed_result_matches_the_property_it_reports(root_component):
     from_function = next(
         r for r in tw.call_function(actor=actor, component=root, function="GetRelativeTransform",
                                     native_units=True).results
-        if r.name == "ReturnValue").typed_value.transform_value.location
+        if r.name == "ReturnValue").typed_value.native_transform_value.translation
 
     assert (from_function.x, from_function.y, from_function.z) == \
            pytest.approx((from_property.x, from_property.y, from_property.z), abs=1e-3)
@@ -558,11 +559,35 @@ def test_an_out_struct_comes_back_by_name(sim_server):
         root = next(c.name for c in tw.get_all_components(actor=spawned.actor).components
                     if "StaticMesh" in c.component_type)
         tw.set_enum_property(actor=spawned.actor, component=root, property="Mobility", value="Movable")
-        results = spawned.K2_SetActorLocation(unreal.UnrealVector(100.0, 0.0, 0.0), False, True)
+        results = spawned.K2_SetActorLocation(unreal.FVector(100.0, 0.0, 0.0), False, True)
         assert results["ReturnValue"] is True
         hit = results["SweepHitResult"]
         assert type(hit).__tempo_struct__ == "FHitResult"
         assert hit.bBlockingHit is False, "nothing to hit with sweep off"
+    finally:
+        tw.destroy_actor(actor=spawned.actor)
+
+
+@requires_classes
+def test_a_transform_travels_in_unreals_shape(sim_server):
+    """An FTransform argument and result keep their quaternion and scale. A typed write used to
+    reset the scale to 1, and a read to drop it."""
+    from tempo_sim.conversion import quat_of, rotator_of
+
+    StaticMeshActor = registered().python_class(SPAWNABLE)
+    spawned = world.spawn_actor(StaticMeshActor)
+    try:
+        root = next(c.name for c in tw.get_all_components(actor=spawned.actor).components
+                    if "StaticMesh" in c.component_type)
+        tw.set_enum_property(actor=spawned.actor, component=root, property="Mobility", value="Movable")
+        wanted = unreal.FTransform(quat_of(unreal.FRotator(Yaw=90.0)),
+                                   unreal.FVector(100.0, 0.0, 50.0), unreal.FVector(2.0, 3.0, 4.0))
+        assert spawned.K2_SetActorTransform(wanted, False, True)["ReturnValue"] is True
+        got = spawned.GetTransform()
+        assert type(got) is unreal.FTransform
+        assert (got.Scale3D.X, got.Scale3D.Y, got.Scale3D.Z) == pytest.approx((2.0, 3.0, 4.0))
+        assert (got.Translation.X, got.Translation.Z) == pytest.approx((100.0, 50.0), abs=1e-3)
+        assert rotator_of(got.Rotation).Yaw == pytest.approx(90.0, abs=1e-3)
     finally:
         tw.destroy_actor(actor=spawned.actor)
 

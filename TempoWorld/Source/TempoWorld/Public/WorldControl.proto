@@ -387,7 +387,9 @@ message GetPropertyRequest {
   string property = 3;
   // False (the default) converts the way every other RPC does: rotations and transforms arrive in
   // radians, right-handed, with lengths in meters. True reports the property exactly as Unreal
-  // stores it -- centimeters, degrees, left-handed -- with no conversion of any kind.
+  // stores it -- centimeters, degrees, left-handed -- with no conversion of any kind, and in
+  // Unreal's own shape: a transform as native_transform_value, with its scale, and an FLinearColor
+  // as linear_color_value rather than squeezed into 8 bits.
   bool native_units = 4;
   // Addresses a subsystem rather than an actor: the class of a world, game-instance, engine or
   // local-player subsystem, by path ("/Script/TempoAgents.TempoAgentsWorldSubsystem") or by name.
@@ -755,6 +757,26 @@ message Color {
   int32 r = 1;
   int32 g = 2;
   int32 b = 3;
+  // Alpha in [0, 255]. A read always reports it. A write uses it only with native_units set, which
+  // is when a value is in Unreal's own shape; without it a write is opaque, as it always was.
+  int32 a = 4;
+}
+
+// An FLinearColor: linear, floating-point RGBA, unclamped.
+message LinearColor {
+  float r = 1;
+  float g = 2;
+  float b = 3;
+  float a = 4;
+}
+
+// An FTransform as Unreal stores it: a rotation as a quaternion, a translation in centimeters and a
+// 3D scale, all left-handed. What a transform-valued property reads as and is written from when
+// native_units is set, since TempoCore.Transform carries neither a scale nor a quaternion.
+message NativeTransform {
+  Quat rotation = 1;
+  TempoCore.Vector translation = 2;
+  TempoCore.Vector scale3d = 3;
 }
 
 // A struct with no first-class representation, as its members.
@@ -837,6 +859,11 @@ message Value {
     StringArray component_set_value = 38;
     StructValue struct_value = 39;
     StructArray struct_array_value = 40;
+    // A transform-valued property with native_units set. See NativeTransform.
+    NativeTransform native_transform_value = 41;
+    // An FLinearColor-valued property with native_units set. Without it, FLinearColor reads and
+    // writes as color_value, converted to and from 8-bit sRGB.
+    LinearColor linear_color_value = 42;
   }
 }
 

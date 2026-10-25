@@ -44,7 +44,7 @@ use fixture_project::reflected::classes::core_u_object::Object;
 use fixture_project::reflected::classes::engine::{MeshThing, Widget};
 use fixture_project::reflected::enums::EWidgetMode;
 use fixture_project::reflected::structs::{FWidgetSettings, FWidgetTrim};
-use tempo_sim::unreal::{Class, ObjectRef, UnrealVector};
+use tempo_sim::unreal::{Class, ObjectRef, FVector};
 use tempo_sim::{world, TempoError};
 
 fn takes_mesh(_m: &MeshThing) {}
@@ -258,7 +258,7 @@ def test_a_property_reads_and_writes(workspace):
     assert check(workspace, """
     let enabled: bool = widget.b_enabled()?;
     widget.set_b_enabled(true)?;
-    let offset: UnrealVector = widget.offset()?;
+    let offset: FVector = widget.offset()?;
 """) == []
 
 
@@ -322,7 +322,7 @@ def test_struct_values_compile(workspace):
     assert check(workspace, """
     let settings = FWidgetSettings {
         scale: Some(2.0),
-        inner: Some(FWidgetTrim { offset: Some(UnrealVector::default()) }),
+        inner: Some(FWidgetTrim { offset: Some(FVector::default()) }),
         ..Default::default()
     };
     widget.set_settings(settings.clone())?;
@@ -330,7 +330,7 @@ def test_struct_values_compile(workspace):
     let _: Option<String> = back.label;
     let copy: FWidgetSettings = widget.settings().load()?;
     widget.settings().store(copy)?;
-    widget.settings().inner().set_offset(UnrealVector::default())?;
+    widget.settings().inner().set_offset(FVector::default())?;
     widget.set_history(vec![FWidgetSettings::default()])?;
     let _: Vec<FWidgetSettings> = widget.history()?;
     let _: f64 = widget.limits().floor()?;
@@ -470,9 +470,9 @@ def test_a_property_whose_setter_cannot_be_named_is_read_only(workspace):
 @pytest.mark.parametrize("case,body", [
     ("a misspelled property", "let _ = widget.b_enabeld()?;"),
     ("a misspelled property, async twin", "let _ = widget.b_enabeld_async();"),
-    ("a write to a read-only property", "widget.set_offset(UnrealVector::default())?;"),
+    ("a write to a read-only property", "widget.set_offset(FVector::default())?;"),
     ("a write to a read-only property, async twin",
-     "widget.set_offset_async(UnrealVector::default());"),
+     "widget.set_offset_async(FVector::default());"),
     ("a wrong value type", "widget.set_b_enabled(1)?;"),
     ("a property of an unrelated class", "let _ = widget.visible()?;"),
     ("an unrelated class where this one is wanted", "takes_mesh(&widget);"),
@@ -569,46 +569,56 @@ def test_conversions_apply_the_servers_rule(workspace):
     stdout, stderr, status = run(workspace, """
     use tempo_sim::conversion::*;
     use tempo_sim::proto::tempo_core as si;
-    use tempo_sim::unreal::{UnrealRotator, UnrealTransform, UnrealVector2D};
+    use tempo_sim::unreal::{FRotator, FTransform, FVector2D};
 
-    let v: si::Vector = unreal_to_si(&UnrealVector { x: 100.0, y: 50.0, z: -25.0 });
+    println!("{} {}", ue_to_si(&250.0), si_to_ue(&2.5));
+    let v: si::Vector = ue_to_si(&FVector { x: 100.0, y: 50.0, z: -25.0 });
     println!("{} {} {}", v.x, v.y, v.z);
-    let v2: si::Vector2D = unreal_to_si(&UnrealVector2D { x: 100.0, y: 50.0 });
+    let v2: si::Vector2D = ue_to_si(&FVector2D { x: 100.0, y: 50.0 });
     println!("{} {}", v2.x, v2.y);
-    let r: si::Rotation = unreal_to_si(&UnrealRotator { roll: 180.0, pitch: 90.0, yaw: 45.0 });
+    let r: si::Rotation = ue_to_si(&FRotator { pitch: 90.0, yaw: 45.0, roll: 180.0 });
     println!("{} {} {}", r.r == std::f64::consts::PI, r.p == -std::f64::consts::FRAC_PI_2,
              r.y == -std::f64::consts::FRAC_PI_4);
-    let d: si::Vector = unreal_direction_to_si(&UnrealVector { x: 0.0, y: 1.0, z: 0.0 });
+    let d: si::Vector = ue_direction_to_si(&FVector { x: 0.0, y: 1.0, z: 0.0 });
     println!("{} {} {}", d.x, d.y, d.z);
 
-    let pose = UnrealTransform {
-        location: UnrealVector { x: 1.0, y: 2.0, z: 3.0 },
-        rotation: UnrealRotator { roll: 4.0, pitch: 5.0, yaw: 6.0 },
+    // Scale 1: TempoCore's Transform carries none, so a round trip comes back with 1.
+    let pose = FTransform {
+        rotation: quat_of(&FRotator { pitch: 5.0, yaw: 6.0, roll: 4.0 }),
+        translation: FVector { x: 1.0, y: 2.0, z: 3.0 },
+        ..FTransform::default()
     };
-    let back: UnrealTransform = si_to_unreal(&unreal_to_si(&pose));
+    let back: FTransform = si_to_ue(&ue_to_si(&pose));
+    let turned = rotator_of(&back.rotation);
     let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
-    println!("{}", close(back.location.y, 2.0) && close(back.rotation.pitch, 5.0)
-             && close(back.rotation.yaw, 6.0) && close(back.rotation.roll, 4.0));
-    println!("{}", si_direction_to_unreal(&d) == UnrealVector { x: 0.0, y: 1.0, z: 0.0 });
+    println!("{}", close(back.translation.y, 2.0) && close(turned.pitch, 5.0)
+             && close(turned.yaw, 6.0) && close(turned.roll, 4.0) && back.scale3d.x == 1.0);
+    println!("{}", si_direction_to_ue(&d) == FVector { x: 0.0, y: 1.0, z: 0.0 });
     // A message that leaves a field unset means the zero it is on the wire.
-    println!("{:?}", si_to_unreal(&si::Transform::default()) == UnrealTransform::default());
+    println!("{:?}", si_to_ue(&si::Transform::default()) == FTransform::default());
+    // Unreal's own formulas, at a pole too, where Unreal folds roll into yaw.
+    let q = quat_of(&FRotator { pitch: 0.0, yaw: 90.0, roll: 0.0 });
+    println!("{}", close(q.z, 0.5f64.sqrt()) && close(q.w, 0.5f64.sqrt()) && q.x == 0.0);
+    let pole = rotator_of(&quat_of(&FRotator { pitch: 90.0, yaw: 30.0, roll: 0.0 }));
+    println!("{}", close(pole.pitch, 90.0) && close(pole.yaw, 30.0) && pole.roll == 0.0);
 """)
     assert status == 0, stderr
-    assert stdout.split("\n")[:7] == ["1 -0.5 -0.25", "1 -0.5", "true true true", "0 -1 0", "true",
-                                      "true", "true"]
+    assert stdout.split("\n")[:10] == ["2.5 250", "1 -0.5 -0.25", "1 -0.5", "true true true",
+                                       "0 -1 0", "true", "true", "true", "true", "true"]
 
 
 @pytest.mark.parametrize("case,source", [
     ("a value with no SI counterpart",
-     "let _ = tempo_sim::conversion::unreal_to_si(&tempo_sim::unreal::UnrealQuat::default());"),
+     "let _ = tempo_sim::conversion::ue_to_si(&tempo_sim::unreal::FColor::default());"),
     ("converting an SI value the wrong way",
-     "let _ = tempo_sim::conversion::unreal_to_si("
+     "let _ = tempo_sim::conversion::ue_to_si("
      "&tempo_sim::proto::tempo_core::Vector::default());"),
     ("converting an Unreal value the wrong way",
-     "let _ = tempo_sim::conversion::si_to_unreal(&UnrealVector::default());"),
+     "let _ = tempo_sim::conversion::si_to_ue(&FVector::default());"),
     ("a conversion typed as another quantity",
-     "let _: UnrealVector = tempo_sim::conversion::si_to_unreal("
+     "let _: FVector = tempo_sim::conversion::si_to_ue("
      "&tempo_sim::proto::tempo_core::Rotation::default());"),
+    ("the old prefixed name", "let _ = tempo_sim::unreal::UnrealVector::default();"),
     ("the old unprefixed name", "let _ = tempo_sim::unreal::Vector::default();"),
 ])
 def test_conversion_misuse_does_not_compile(workspace, case, source):

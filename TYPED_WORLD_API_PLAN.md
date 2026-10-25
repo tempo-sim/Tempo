@@ -446,7 +446,7 @@ transform-shaped ones do (`docs/concepts/conventions.md#the-exception-set_proper
 typed API there is no exception.
 
 **Consequence to flag loudly:** two vector types in one client —
-`tempo_sim.unreal.UnrealVector` (cm, left-handed, typed API) and
+`tempo_sim.unreal.FVector` (cm, left-handed, typed API) and
 `tempo_sim.TempoCore.Geometry_pb2.Vector` (m, right-handed, every other RPC). Distinct names and an
 explicit conversion helper, never implicit coercion (§22). Generated struct and enum names must be
 checked against the hand-written runtime names so a harvested struct cannot shadow a runtime type.
@@ -729,7 +729,7 @@ an empty subscription map, so a project that never streams pays nothing measurab
 | **10 — Asset catalog** | cooked assets from the packaged build; `AssetRef[T]` typed by class; a generated catalog per mount point; drift reporting | Designed in §19. **Done**; see §19.5. |
 | **11 — One package per project** | a project's classes in its own client package and crate (`tempo_sample.reflected`, `tempo_sample::reflected`) rather than a `-classes` one beside it | §20. **Done.** |
 | **12 — Subsystems** | a `subsystem` address on the typed requests; `world.get_subsystem` in both clients | §21. **Done.** |
-| **13 — Unreal-native values, named and converted** | the runtime value types renamed `Unreal…`; `unreal_to_si`/`si_to_unreal` in both clients; `_pb2` stubs | §22. **Done.** |
+| **13 — Unreal-native values, named and converted** | Unreal's own value types in Unreal's shapes, with the server fixes they needed; `ue_to_si`/`si_to_ue`; `world` in SI; `_pb2` stubs | §22. **Done.** |
 
 ### Phase 0 results (measured)
 
@@ -831,7 +831,7 @@ requirements file. Worth preferring over a system dependency given how the CI im
 6. **Round-trip amplification.** 1,000 actors × one property = 1,000 RPCs. → `batch()`/`snapshot()`
    in Phase 1, documented from the start.
 7. **Two `Vector` types**, and generated names shadowing runtime ones. → distinct names
-   (`UnrealVector`), explicit conversion (§22), a generation-time name check (§7).
+   (`FVector`), explicit conversion (§22), a generation-time name check (§7).
 8. **Consumer CI not enforcing strictness** — the guarantee is only as strong as the weakest
    consuming repo's Pyright config. → §10.4 ships the policy, not just advice.
 
@@ -1740,51 +1740,92 @@ its `call(actor, component, function)` and gains a `.subsystem(...)` method.
 ## 22. Unreal-native values, named and converted
 
 §7's decision stands: the typed API does not convert, because a raw `UPROPERTY` does not say what
-it measures. What it got wrong was the names. `tempo_sim.unreal.Vector` and
+it measures. What it got wrong was the names and the shapes. `tempo_sim.unreal.Vector` and
 `tempo_sim.TempoCore.Geometry_pb2.Vector` — and in Rust `tempo_sim::unreal::Vector` and
 `tempo_sim::proto::tempo_core::Vector` — were one import away from each other and a factor of a
 hundred and a sign apart, and nothing at a call site said which was which. §7 asked for "distinct
 names and an explicit conversion helper"; this delivers both.
 
-**The names.** Every hand-written value type carries the prefix: `UnrealVector`, `UnrealVector2D`,
-`UnrealIntVector`, `UnrealIntPoint`, `UnrealRotator`, `UnrealQuat`, `UnrealTransform`,
-`UnrealColor`, in both languages. All of them and not only the ones with a TempoCore namesake, so
-the rule is one sentence: a type from `unreal` is Unreal-native, and says so. The `Value` variants
-and the generated members are untouched; only the types they carry are renamed, in
-`gen_py_classes.SIMPLE_TYPES` and `gen_rust_classes`'s table.
+### 22.1 Unreal's own types
 
-**The conversions.** `tempo_sim.conversion` and `tempo_sim::conversion`, beside the runtime and
-hand-written like it. `unreal_to_si` and `si_to_unreal` are overloaded on the type —
-`typing.overload` in Python, a pair of traits (`UnrealToSi`, `SiToUnreal`) behind generic functions
-in Rust — so the argument decides what comes back and a type checker knows it:
+**The names went through two steps.** First every hand-written value type took an `Unreal` prefix
+(`UnrealVector`, `UnrealRotator`, …). That made them distinct, but they were neither Tempo's types
+nor Unreal's: `UnrealRotator` was constructed (roll, pitch, yaw), `UnrealTransform` was a location
+and a rotator with no scale, `UnrealColor` had no alpha. So they became **Unreal's own names in
+Unreal's own shapes**, in all three clients:
+
+| Type | Shape |
+|---|---|
+| `FVector`, `FVector2D`, `FIntVector`, `FIntPoint` | as Unreal's |
+| `FRotator` | pitch, yaw, roll — so `FRotator(10, 20, 30)` means what it does in Unreal |
+| `FQuat` | x, y, z, w |
+| `FTransform` | rotation (an `FQuat`), translation, 3D scale; the identity and scale 1 by default |
+| `FColor` | 8-bit RGBA, opaque by default |
+| `FLinearColor` | float RGBA, linear, opaque by default |
+
+Members follow each language's convention, as the generated ones do: `Pitch` in Python, `pitch`
+in Rust and C++.
+
+**The shapes needed the server.** What had been lossy, and is no longer:
+
+- **A transform's scale.** A typed write built `FTransform(Rotator, Location)` and reset the scale
+  to 1; a read dropped it. Under `native_units` a transform now travels as `native_transform_value`,
+  a `NativeTransform` of quaternion, translation and scale, both ways. `transform_value`, SI and
+  scale-less, is unchanged for every caller without `native_units`.
+- **A color's alpha.** A write left `FColor`'s alpha uninitialized and a read dropped it.
+  `Color.a` is new, always reported, and honored on a write with `native_units`, which is when a
+  value is in Unreal's shape; a write without it stays opaque, so no existing caller changes.
+  (Not proto3 `optional`: `gen_common` reads such a field's synthetic oneof as a real one with this
+  protobuf, which has no `is_synthetic`, and every generator would need teaching.)
+- **`FLinearColor`** was a `color` and squeezed through 8-bit sRGB both ways. It is a kind of its
+  own, `linearcolor`, carried as float RGBA in `linear_color_value` under `native_units`. Its type
+  string is still `color`, which the string API has always published.
+
+### 22.2 The conversions
+
+`tempo_sim.conversion`, `tempo_sim::conversion` and `tempo/conversion.h`, beside each runtime.
+`ue_to_si` and `si_to_ue` (short for what were `unreal_to_si` and `si_to_unreal`) are overloaded on
+the type — `typing.overload` in Python, a pair of traits (`UeToSi`, `SiToUe`) behind generic
+functions in Rust, overloads in C++ — so the argument decides what comes back and a type checker
+knows it:
 
 | Unreal | TempoCore | Rule (`TempoConversion.h`'s) |
 |---|---|---|
-| `UnrealVector` | `Vector` | a length: cm ↔ m, Y negated |
-| `UnrealVector2D` | `Vector2D` | likewise |
-| `UnrealRotator` | `Rotation` | degrees ↔ radians, pitch and yaw negated, roll kept |
-| `UnrealTransform` | `Transform` | its location and rotation, each as above |
+| a number | a number | a length: cm ↔ m |
+| `FVector` | `Vector` | a length: cm ↔ m, Y negated |
+| `FVector2D` | `Vector2D` | likewise |
+| `FRotator` | `Rotation` | degrees ↔ radians, pitch and yaw negated, roll kept |
+| `FQuat` | `Rotation` | one way, through the rotator Unreal makes of it |
+| `FTransform` | `Transform` | its translation and rotation, each as above; the scale is dropped one way and 1 the other, since `Transform` has none |
+
+An `FTransform`'s rotation is a quaternion, and an SI `Rotation` is Euler angles, so the clients
+reproduce Unreal's own `FQuat::Rotator()` and `FRotator::Quaternion()` (`rotator_of`, `quat_of`)
+formula for formula from the engine source, singularity handling included — the one piece of
+engine math the clients carry.
 
 A type alone cannot say whether a vector is a location or a direction, and the server itself treats
 them differently (a raycast's impact point is scaled, its normal only reflected). So the overloads
-take a vector to be a length — a velocity in cm/s converts the same way — and a direction has its
-own pair, `unreal_direction_to_si` and `si_direction_to_unreal`, which change the handedness alone.
-`UnrealQuat`, `UnrealIntVector`, `UnrealIntPoint` and `UnrealColor` have no TempoCore counterpart
-and are not converted: an integer vector cannot be scaled to metres, and there is no quaternion
-message. `spawn_actor`'s transform, which had its own copy of the rule in each client, now goes
-through `unreal_to_si`.
+take a number or a vector to be a length — a velocity in cm/s converts the same way — and a
+direction has its own pair, `ue_direction_to_si` and `si_direction_to_ue`, which change the
+handedness alone. `FIntVector`, `FIntPoint`, `FColor` and `FLinearColor` have no TempoCore
+counterpart and are not converted.
+
+**`world` speaks SI.** It is the typed counterpart of `tempo_world` and mirrors it: what
+`tempo_world` takes in metres and radians, `world` takes too, with handles where `tempo_world`
+takes names, and it re-exports the TempoCore types (`world.Transform`, `world::Vector`). The
+generated classes are what speak Unreal's units.
 
 **The stubs it needed.** A `_pb2` module builds its classes at import time, so without stubs Pyright
 sees no `Geometry_pb2.Vector` at all; every message type was `Unknown`, and the first overload of
-`si_to_unreal` matched anything, typing a converted `Rotation` as an `UnrealVector`. `gen_protos.py`
-now passes `--pyi_out`, so every `_pb2` module ships its `.pyi` (both packages already include
-`*.pyi`). That is a change beyond the conversions: every RPC wrapper's message annotations, which
-were `Unknown` until now, are real types.
+`si_to_ue` matched anything. `gen_protos.py` now passes `--pyi_out`, so every `_pb2` module ships
+its `.pyi` (both packages already include `*.pyi`). That is a change beyond the conversions: every
+RPC wrapper's message annotations, which were `Unknown` until now, are real types.
 
-**Tests.** The `codegen` group checks the values against the rule in Python and Rust, that a
-round trip returns what went in, that an unconvertible value is refused, and — with Pyright and
-`rustc` — that a conversion is typed by what it converts, that the wrong direction or a value with
-no counterpart is an error, and that the old unprefixed names are gone.
+**Tests.** The `codegen` group checks the values against the rule in all three clients, the rotation
+math against Unreal's results, that each value type travels in Unreal's shape (a rotator's r/p/y by
+name, a transform with its scale, a color with its alpha, a linear color unsqueezed), and — with
+Pyright, `rustc` and the host C++ compiler — that a conversion is typed by what it converts and that
+the wrong direction, a value with no counterpart, and both old names are errors.
 
 ---
 

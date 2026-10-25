@@ -222,7 +222,7 @@ def test_a_property_reads_and_writes(generated, tmp_path):
     assert check(generated, """
     Result<bool> enabled = widget.b_enabled();
     Result<void> written = widget.set_b_enabled(true);
-    Result<UnrealVector> offset = widget.offset();
+    Result<FVector> offset = widget.offset();
 """, tmp_path) == []
 
 
@@ -261,7 +261,7 @@ def test_a_reference_is_typed_as_the_class_it_points_at(generated, tmp_path):
 def test_a_struct_property_is_addressed_a_member_at_a_time(generated, tmp_path):
     assert check(generated, """
     Result<double> scale = widget.settings().scale();
-    Result<void> inner = widget.settings().inner().set_offset(UnrealVector{});
+    Result<void> inner = widget.settings().inner().set_offset(FVector{});
 """, tmp_path) == []
 
 
@@ -269,7 +269,7 @@ def test_struct_values_compile(generated, tmp_path):
     assert check(generated, """
     FWidgetSettings settings;
     settings.scale = 2.0;
-    settings.inner = FWidgetTrim{UnrealVector{}};
+    settings.inner = FWidgetTrim{FVector{}};
     Result<void> set = widget.set_settings(settings);
     Result<FWidgetSettings> back = widget.configure(settings);
     if (back) { std::optional<std::string> label = back.value().label; }
@@ -333,7 +333,9 @@ def test_discovery_and_spawning_are_typed(generated, tmp_path):
     assert check(generated, """
     Result<std::vector<Widget>> widgets = world::get_actors<Widget>();
     Result<Widget> one = world::get_actor<Widget>("Widget_1");
-    Result<Widget> spawned = world::spawn_actor<Widget>(UnrealTransform{UnrealVector{0, 0, 100}, {}});
+    world::Transform at;
+    at.mutable_location()->set_z(1.0);   // SI, as tempo_world takes it: a meter up
+    Result<Widget> spawned = world::spawn_actor<Widget>(at);
     Result<Widget> deferred = world::spawn_actor_deferred<Widget>(
         std::nullopt, "", [](const Widget& w) { return w.set_b_enabled(false); });
     bool is_object = widget.is_a<Object>();
@@ -372,7 +374,7 @@ def test_every_enumerator_has_a_member(generated, tmp_path):
 
 @pytest.mark.parametrize("case,body", [
     ("a misspelled property", "auto r = widget.b_enabeld();"),
-    ("a write to a read-only property", "auto r = widget.set_offset(UnrealVector{});"),
+    ("a write to a read-only property", "auto r = widget.set_offset(FVector{});"),
     ("a wrong value type", 'auto r = widget.set_b_enabled(std::string("yes"));'),
     ("a property of an unrelated class", "auto r = widget.visible();"),
     ("an unrelated class where this one is wanted", "takes_mesh(widget);"),
@@ -399,9 +401,10 @@ def test_every_enumerator_has_a_member(generated, tmp_path):
     ("a bare path", 'auto r = widget.set_skin("/Game/Widgets/W_Main");'),
     ("two assets that collide, both left out",
      "auto& r = tempo::reflected::assets::game::widgets::Dup_One;"),
-    ("a quaternion converted to SI", "auto r = conversion::unreal_to_si(UnrealQuat{});"),
+    ("a color converted to SI", "auto r = conversion::ue_to_si(FColor{});"),
     ("an SI value converted the wrong way",
-     "auto r = conversion::unreal_to_si(TempoCore::Vector{});"),
+     "auto r = conversion::ue_to_si(TempoCore::Vector{});"),
+    ("the old prefixed name", "tempo::unreal::UnrealVector v;"),
     ("the old unprefixed name", "tempo::unreal::Vector v;"),
     ("the string API without naming it", 'auto r = widget.get<int>("WhateverThisIs");'),
 ])
@@ -446,17 +449,41 @@ def test_values_conversions_and_batches_behave(generated):
 
     // The server's conversion rule: cm -> m with Y negated, degrees -> radians with pitch and yaw
     // negated, and a direction's handedness alone.
-    TempoCore::Vector si = conversion::unreal_to_si(UnrealVector{100, 50, -25});
+    TempoCore::Vector si = conversion::ue_to_si(FVector{100, 50, -25});
     expect(si.x() == 1 && si.y() == -0.5 && si.z() == -0.25, "a length converts");
-    TempoCore::Rotation r = conversion::unreal_to_si(UnrealRotator{180, 90, 45});
+    expect(conversion::ue_to_si(250.0) == 2.5 && conversion::si_to_ue(2.5) == 250.0, "a bare number is a length");
+    TempoCore::Rotation r = conversion::ue_to_si(FRotator{90, 45, 180});   // pitch, yaw, roll
     expect(std::abs(r.r() - 3.141592653589793) < 1e-12 && std::abs(r.p() + 1.5707963267948966) < 1e-12 &&
            std::abs(r.y() + 0.7853981633974483) < 1e-12, "a rotation converts");
-    expect(conversion::unreal_direction_to_si(UnrealVector{0, 1, 0}).y() == -1, "a direction is not scaled");
-    UnrealTransform pose{UnrealVector{1, 2, 3}, UnrealRotator{4, 5, 6}};
-    UnrealTransform round = conversion::si_to_unreal(conversion::unreal_to_si(pose));
-    expect(std::abs(round.location.y - 2) < 1e-9 && std::abs(round.rotation.pitch - 5) < 1e-9 &&
-           std::abs(round.rotation.yaw - 6) < 1e-9, "a transform round-trips");
-    expect(conversion::si_to_unreal(TempoCore::Transform()) == UnrealTransform{}, "unset is zero");
+    expect(conversion::ue_direction_to_si(FVector{0, 1, 0}).y() == -1, "a direction is not scaled");
+    // Scale 1: TempoCore::Transform carries none, so a round trip comes back with 1.
+    FTransform pose{conversion::quat_of(FRotator{5, 6, 4}), FVector{1, 2, 3}};
+    FTransform round = conversion::si_to_ue(conversion::ue_to_si(pose));
+    FRotator turned = conversion::rotator_of(round.rotation);
+    expect(std::abs(round.translation.y - 2) < 1e-9 && std::abs(turned.pitch - 5) < 1e-9 &&
+           std::abs(turned.yaw - 6) < 1e-9 && std::abs(turned.roll - 4) < 1e-9 && round.scale3d.x == 1,
+           "a transform round-trips");
+    expect(conversion::si_to_ue(TempoCore::Transform()) == FTransform{}, "unset is zero");
+    FQuat quarter = conversion::quat_of(FRotator{0, 90, 0});
+    expect(std::abs(quarter.z - std::sqrt(0.5)) < 1e-12 && std::abs(quarter.w - std::sqrt(0.5)) < 1e-12,
+           "Unreal's FRotator::Quaternion");
+    FRotator pole = conversion::rotator_of(conversion::quat_of(FRotator{90, 30, 0}));
+    expect(std::abs(pole.pitch - 90) < 1e-9 && std::abs(pole.yaw - 30) < 1e-9 && pole.roll == 0,
+           "Unreal's FQuat::Rotator, at the pole");
+
+    // The value types travel in Unreal's own shapes.
+    TempoWorld::Value rotator = ValueTraits<FRotator>::to(FRotator{10, 20, 30});
+    expect(rotator.rotator_value().r() == 30 && rotator.rotator_value().p() == 10 &&
+           rotator.rotator_value().y() == 20, "r/p/y are roll, pitch and yaw");
+    FTransform scaled{FQuat{0, 0, 0.5, 0.5}, FVector{1, 2, 3}, FVector{2, 2, 2}};
+    expect(ValueTraits<FTransform>::from(ValueTraits<FTransform>::to(scaled)).value() == scaled,
+           "a transform keeps its scale");
+    expect(ValueTraits<FColor>::from(ValueTraits<FColor>::to(FColor{1, 2, 3, 4})).value() == FColor{1, 2, 3, 4},
+           "a color keeps its alpha");
+    FLinearColor linear{0.25f, 0.5f, 0.75f, 0.125f};
+    expect(ValueTraits<FLinearColor>::from(ValueTraits<FLinearColor>::to(linear)).value() == linear,
+           "a linear color is not squeezed into 8 bits");
+    expect(FTransform{}.scale3d == FVector{1, 1, 1} && FColor{}.a == 255, "Unreal's defaults");
 
     // A batch abandoned by its body sends nothing, which is what lets this run without a sim; a
     // deferred read inside it waits rather than resolving.

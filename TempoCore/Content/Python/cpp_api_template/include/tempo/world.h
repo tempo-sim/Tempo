@@ -29,11 +29,21 @@
 #include "tempo/result.h"
 #include "tempo/unreal.h"
 
+#include "TempoCore/Geometry.pb.h"
+
 namespace tempo::world {
 
 using unreal::batch;
 using unreal::defer;
 using unreal::Deferred;
+
+// The SI types, re-exported: this namespace mirrors tempo_world, and takes and returns what it does
+// -- meters, radians and right-handed -- with handles where tempo_world takes names. The generated
+// classes are what speak Unreal's own units and types; tempo/conversion.h moves between the two.
+using Rotation = TempoCore::Rotation;
+using Transform = TempoCore::Transform;
+using Vector = TempoCore::Vector;
+using Vector2D = TempoCore::Vector2D;
 
 namespace detail {
 
@@ -48,7 +58,7 @@ Result<void> resolve_subsystem(std::string_view class_path);
 
 /// Spawn one actor and return its name.
 Result<std::string> spawn(std::string_view class_path, bool deferred,
-						  const std::optional<unreal::UnrealTransform>& transform, std::string_view relative_to);
+						  const std::optional<Transform>& transform, std::string_view relative_to);
 
 Result<void> finish_spawning(const std::string& name);
 
@@ -94,10 +104,9 @@ Result<T> get_subsystem() {
 /// visible where it was taken.
 Result<unreal::ObjectRef> find_actor(std::string_view name);
 
-/// Spawn one actor of a class and return a handle to it. The transform is Unreal-native, like the
-/// rest of the typed API, and converted for the SpawnActor RPC.
+/// Spawn one actor of a class and return a handle to it. The transform is SI, as tempo_world's is.
 template <unreal::Class T>
-Result<T> spawn_actor(const std::optional<unreal::UnrealTransform>& transform = std::nullopt,
+Result<T> spawn_actor(const std::optional<Transform>& transform = std::nullopt,
 					  std::string_view relative_to = "") {
 	unreal::note_origin<T>();
 	auto name = detail::spawn(T::kPath, false, transform, relative_to);
@@ -113,7 +122,7 @@ Result<T> spawn_actor(const std::optional<unreal::UnrealTransform>& transform = 
 /// configured only partway. The error from `configure` is what comes back.
 template <unreal::Class T, typename F>
 	requires std::is_invocable_r_v<Result<void>, F, const T&>
-Result<T> spawn_actor_deferred(const std::optional<unreal::UnrealTransform>& transform,
+Result<T> spawn_actor_deferred(const std::optional<Transform>& transform,
 							   std::string_view relative_to, F&& configure) {
 	unreal::note_origin<T>();
 	auto name = detail::spawn(T::kPath, true, transform, relative_to);

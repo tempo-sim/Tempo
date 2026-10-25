@@ -22,51 +22,61 @@ _V = TypeVar("_V")
 _T = TypeVar("_T")
 _C = TypeVar("_C", covariant=True)
 
-class UnrealVector:
+class FVector:
     X: float
     Y: float
     Z: float
     def __init__(self, X: float = ..., Y: float = ..., Z: float = ...) -> None: ...
 
-class UnrealVector2D:
+class FVector2D:
     X: float
     Y: float
     def __init__(self, X: float = ..., Y: float = ...) -> None: ...
 
-class UnrealIntVector:
+class FIntVector:
     X: int
     Y: int
     Z: int
     def __init__(self, X: int = ..., Y: int = ..., Z: int = ...) -> None: ...
 
-class UnrealIntPoint:
+class FIntPoint:
     X: int
     Y: int
     def __init__(self, X: int = ..., Y: int = ...) -> None: ...
 
-class UnrealRotator:
-    Roll: float
+class FRotator:
     Pitch: float
     Yaw: float
-    def __init__(self, Roll: float = ..., Pitch: float = ..., Yaw: float = ...) -> None: ...
+    Roll: float
+    def __init__(self, Pitch: float = ..., Yaw: float = ..., Roll: float = ...) -> None: ...
 
-class UnrealQuat:
+class FQuat:
     X: float
     Y: float
     Z: float
     W: float
     def __init__(self, X: float = ..., Y: float = ..., Z: float = ..., W: float = ...) -> None: ...
 
-class UnrealTransform:
-    Location: UnrealVector
-    Rotation: UnrealRotator
-    def __init__(self, Location: UnrealVector = ..., Rotation: UnrealRotator = ...) -> None: ...
+class FTransform:
+    Rotation: FQuat
+    Translation: FVector
+    Scale3D: FVector
+    def __init__(self, Rotation: FQuat = ..., Translation: FVector = ...,
+                 Scale3D: FVector = ...) -> None: ...
 
-class UnrealColor:
+class FColor:
     R: int
     G: int
     B: int
-    def __init__(self, R: int = ..., G: int = ..., B: int = ...) -> None: ...
+    A: int
+    def __init__(self, R: int = ..., G: int = ..., B: int = ..., A: int = ...) -> None: ...
+
+class FLinearColor:
+    R: float
+    G: float
+    B: float
+    A: float
+    def __init__(self, R: float = ..., G: float = ..., B: float = ..., A: float = ...) -> None: ...
 
 class AssetRef(Generic[_C]):
     """A cooked asset, by path, typed by its class.

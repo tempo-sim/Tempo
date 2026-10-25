@@ -9,9 +9,10 @@
 // tagging, so converting them would be guesswork; the typed API therefore does not convert at all
 // and says so here rather than per property.
 //
-// Which is why every value type here is named Unreal...: UnrealVector is centimeters and
-// left-handed, as Unreal stores it, and TempoCore::Vector is meters and right-handed, as every other
-// Tempo RPC speaks. They are not interchangeable. tempo/conversion.h converts between the two.
+// Which is why the value types here are Unreal's own, named and shaped as Unreal's are -- FVector,
+// FRotator in pitch-yaw-roll order, FTransform with its quaternion and scale -- and not the
+// TempoCore messages every other Tempo RPC speaks, which are meters, radians and right-handed.
+// TempoCore::Vector is not an FVector. tempo/conversion.h converts between the two.
 //
 // Like the rest of the C++ client this never throws: every call that can fail returns a Result.
 
@@ -42,63 +43,79 @@ namespace tempo::unreal {
 
 // -- value types --------------------------------------------------------------------------------
 
-/// A location or direction in centimeters, left-handed.
-struct UnrealVector {
+/// Unreal's FVector: a location or direction in centimeters, left-handed.
+struct FVector {
 	double x = 0.0;
 	double y = 0.0;
 	double z = 0.0;
-	bool operator==(const UnrealVector&) const = default;
+	bool operator==(const FVector&) const = default;
 };
 
-struct UnrealVector2D {
+/// Unreal's FVector2D.
+struct FVector2D {
 	double x = 0.0;
 	double y = 0.0;
-	bool operator==(const UnrealVector2D&) const = default;
+	bool operator==(const FVector2D&) const = default;
 };
 
-struct UnrealIntVector {
+/// Unreal's FIntVector.
+struct FIntVector {
 	std::int32_t x = 0;
 	std::int32_t y = 0;
 	std::int32_t z = 0;
-	bool operator==(const UnrealIntVector&) const = default;
+	bool operator==(const FIntVector&) const = default;
 };
 
-struct UnrealIntPoint {
+/// Unreal's FIntPoint.
+struct FIntPoint {
 	std::int32_t x = 0;
 	std::int32_t y = 0;
-	bool operator==(const UnrealIntPoint&) const = default;
+	bool operator==(const FIntPoint&) const = default;
 };
 
-/// An orientation in degrees, left-handed.
-struct UnrealRotator {
-	double roll = 0.0;
+/// Unreal's FRotator: an orientation in degrees, left-handed, in Unreal's own order -- pitch, yaw,
+/// roll -- so FRotator{10, 20, 30} means what it does in Unreal.
+struct FRotator {
 	double pitch = 0.0;
 	double yaw = 0.0;
-	bool operator==(const UnrealRotator&) const = default;
+	double roll = 0.0;
+	bool operator==(const FRotator&) const = default;
 };
 
-/// A rotation, left-handed.
-struct UnrealQuat {
+/// Unreal's FQuat: a rotation, left-handed.
+struct FQuat {
 	double x = 0.0;
 	double y = 0.0;
 	double z = 0.0;
 	double w = 1.0;
-	bool operator==(const UnrealQuat&) const = default;
+	bool operator==(const FQuat&) const = default;
 };
 
-/// A pose: centimeters and degrees, left-handed.
-struct UnrealTransform {
-	UnrealVector location;
-	UnrealRotator rotation;
-	bool operator==(const UnrealTransform&) const = default;
+/// Unreal's FTransform: a rotation as a quaternion, a translation in centimeters and a 3D scale,
+/// left-handed, in Unreal's own order. The default is the identity, scale 1.
+struct FTransform {
+	FQuat rotation;
+	FVector translation;
+	FVector scale3d{1.0, 1.0, 1.0};
+	bool operator==(const FTransform&) const = default;
 };
 
-/// 8-bit RGB.
-struct UnrealColor {
+/// Unreal's FColor: 8-bit RGBA, sRGB. The default is opaque black.
+struct FColor {
 	std::uint8_t r = 0;
 	std::uint8_t g = 0;
 	std::uint8_t b = 0;
-	bool operator==(const UnrealColor&) const = default;
+	std::uint8_t a = 255;
+	bool operator==(const FColor&) const = default;
+};
+
+/// Unreal's FLinearColor: floating-point RGBA, linear. The default is opaque black.
+struct FLinearColor {
+	float r = 0.0f;
+	float g = 0.0f;
+	float b = 0.0f;
+	float a = 1.0f;
+	bool operator==(const FLinearColor&) const = default;
 };
 
 // -- the hierarchy a generated library carries ---------------------------------------------------
@@ -418,14 +435,15 @@ struct ValueTraits<double> {
 		static TempoWorld::Value to(const Type& v);              \
 	};
 
-TEMPO_DECLARE_VALUE(UnrealVector)
-TEMPO_DECLARE_VALUE(UnrealVector2D)
-TEMPO_DECLARE_VALUE(UnrealIntVector)
-TEMPO_DECLARE_VALUE(UnrealIntPoint)
-TEMPO_DECLARE_VALUE(UnrealRotator)
-TEMPO_DECLARE_VALUE(UnrealQuat)
-TEMPO_DECLARE_VALUE(UnrealTransform)
-TEMPO_DECLARE_VALUE(UnrealColor)
+TEMPO_DECLARE_VALUE(FVector)
+TEMPO_DECLARE_VALUE(FVector2D)
+TEMPO_DECLARE_VALUE(FIntVector)
+TEMPO_DECLARE_VALUE(FIntPoint)
+TEMPO_DECLARE_VALUE(FRotator)
+TEMPO_DECLARE_VALUE(FQuat)
+TEMPO_DECLARE_VALUE(FTransform)
+TEMPO_DECLARE_VALUE(FColor)
+TEMPO_DECLARE_VALUE(FLinearColor)
 TEMPO_DECLARE_VALUE(ClassRef)
 TEMPO_DECLARE_VALUE(std::vector<bool>)
 TEMPO_DECLARE_VALUE(std::vector<std::int32_t>)

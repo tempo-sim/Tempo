@@ -7,7 +7,6 @@
 #include <grpcpp/client_context.h>
 
 #include "tempo/context.h"
-#include "tempo/conversion.h"
 
 #include "TempoWorld/WorldControl.grpc.pb.h"
 
@@ -121,15 +120,13 @@ Result<void> resolve_subsystem(std::string_view class_path) {
 }
 
 Result<std::string> spawn(std::string_view class_path, bool deferred,
-                          const std::optional<unreal::UnrealTransform>& transform, std::string_view relative_to) {
+                          const std::optional<Transform>& transform, std::string_view relative_to) {
     auto client = stub();
     if (!client) return std::move(client).error();
     TempoWorld::SpawnActorRequest request;
     request.set_actor_type(std::string(class_path));
     request.set_deferred(deferred);
-    // SpawnActor converts: it reads meters, radians and right-handed, unlike the typed property API,
-    // which is Unreal-native throughout. So a native-unit transform is converted on the way in.
-    *request.mutable_transform() = conversion::unreal_to_si(transform.value_or(unreal::UnrealTransform{}));
+    *request.mutable_transform() = transform.value_or(Transform{});
     request.set_relative_to_actor(std::string(relative_to));
     TempoWorld::SpawnActorResponse response;
     grpc::ClientContext context;

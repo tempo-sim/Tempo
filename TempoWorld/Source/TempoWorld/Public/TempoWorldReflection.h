@@ -41,7 +41,7 @@ namespace TempoWorldReflection
 		Enum,       // FEnumProperty, or an FByteProperty carrying a UEnum
 
 		// Structs with a first-class representation.
-		Vector, Vector2D, IntVector, IntPoint, Rotator, Quat, Transform, Color,
+		Vector, Vector2D, IntVector, IntPoint, Rotator, Quat, Transform, Color, LinearColor,
 
 		// Object references, by what they point at.
 		Class, Asset, Actor, Component,

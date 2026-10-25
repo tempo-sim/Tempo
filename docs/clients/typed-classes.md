@@ -39,8 +39,9 @@ before anything runs.
 Five things about the typed classes catch people out. Each has a section below.
 
 1. **They speak Unreal's units, not Tempo's.** Centimetres, degrees and a left-handed frame, unlike
-   every other Tempo RPC. Their value types are named `UnrealVector`, `UnrealRotator` and so on to
-   make that visible, and `tempo_sim.conversion` converts to and from SI. See [Units](#units).
+   every other Tempo RPC. Their value types are Unreal's own — `FVector`, `FRotator`,
+   `FTransform` — shaped as Unreal's are, and `tempo_sim.conversion` converts to and from SI. See
+   [Units](#units).
 2. **They describe the latest supported engine.** The types shipped in `tempo-sim` are generated
    from the newest engine version Tempo supports, and only a project's own types are exact for its
    build. See [Latest engine only](#latest-engine-only).
@@ -72,7 +73,7 @@ project defines no services. Importing it is what registers the classes with the
 
 | | `tempo-sim` (`tempo_sim`, `tempo_sim::`) | Your project's package (`tempo_sample`, `tempo_sample::`) |
 |---|---|---|
-| **Runtime** | `unreal` (the handle classes, the `Unreal…` value types, `AssetRef`), `world` (`get_actors`, `spawn_actor`, `get_subsystem`, `batch`, `check_schema`), `conversion` | none; it uses tempo-sim's |
+| **Runtime** | `unreal` (the handle classes, Unreal's value types, `AssetRef`), `world` (`get_actors`, `spawn_actor`, `get_subsystem`, `batch`, `check_schema`; SI, as `tempo_world` is), `conversion` | none; it uses tempo-sim's |
 | **Types** | `reflected`: the *published* types, for the modules every build has, which are the engine's always-loaded modules and Tempo's plugins | `reflected`: every class in *this* build, including its C++ modules, its Blueprints, the plugins it enables and every engine module it loads |
 | **Asset catalog** | none, since what is cooked depends on the project | `reflected.assets`, everything this build cooked |
 | **Generated from** | the newest engine Tempo supports | this project's packaged build |
@@ -239,60 +240,99 @@ tagging, so converting them would be guesswork, and the typed API therefore does
 
 That covers everything that goes through a typed class: property reads and writes, function
 arguments and results, struct members, `watch`, batches and snapshots. A `MaxDistance` of `20000.0`
-is 200 metres, and a `RelativeRotation` yaw of `90.0` is a quarter turn to the right. The one entry
-point that accepts a value and converts it for you is `spawn_actor`, which takes an
-`UnrealTransform` like the rest and converts it for the `SpawnActor` RPC underneath.
+is 200 metres, and a `RelativeRotation` yaw of `90.0` is a quarter turn to the right. `world`, on
+the other hand, mirrors `tempo_world` and speaks SI like it: `spawn_actor` takes a `Transform` in
+metres and radians, as `tempo_world.spawn_actor` does.
 
-That is why every value type the typed classes use is named `Unreal…` — `UnrealVector`,
-`UnrealRotator`, `UnrealTransform` and the rest, in `tempo_sim.unreal` and `tempo_sim::unreal`.
-`UnrealVector` is centimetres and left-handed; `TempoCore.Geometry_pb2.Vector`
-(`tempo_sim::proto::tempo_core::Vector`), which every other RPC uses, is metres and right-handed.
-They are not interchangeable.
+#### Unreal's own types
 
-To move a value between the two, convert it explicitly. `unreal_to_si` and `si_to_unreal` are
-overloaded on what they are given, and a type checker knows what each returns:
+The values the typed classes carry are Unreal's own, named and shaped as Unreal's are, in
+`tempo_sim.unreal`, `tempo_sim::unreal` and `tempo::unreal`:
+
+| Type | Shape | |
+|---|---|---|
+| `FVector`, `FVector2D` | `X`, `Y`(, `Z`) | centimetres |
+| `FIntVector`, `FIntPoint` | `X`, `Y`(, `Z`) | |
+| `FRotator` | `Pitch`, `Yaw`, `Roll` | degrees, constructed in that order, as Unreal's is |
+| `FQuat` | `X`, `Y`, `Z`, `W` | |
+| `FTransform` | `Rotation` (an `FQuat`), `Translation`, `Scale3D` | scale 1 by default |
+| `FColor` | `R`, `G`, `B`, `A` | 8-bit sRGB, opaque by default |
+| `FLinearColor` | `R`, `G`, `B`, `A` | floating-point, linear, opaque by default |
+
+Member names follow each language's convention, as everywhere in the typed classes: `Pitch` in
+Python, `pitch` in Rust and C++. So `FRotator(10, 20, 30)` means what it does in Unreal — pitch 10,
+yaw 20, roll 30 — and an `FTransform` carries its scale, which a write keeps rather than resetting
+to 1.
+
+They are not the TempoCore messages every other RPC uses: `FVector` is centimetres and left-handed,
+and `TempoCore.Geometry_pb2.Vector` (`tempo_sim::proto::tempo_core::Vector`) is metres and
+right-handed. To move a value between the two, convert it explicitly.
+
+#### Converting
+
+`ue_to_si` and `si_to_ue` are overloaded on what they are given, and a type checker knows what each
+returns:
 
 === "Python"
 
     ```python
-    from tempo_sim import tempo_world as tw
-    from tempo_sim.conversion import si_to_unreal, unreal_to_si
+    from tempo_sim import tempo_world, world
+    from tempo_sim.conversion import si_to_ue, ue_to_si
 
-    location = sweeper.K2_GetActorLocation()           # UnrealVector, centimetres
-    tw.set_actor_location(actor="Marker", location=unreal_to_si(location))   # Vector, metres
+    location = sweeper.K2_GetActorLocation()              # FVector, centimetres
+    truck = world.spawn_actor(BP_Cat745_C, transform=world.Transform(location=ue_to_si(location)))
 
-    state = tw.get_current_actor_state(actor="Marker")
-    pose = si_to_unreal(state.transform)               # UnrealTransform
+    pose = si_to_ue(tempo_world.get_current_actor_state(actor="Marker").transform)   # FTransform
+    reach = ue_to_si(sweeper.Body.BoundsRadius)           # a float: centimetres to metres
     ```
 
 === "Rust"
 
     ```rust
-    use tempo_sim::conversion::{si_to_unreal, unreal_to_si};
+    use tempo_sim::conversion::{si_to_ue, ue_to_si};
 
-    let location = sweeper.k2_get_actor_location()?;   // UnrealVector, centimetres
-    let metres = unreal_to_si(&location);              // proto::tempo_core::Vector, metres
+    let location = sweeper.k2_get_actor_location()?;     // FVector, centimetres
+    let metres = ue_to_si(&location);                    // world::Vector, metres
 
     let state = tempo_sim::tempo_world::get_current_actor_state("Marker".into(), false)?;
-    let pose = si_to_unreal(&state.transform.unwrap_or_default());   // UnrealTransform
+    let pose = si_to_ue(&state.transform.unwrap_or_default());   // FTransform
+    ```
+
+=== "C++"
+
+    ```cpp
+    #include <tempo/conversion.h>
+
+    auto location = sweeper.k2_get_actor_location();               // Result<FVector>, centimetres
+    tempo::world::Vector metres = tempo::conversion::ue_to_si(location.value());
+
+    auto state = tempo::tempo_world::get_current_actor_state("Marker", false);
+    tempo::unreal::FTransform pose = tempo::conversion::si_to_ue(state.value().transform());
     ```
 
 | Unreal | TempoCore | Rule |
 |---|---|---|
-| `UnrealVector` | `Vector` | a length: cm ↔ m, Y negated |
-| `UnrealVector2D` | `Vector2D` | likewise |
-| `UnrealRotator` | `Rotation` | degrees ↔ radians, pitch and yaw negated, roll kept |
-| `UnrealTransform` | `Transform` | its location and rotation, each as above |
+| a number | a number | a length: cm ↔ m |
+| `FVector` | `Vector` | a length: cm ↔ m, Y negated |
+| `FVector2D` | `Vector2D` | likewise |
+| `FRotator` | `Rotation` | degrees ↔ radians, pitch and yaw negated, roll kept |
+| `FQuat` | `Rotation` | one way: as the `FRotator` Unreal's `FQuat::Rotator()` makes of it |
+| `FTransform` | `Transform` | its translation and rotation, each as above |
 
-These are the server's own rules ([Conventions](../concepts/conventions.md)).
+These are the server's own rules ([Conventions](../concepts/conventions.md)), and the rotation math
+is Unreal's own: `rotator_of` and `quat_of` reproduce `FQuat::Rotator()` and
+`FRotator::Quaternion()` formula for formula, singularities included.
 
-!!! warning "A direction is not a length"
+!!! warning "What does not survive a conversion"
 
-    The type alone cannot say whether a vector is a location or a direction, so `unreal_to_si`
-    takes it to be a length and scales it — right for a location or a velocity, wrong for a normal
-    or a unit axis. For those use `unreal_direction_to_si` and `si_direction_to_unreal`, which
-    change the handedness and nothing else. `UnrealQuat`, `UnrealIntVector`, `UnrealIntPoint` and
-    `UnrealColor` have no TempoCore counterpart and are not converted.
+    - **A direction is not a length.** A number or a vector is taken to be a length and scaled —
+      right for a location or a velocity, wrong for a normal or a unit axis. For those use
+      `ue_direction_to_si` and `si_direction_to_ue`, which change the handedness and nothing else.
+      An angle on its own is not converted at all.
+    - **A transform's scale.** `TempoCore.Transform` has none — Tempo's RPCs carry a scale beside a
+      transform, never in one — so `ue_to_si` drops an `FTransform`'s, and `si_to_ue` makes one of
+      scale 1.
+    - **Integer vectors and colors** have no TempoCore counterpart and are not converted.
 
 ### One call instead of twenty
 
@@ -364,6 +404,7 @@ asset the package has and the sim does not.
 ## Spawning
 
 ```python
+t = world.Transform(location=world.Vector(z=5.0))        # SI, as tempo_world takes it: 5 m up
 truck = world.spawn_actor(BP_Cat745_C, transform=t)       # -> BP_Cat745_C
 
 with world.spawn_actor_deferred(BP_Cat745_C, transform=t) as truck:

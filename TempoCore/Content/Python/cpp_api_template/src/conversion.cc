@@ -2,6 +2,7 @@
 
 #include "tempo/conversion.h"
 
+#include <cmath>
 #include <numbers>
 
 namespace tempo::conversion {
@@ -14,9 +15,48 @@ double radians(double degrees) { return degrees * std::numbers::pi / 180.0; }
 
 double degrees(double radians) { return radians * 180.0 / std::numbers::pi; }
 
+/// FRotator::NormalizeAxis: an angle in (-180, 180].
+double normalize_axis(double angle) {
+    angle = std::fmod(angle, 360.0);
+    if (angle < 0.0) angle += 360.0;
+    return angle > 180.0 ? angle - 360.0 : angle;
+}
+
 }  // namespace
 
-TempoCore::Vector unreal_to_si(const unreal::UnrealVector& value) {
+unreal::FRotator rotator_of(const unreal::FQuat& quat) {
+    const double x = quat.x, y = quat.y, z = quat.z, w = quat.w;
+    const double singularity = z * x - w * y;
+    const double yaw_y = 2.0 * (w * z + x * y);
+    const double yaw_x = 1.0 - 2.0 * (y * y + z * z);
+    constexpr double kThreshold = 0.4999995;
+    if (singularity < -kThreshold) {
+        return unreal::FRotator{-90.0, normalize_axis(-2.0 * degrees(std::atan2(x, w))), 0.0};
+    }
+    if (singularity > kThreshold) {
+        return unreal::FRotator{90.0, normalize_axis(2.0 * degrees(std::atan2(x, w))), 0.0};
+    }
+    return unreal::FRotator{degrees(std::asin(2.0 * singularity)), degrees(std::atan2(yaw_y, yaw_x)),
+                            degrees(std::atan2(-2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y)))};
+}
+
+unreal::FQuat quat_of(const unreal::FRotator& rotator) {
+    auto half = [](double angle) {
+        const double half_angle = std::fmod(angle, 360.0) * std::numbers::pi / 180.0 / 2.0;
+        return std::pair{std::sin(half_angle), std::cos(half_angle)};
+    };
+    const auto [sp, cp] = half(rotator.pitch);
+    const auto [sy, cy] = half(rotator.yaw);
+    const auto [sr, cr] = half(rotator.roll);
+    return unreal::FQuat{cr * sp * sy - sr * cp * cy, -cr * sp * cy - sr * cp * sy,
+                         cr * cp * sy - sr * sp * cy, cr * cp * cy + sr * sp * sy};
+}
+
+double ue_to_si(double centimeters) { return centimeters / kCmPerM; }
+
+double si_to_ue(double meters) { return meters * kCmPerM; }
+
+TempoCore::Vector ue_to_si(const unreal::FVector& value) {
     TempoCore::Vector out;
     out.set_x(value.x / kCmPerM);
     out.set_y(-value.y / kCmPerM);
@@ -24,14 +64,14 @@ TempoCore::Vector unreal_to_si(const unreal::UnrealVector& value) {
     return out;
 }
 
-TempoCore::Vector2D unreal_to_si(const unreal::UnrealVector2D& value) {
+TempoCore::Vector2D ue_to_si(const unreal::FVector2D& value) {
     TempoCore::Vector2D out;
     out.set_x(value.x / kCmPerM);
     out.set_y(-value.y / kCmPerM);
     return out;
 }
 
-TempoCore::Rotation unreal_to_si(const unreal::UnrealRotator& value) {
+TempoCore::Rotation ue_to_si(const unreal::FRotator& value) {
     TempoCore::Rotation out;
     out.set_r(radians(value.roll));
     out.set_p(-radians(value.pitch));
@@ -39,31 +79,37 @@ TempoCore::Rotation unreal_to_si(const unreal::UnrealRotator& value) {
     return out;
 }
 
-TempoCore::Transform unreal_to_si(const unreal::UnrealTransform& value) {
+TempoCore::Rotation ue_to_si(const unreal::FQuat& value) { return ue_to_si(rotator_of(value)); }
+
+TempoCore::Transform ue_to_si(const unreal::FTransform& value) {
+    // TempoCore::Transform has no scale; see the top of conversion.h.
     TempoCore::Transform out;
-    *out.mutable_location() = unreal_to_si(value.location);
-    *out.mutable_rotation() = unreal_to_si(value.rotation);
+    *out.mutable_location() = ue_to_si(value.translation);
+    *out.mutable_rotation() = ue_to_si(value.rotation);
     return out;
 }
 
-unreal::UnrealVector si_to_unreal(const TempoCore::Vector& value) {
-    return unreal::UnrealVector{value.x() * kCmPerM, -value.y() * kCmPerM, value.z() * kCmPerM};
+unreal::FVector si_to_ue(const TempoCore::Vector& value) {
+    return unreal::FVector{value.x() * kCmPerM, -value.y() * kCmPerM, value.z() * kCmPerM};
 }
 
-unreal::UnrealVector2D si_to_unreal(const TempoCore::Vector2D& value) {
-    return unreal::UnrealVector2D{value.x() * kCmPerM, -value.y() * kCmPerM};
+unreal::FVector2D si_to_ue(const TempoCore::Vector2D& value) {
+    return unreal::FVector2D{value.x() * kCmPerM, -value.y() * kCmPerM};
 }
 
-unreal::UnrealRotator si_to_unreal(const TempoCore::Rotation& value) {
-    return unreal::UnrealRotator{degrees(value.r()), -degrees(value.p()), -degrees(value.y())};
+unreal::FRotator si_to_ue(const TempoCore::Rotation& value) {
+    return unreal::FRotator{-degrees(value.p()), -degrees(value.y()), degrees(value.r())};
 }
 
-unreal::UnrealTransform si_to_unreal(const TempoCore::Transform& value) {
-    // An unset submessage reads as its defaults, which are the zero the wire means.
-    return unreal::UnrealTransform{si_to_unreal(value.location()), si_to_unreal(value.rotation())};
+unreal::FTransform si_to_ue(const TempoCore::Transform& value) {
+    // An unset submessage reads as its defaults, which are the zero the wire means; the scale is 1.
+    unreal::FTransform out;
+    out.rotation = quat_of(si_to_ue(value.rotation()));
+    out.translation = si_to_ue(value.location());
+    return out;
 }
 
-TempoCore::Vector unreal_direction_to_si(const unreal::UnrealVector& value) {
+TempoCore::Vector ue_direction_to_si(const unreal::FVector& value) {
     TempoCore::Vector out;
     out.set_x(value.x);
     out.set_y(-value.y);
@@ -71,8 +117,8 @@ TempoCore::Vector unreal_direction_to_si(const unreal::UnrealVector& value) {
     return out;
 }
 
-unreal::UnrealVector si_direction_to_unreal(const TempoCore::Vector& value) {
-    return unreal::UnrealVector{value.x(), -value.y(), value.z()};
+unreal::FVector si_direction_to_ue(const TempoCore::Vector& value) {
+    return unreal::FVector{value.x(), -value.y(), value.z()};
 }
 
 }  // namespace tempo::conversion

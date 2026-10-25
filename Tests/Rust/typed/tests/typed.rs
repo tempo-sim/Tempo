@@ -15,7 +15,8 @@ use std::time::{Duration, Instant};
 use project::reflected::classes::engine::{Actor, StaticMeshActor};
 use project::reflected::enums::EWalkableSlopeBehavior;
 use project::reflected::structs::FWalkableSlopeOverride;
-use tempo_sim::unreal::{Class, UnrealVector};
+use tempo_sim::conversion::{quat_of, rotator_of};
+use tempo_sim::unreal::{Class, FRotator, FTransform, FVector};
 use tempo_sim::world;
 
 /// Point the client at the sim and block until its gRPC server answers.
@@ -165,7 +166,7 @@ fn a_component_is_reachable_through_its_owner() {
 
     // Typed as StaticMeshComponent, so this is its own property and not the actor's.
     let component = actor.actor().static_mesh_component0();
-    let _: UnrealVector = component.relative_location().expect("read RelativeLocation");
+    let _: FVector = component.relative_location().expect("read RelativeLocation");
 }
 
 #[test]
@@ -253,10 +254,38 @@ fn an_out_struct_comes_back_with_the_return_value() {
     // returned only its bool. It is now a value, read back by name.
     let (moved, hit) = actor
         .actor()
-        .k2_set_actor_location(UnrealVector { x: 100.0, y: 0.0, z: 0.0 }, false, true)
+        .k2_set_actor_location(FVector { x: 100.0, y: 0.0, z: 0.0 }, false, true)
         .expect("K2_SetActorLocation");
     assert!(moved);
     assert_eq!(hit.b_blocking_hit, Some(false), "nothing to hit with the sweep off");
+}
+
+#[test]
+fn a_transform_travels_in_unreals_shape() {
+    connect();
+    let actor = spawn();
+    make_movable(&actor);
+
+    // An FTransform argument and result keep their quaternion and scale. A typed write used to
+    // reset the scale to 1, and a read to drop it.
+    let wanted = FTransform {
+        rotation: quat_of(&FRotator { pitch: 0.0, yaw: 90.0, roll: 0.0 }),
+        translation: FVector { x: 100.0, y: 0.0, z: 50.0 },
+        scale3d: FVector { x: 2.0, y: 3.0, z: 4.0 },
+    };
+    let (moved, _) = actor
+        .actor()
+        .k2_set_actor_transform(wanted, false, true)
+        .expect("K2_SetActorTransform");
+    assert!(moved);
+    let got = actor.actor().get_transform().expect("GetTransform");
+    let close = |a: f64, b: f64| (a - b).abs() < 1e-3;
+    assert!(
+        close(got.scale3d.x, 2.0) && close(got.scale3d.y, 3.0) && close(got.scale3d.z, 4.0),
+        "the scale survives the round trip: {got:?}"
+    );
+    assert!(close(got.translation.x, 100.0) && close(got.translation.z, 50.0), "{got:?}");
+    assert!(close(rotator_of(&got.rotation).yaw, 90.0), "{got:?}");
 }
 
 #[test]

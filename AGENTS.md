@@ -282,10 +282,14 @@ committed; fetched.
 - **Units in the typed class API**: the one place in Tempo that is **Unreal-native** — centimetres,
   degrees, left-handed. Raw `UPROPERTY` values carry no semantic tagging, so converting them is
   guesswork. That is what `native_units` on `GetProperty`/`SetProperty`/`CallFunction` selects, and
-  why the runtime's value types are named `UnrealVector`, `UnrealRotator`, `UnrealTransform` and so
-  on — never plain `Vector`, which is `TempoCore.Geometry_pb2.Vector`, metres and right-handed.
-  `tempo_sim.conversion` / `tempo_sim::conversion` convert between the two (`unreal_to_si`,
-  `si_to_unreal`, overloaded on the type) with the server's own `TempoConversion.h` rules; a vector
+  why the runtime's value types are Unreal's own, named and shaped as Unreal's are (`FVector`,
+  `FRotator` in pitch-yaw-roll order, `FTransform` with its quaternion and scale, `FColor` with
+  alpha, `FLinearColor` in float) — never `Vector`, which is `TempoCore.Geometry_pb2.Vector`, metres
+  and right-handed. Under `native_units` a transform travels as `native_transform_value` and an
+  `FLinearColor` as `linear_color_value`, since `TempoCore.Transform` has no scale; `world` mirrors
+  `tempo_world` and speaks SI, re-exporting its types.
+  `tempo_sim.conversion` / `tempo_sim::conversion` convert between the two (`ue_to_si`,
+  `si_to_ue`, overloaded on the type) with the server's own `TempoConversion.h` rules; a vector
   is taken to be a length, and a direction has its own handedness-only pair. Don't re-derive the
   rule anywhere else in the clients.
 - **Blueprint exposure is how a Tempo class declares its public scenario API.** The typed class

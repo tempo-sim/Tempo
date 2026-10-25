@@ -18,9 +18,15 @@
 from contextlib import contextmanager
 from typing import Any, Iterator, List, Optional, TypeVar, overload
 
-from .conversion import unreal_to_si
-from .unreal import (Batch, DynamicObject, Object, UnrealRotator, UnrealTransform, UnrealVector,
-                     registered_classes)
+# The SI types, re-exported (the `as` is what marks a re-export to a type checker): this module
+# mirrors tempo_world, and takes and returns what it does -- meters, radians and right-handed --
+# with handles where tempo_world takes names. The generated classes are what speak Unreal's own
+# units and types; tempo_sim.conversion moves between the two.
+from .TempoCore.Geometry_pb2 import Rotation as Rotation
+from .TempoCore.Geometry_pb2 import Transform as Transform
+from .TempoCore.Geometry_pb2 import Vector as Vector
+from .TempoCore.Geometry_pb2 import Vector2D as Vector2D
+from .unreal import Batch, DynamicObject, Object, registered_classes
 
 T = TypeVar("T", bound=Object)
 
@@ -28,16 +34,6 @@ T = TypeVar("T", bound=Object)
 def _world():
     from tempo_sim import tempo_world
     return tempo_world
-
-
-def _spawn_transform(transform: Optional[UnrealTransform]):
-    """An UnrealTransform as the message SpawnActor takes.
-
-    SpawnActor converts: it reads meters, radians and right-handed, unlike the typed property API,
-    which is Unreal-native throughout. So a native-unit transform has to be converted on the way in,
-    rather than passed through.
-    """
-    return unreal_to_si(transform or UnrealTransform())
 
 
 def get_actors(cls: type[T]) -> List[T]:
@@ -121,7 +117,7 @@ def get_subsystem(cls: type[T]) -> T:
     return cls(subsystem=cls.__tempo_class__, class_path=cls.__tempo_class__)
 
 
-def spawn_actor(cls: type[T], transform: Optional[UnrealTransform] = None,
+def spawn_actor(cls: type[T], transform: Optional[Transform] = None,
                 relative_to: str = "") -> T:
     """Spawn one actor of a class and return a handle to it.
 
@@ -129,12 +125,12 @@ def spawn_actor(cls: type[T], transform: Optional[UnrealTransform] = None,
     """
     response = _world().spawn_actor(actor_type=cls.__tempo_class__, deferred=False,
                                     relative_to_actor=relative_to,
-                                    transform=_spawn_transform(transform))
+                                    transform=transform or Transform())
     return cls(response.name)
 
 
 @contextmanager
-def spawn_actor_deferred(cls: type[T], transform: Optional[UnrealTransform] = None,
+def spawn_actor_deferred(cls: type[T], transform: Optional[Transform] = None,
                          relative_to: str = "") -> Iterator[T]:
     """Spawn an actor, configure it, and only then let it begin.
 
@@ -147,7 +143,7 @@ def spawn_actor_deferred(cls: type[T], transform: Optional[UnrealTransform] = No
     """
     response = _world().spawn_actor(actor_type=cls.__tempo_class__, deferred=True,
                                     relative_to_actor=relative_to,
-                                    transform=_spawn_transform(transform))
+                                    transform=transform or Transform())
     handle = cls(response.name)
     try:
         yield handle

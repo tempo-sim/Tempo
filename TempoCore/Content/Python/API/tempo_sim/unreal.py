@@ -8,10 +8,11 @@
 # so converting them would be guesswork; the typed API therefore does not convert at all and says so
 # here rather than per property.
 #
-# Which is why every value type here is named `Unreal...`: `UnrealVector` is centimeters and
-# left-handed, as Unreal stores it, and `tempo_sim.TempoCore.Geometry_pb2.Vector` is meters and
-# right-handed, as every other Tempo RPC speaks. They are not interchangeable, and a shared name
-# made them easy to mistake for one another. `tempo_sim.conversion` converts between the two.
+# Which is why the value types here are Unreal's own, named and shaped as Unreal's are -- FVector,
+# FRotator constructed (Pitch, Yaw, Roll), FTransform with its quaternion and scale -- and not the
+# TempoCore messages every other Tempo RPC speaks, which are meters, radians and right-handed.
+# `tempo_sim.TempoCore.Geometry_pb2.Vector` is not an FVector. `tempo_sim.conversion` converts
+# between the two.
 #
 # Note on `Object`: it declares no `__getattr__`. That is deliberate and load-bearing. A catch-all
 # visible to a type checker makes *every* attribute legal on *every* generated subclass, which would
@@ -30,43 +31,47 @@ from dataclasses import dataclass, field
 
 
 @dataclass
-class UnrealVector:
-    """A location or direction in centimeters, left-handed."""
+class FVector:
+    """Unreal's FVector: a location or direction in centimeters, left-handed."""
     X: float = 0.0
     Y: float = 0.0
     Z: float = 0.0
 
 
 @dataclass
-class UnrealVector2D:
+class FVector2D:
+    """Unreal's FVector2D."""
     X: float = 0.0
     Y: float = 0.0
 
 
 @dataclass
-class UnrealIntVector:
+class FIntVector:
+    """Unreal's FIntVector."""
     X: int = 0
     Y: int = 0
     Z: int = 0
 
 
 @dataclass
-class UnrealIntPoint:
+class FIntPoint:
+    """Unreal's FIntPoint."""
     X: int = 0
     Y: int = 0
 
 
 @dataclass
-class UnrealRotator:
-    """An orientation in degrees, left-handed."""
-    Roll: float = 0.0
+class FRotator:
+    """Unreal's FRotator: an orientation in degrees, left-handed, constructed (Pitch, Yaw, Roll) as
+    Unreal's is."""
     Pitch: float = 0.0
     Yaw: float = 0.0
+    Roll: float = 0.0
 
 
 @dataclass
-class UnrealQuat:
-    """A rotation, left-handed."""
+class FQuat:
+    """Unreal's FQuat: a rotation, left-handed."""
     X: float = 0.0
     Y: float = 0.0
     Z: float = 0.0
@@ -74,18 +79,30 @@ class UnrealQuat:
 
 
 @dataclass
-class UnrealTransform:
-    """A pose: centimeters and degrees, left-handed."""
-    Location: UnrealVector = field(default_factory=UnrealVector)
-    Rotation: UnrealRotator = field(default_factory=UnrealRotator)
+class FTransform:
+    """Unreal's FTransform: a rotation as a quaternion, a translation in centimeters and a 3D scale,
+    left-handed, constructed (Rotation, Translation, Scale3D) as Unreal's is."""
+    Rotation: FQuat = field(default_factory=FQuat)
+    Translation: FVector = field(default_factory=FVector)
+    Scale3D: FVector = field(default_factory=lambda: FVector(1.0, 1.0, 1.0))
 
 
 @dataclass
-class UnrealColor:
-    """8-bit RGB."""
+class FColor:
+    """Unreal's FColor: 8-bit RGBA, sRGB. Opaque unless told otherwise."""
     R: int = 0
     G: int = 0
     B: int = 0
+    A: int = 255
+
+
+@dataclass
+class FLinearColor:
+    """Unreal's FLinearColor: floating-point RGBA, linear. Opaque unless told otherwise."""
+    R: float = 0.0
+    G: float = 0.0
+    B: float = 0.0
+    A: float = 1.0
 
 
 class AssetRef:
@@ -774,18 +791,23 @@ _COMPONENT_VARIANTS = {
     "vector2d_value": ("x", "y"),
     "int_vector_value": ("x", "y", "z"),
     "int_point_value": ("x", "y"),
+    # The wire's r/p/y carry Unreal's roll, pitch and yaw, unconverted under native_units.
+    "rotator_value": ("p", "y", "r"),
     "quat_value": ("x", "y", "z", "w"),
-    "color_value": ("r", "g", "b"),
+    "color_value": ("r", "g", "b", "a"),
+    "linear_color_value": ("r", "g", "b", "a"),
 }
 
 # How a component-shaped variant maps onto one of this module's value types.
 _COMPONENT_TYPES = {
-    "vector_value": (UnrealVector, ("X", "Y", "Z")),
-    "vector2d_value": (UnrealVector2D, ("X", "Y")),
-    "int_vector_value": (UnrealIntVector, ("X", "Y", "Z")),
-    "int_point_value": (UnrealIntPoint, ("X", "Y")),
-    "quat_value": (UnrealQuat, ("X", "Y", "Z", "W")),
-    "color_value": (UnrealColor, ("R", "G", "B")),
+    "vector_value": (FVector, ("X", "Y", "Z")),
+    "vector2d_value": (FVector2D, ("X", "Y")),
+    "int_vector_value": (FIntVector, ("X", "Y", "Z")),
+    "int_point_value": (FIntPoint, ("X", "Y")),
+    "rotator_value": (FRotator, ("Pitch", "Yaw", "Roll")),
+    "quat_value": (FQuat, ("X", "Y", "Z", "W")),
+    "color_value": (FColor, ("R", "G", "B", "A")),
+    "linear_color_value": (FLinearColor, ("R", "G", "B", "A")),
 }
 
 
@@ -873,21 +895,16 @@ def _to_value(variant, value):
             setattr(target, field_name, getattr(value, attribute))
         return message
 
-    if variant == "rotator_value":
-        if not isinstance(value, UnrealRotator):
-            raise TypeError("expected UnrealRotator, got {!r}".format(value))
-        target = message.rotator_value
-        target.r, target.p, target.y = value.Roll, value.Pitch, value.Yaw
-        return message
-
-    if variant == "transform_value":
-        if not isinstance(value, UnrealTransform):
-            raise TypeError("expected UnrealTransform, got {!r}".format(value))
-        target = message.transform_value
-        target.location.x, target.location.y, target.location.z = (
-            value.Location.X, value.Location.Y, value.Location.Z)
-        target.rotation.r, target.rotation.p, target.rotation.y = (
-            value.Rotation.Roll, value.Rotation.Pitch, value.Rotation.Yaw)
+    if variant == "native_transform_value":
+        if not isinstance(value, FTransform):
+            raise TypeError("expected FTransform, got {!r}".format(value))
+        target = message.native_transform_value
+        target.rotation.x, target.rotation.y, target.rotation.z, target.rotation.w = (
+            value.Rotation.X, value.Rotation.Y, value.Rotation.Z, value.Rotation.W)
+        target.translation.x, target.translation.y, target.translation.z = (
+            value.Translation.X, value.Translation.Y, value.Translation.Z)
+        target.scale3d.x, target.scale3d.y, target.scale3d.z = (
+            value.Scale3D.X, value.Scale3D.Y, value.Scale3D.Z)
         return message
 
     if variant.endswith("_array_value") or variant.endswith("_set_value"):
@@ -927,18 +944,16 @@ def _from_value(message):
     if variant in _COMPONENT_TYPES:
         source = getattr(message, variant)
         python_type, attributes = _COMPONENT_TYPES[variant]
-        return python_type(*(getattr(source, field_name)
-                             for field_name in _COMPONENT_VARIANTS[variant]))
+        return python_type(**{attribute: getattr(source, field_name)
+                              for field_name, attribute in zip(_COMPONENT_VARIANTS[variant],
+                                                               attributes)})
 
-    if variant == "rotator_value":
-        source = message.rotator_value
-        return UnrealRotator(source.r, source.p, source.y)
-
-    if variant == "transform_value":
-        source = message.transform_value
-        return UnrealTransform(
-            UnrealVector(source.location.x, source.location.y, source.location.z),
-            UnrealRotator(source.rotation.r, source.rotation.p, source.rotation.y))
+    if variant == "native_transform_value":
+        source = message.native_transform_value
+        return FTransform(
+            FQuat(source.rotation.x, source.rotation.y, source.rotation.z, source.rotation.w),
+            FVector(source.translation.x, source.translation.y, source.translation.z),
+            FVector(source.scale3d.x, source.scale3d.y, source.scale3d.z))
 
     if variant in ("asset_array_value", "asset_set_value"):
         assets = [AssetRef(path) for path in getattr(message, variant).values]

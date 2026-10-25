@@ -2502,13 +2502,19 @@ grpc::Status WritePropertyToValue(const void* Container, const FProperty* Proper
 		CastFieldChecked<FStructProperty>(Property)->GetValue_InContainer(Container, &V);
 		if (bNativeUnits)
 		{
-			// Report the transform exactly as Unreal stores it: cm, degrees, left-handed.
-			TempoCore::Transform* Out = OutValue.mutable_transform_value();
-			TempoCore::Vector* Location = Out->mutable_location();
-			Location->set_x(V.GetLocation().X); Location->set_y(V.GetLocation().Y); Location->set_z(V.GetLocation().Z);
-			const FRotator Rotation = V.Rotator();
-			TempoCore::Rotation* OutRotation = Out->mutable_rotation();
-			OutRotation->set_r(Rotation.Roll); OutRotation->set_p(Rotation.Pitch); OutRotation->set_y(Rotation.Yaw);
+			// Report the transform exactly as Unreal stores it, in its own shape: a quaternion, a
+			// translation in cm and a scale, left-handed. TempoCore.Transform has room for neither
+			// the scale nor the quaternion.
+			TempoWorld::NativeTransform* Out = OutValue.mutable_native_transform_value();
+			const FQuat Rotation = V.GetRotation();
+			Out->mutable_rotation()->set_x(Rotation.X); Out->mutable_rotation()->set_y(Rotation.Y);
+			Out->mutable_rotation()->set_z(Rotation.Z); Out->mutable_rotation()->set_w(Rotation.W);
+			const FVector Translation = V.GetTranslation();
+			Out->mutable_translation()->set_x(Translation.X); Out->mutable_translation()->set_y(Translation.Y);
+			Out->mutable_translation()->set_z(Translation.Z);
+			const FVector Scale = V.GetScale3D();
+			Out->mutable_scale3d()->set_x(Scale.X); Out->mutable_scale3d()->set_y(Scale.Y);
+			Out->mutable_scale3d()->set_z(Scale.Z);
 		}
 		else
 		{
@@ -2518,20 +2524,29 @@ grpc::Status WritePropertyToValue(const void* Container, const FProperty* Proper
 	}
 	case EValueKind::Color:
 	{
-		const FStructProperty* StructProperty = CastFieldChecked<FStructProperty>(Property);
 		FColor V;
-		if (StructProperty->Struct->GetStructCPPName() == TEXT("FLinearColor"))
+		CastFieldChecked<FStructProperty>(Property)->GetValue_InContainer(Container, &V);
+		TempoWorld::Color* Out = OutValue.mutable_color_value();
+		Out->set_r(V.R); Out->set_g(V.G); Out->set_b(V.B); Out->set_a(V.A);
+		return grpc::Status_OK;
+	}
+	case EValueKind::LinearColor:
+	{
+		FLinearColor V;
+		CastFieldChecked<FStructProperty>(Property)->GetValue_InContainer(Container, &V);
+		if (bNativeUnits)
 		{
-			FLinearColor Linear;
-			StructProperty->GetValue_InContainer(Container, &Linear);
-			V = Linear.ToFColor(true);
+			// As Unreal stores it: linear and floating point. 8 bits of sRGB would lose both.
+			TempoWorld::LinearColor* Out = OutValue.mutable_linear_color_value();
+			Out->set_r(V.R); Out->set_g(V.G); Out->set_b(V.B); Out->set_a(V.A);
 		}
 		else
 		{
-			StructProperty->GetValue_InContainer(Container, &V);
+			// What this has always reported, for the callers that predate native_units.
+			const FColor Converted = V.ToFColor(true);
+			TempoWorld::Color* Out = OutValue.mutable_color_value();
+			Out->set_r(Converted.R); Out->set_g(Converted.G); Out->set_b(Converted.B); Out->set_a(Converted.A);
 		}
-		TempoWorld::Color* Out = OutValue.mutable_color_value();
-		Out->set_r(V.R); Out->set_g(V.G); Out->set_b(V.B);
 		return grpc::Status_OK;
 	}
 	case EValueKind::Struct:
@@ -3710,12 +3725,31 @@ grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target
 			: ToUnrealTransform(Value.transform_value());
 		return SetStructOnTarget(World, Target, Transform, TEXT("FTransform"));
 	}
+	case PropertyValue::kNativeTransformValue:
+	{
+		// Unreal's own shape, unconverted, whatever native_units says: there is no SI form of it.
+		const TempoWorld::NativeTransform& Given = Value.native_transform_value();
+		const FTransform Transform(
+			FQuat(Given.rotation().x(), Given.rotation().y(), Given.rotation().z(), Given.rotation().w()),
+			FVector(Given.translation().x(), Given.translation().y(), Given.translation().z()),
+			FVector(Given.scale3d().x(), Given.scale3d().y(), Given.scale3d().z()));
+		return SetStructOnTarget(World, Target, Transform, TEXT("FTransform"));
+	}
+	case PropertyValue::kLinearColorValue:
+	{
+		const TempoWorld::LinearColor& Given = Value.linear_color_value();
+		return SetStructOnTarget(World, Target, FLinearColor(Given.r(), Given.g(), Given.b(), Given.a()),
+			TEXT("FLinearColor"));
+	}
 	case PropertyValue::kColorValue:
 	{
-		FColor Color;
+		// Zero-initialized, so no component is left as whatever the stack held; alpha is opaque
+		// unless the value says otherwise.
+		FColor Color(ForceInitToZero);
 		Color.R = Value.color_value().r();
 		Color.G = Value.color_value().g();
 		Color.B = Value.color_value().b();
+		Color.A = bNativeUnits ? Value.color_value().a() : 255;
 
 		const grpc::Status ColorStatus = SetStructOnTarget(World, Target, Color, TEXT("FColor"));
 		if (ColorStatus.ok())
