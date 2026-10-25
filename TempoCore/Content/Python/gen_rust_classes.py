@@ -82,6 +82,31 @@ CONTAINER_ELEMENTS = frozenset(
 PLAIN, OBJECT, ENUMS, OBJECTS, ACTOR_REF, COMPONENT_REF, ASSET = range(7)
 
 
+# Registers TABLE before main, so `world::check_schema` finds these classes before any handle has
+# been made -- the one thing a program may reasonably do first. Rust has no import side effects,
+# so this is the platform's own list of static initializers, which is what a C++ global's
+# constructor goes in: a function pointer in a section the loader runs. `#[used]` keeps it from
+# being optimized away. The linker keeps it only if it links this module's object, which it does
+# whenever the program uses a class, since every class's `hierarchy()` names TABLE beside it; a
+# crate the program never names is not linked at all, and has nothing to check.
+#
+# A platform outside these three falls back to the registration every handle makes on creation.
+REGISTER_AT_STARTUP = [
+    "",
+    "#[used]",
+    "#[cfg_attr(any(target_os = \"linux\", target_os = \"android\", target_os = \"freebsd\",",
+    "              target_os = \"netbsd\", target_os = \"openbsd\", target_os = \"dragonfly\",",
+    "              target_os = \"illumos\"), link_section = \".init_array\")]",
+    "#[cfg_attr(target_vendor = \"apple\", link_section = \"__DATA,__mod_init_func\")]",
+    "#[cfg_attr(target_os = \"windows\", link_section = \".CRT$XCU\")]",
+    "static REGISTER_AT_STARTUP: extern \"C\" fn() = register_at_startup;",
+    "",
+    "extern \"C\" fn register_at_startup() {",
+    "    ::tempo_sim::unreal::register_classes(&TABLE);",
+    "}",
+]
+
+
 class Unsupported(Exception):
     """A type the API cannot carry. Its member is omitted rather than loosely typed."""
 
@@ -768,15 +793,21 @@ class Generator:
             self.stats["struct_members_omitted"] += 1
             return []
 
-        used.add(accessor)
-        used.add("set_" + accessor)
+        used.update((accessor, accessor + "_async", "set_" + accessor, "set_" + accessor + "_async"))
         self.stats["struct_members"] += 1
-        lines = ["    pub fn {}(&self) -> Result<{}, {}> {{ self.0.get({}) }}".format(
-            accessor, rust, ERROR, literal)]
+        lines = [
+            "    pub fn {}(&self) -> Result<{}, {}> {{ self.0.get({}) }}".format(
+                accessor, rust, ERROR, literal),
+            "    pub fn {}_async(&self) -> impl ::core::future::Future<Output = Result<{}, {}>> + '_ "
+            "{{ self.0.get_async({}) }}".format(accessor, rust, ERROR, literal),
+        ]
         if member.get("writable"):
             parameter, value = ("&" + rust, "value.clone()") if how == ASSET else (rust, "value")
             lines.append("    pub fn set_{}(&self, value: {}) -> Result<(), {}> "
                          "{{ self.0.set({}, {}) }}".format(accessor, parameter, ERROR, literal, value))
+            lines.append("    pub fn set_{}_async(&self, value: {}) -> impl ::core::future::Future<"
+                         "Output = Result<(), {}>> + '_ {{ self.0.set_async({}, {}) }}".format(
+                             accessor, parameter, ERROR, literal, value))
         return lines
 
     def emit_assets(self):
@@ -888,9 +919,11 @@ class Generator:
             "        .map(|at| table[at].1)",
             "}",
             "",
-            "pub struct Table;",
+            "/// Not zero-sized: the registry tells tables apart by address, and a zero-sized static",
+            "/// need not have an address of its own.",
+            "pub struct Table(u8);",
             "",
-            "pub static TABLE: Table = Table;",
+            "pub static TABLE: Table = Table(0);",
             "",
             "impl ::tempo_sim::unreal::Hierarchy for Table {",
             "    fn superclass(&self, class_path: &str) -> Option<&'static str> {",
@@ -936,6 +969,7 @@ class Generator:
                 "    }",
             ]
         lines.append("}")
+        lines += REGISTER_AT_STARTUP
         return "\n".join(lines) + "\n"
 
 

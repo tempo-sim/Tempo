@@ -1918,3 +1918,66 @@ the defines a DLL consumer needs (`PROTOBUF_USE_DLLS`, `ABSL_CONSUME_DLL`), as T
 | **6d** | `Tests/Cpp`, `TestCppAPI.sh`, CI | **Done.** |
 | **6e** | docs | **Done.** |
 
+
+## 24. Async typed access, and registering before `main`
+
+Phase 7. Every example client that writes a fixed set of properties does it from async code --
+`SensorPlayground`'s post-process randomizer in both languages, RerunPlayground's FOV lookup -- and
+neither typed runtime could serve it.
+
+### 24.1 Python
+
+Attribute access cannot be awaited, so the async form of a write is a batch and the async form of
+a read is a deferred lambda, both of which already existed:
+
+- **`async with world.batch() as b:`** queues the block's assignments and sends them, without
+  blocking, when it ends. Nothing in the block is sent before that, so a direct read or call there
+  is refused by name; `b.get` / `b.call` defer one.
+- **`await world.get_async(lambda: truck.MaxSpeed)`** / **`call_async`**: one deferred op, sent as
+  a batch of one. Typed by the lambda, exactly as `b.get` is.
+- **`snapshot_async`**, **`watch_async`** on every handle.
+- **`world`'s functions have `_async` twins**, written once as the async function, with the
+  blocking one derived from it (`_blocking`, through a `ParamSpec` so its generics survive). Not
+  `tempo_world`'s single dual-mode name, which a checker reads as always returning a coroutine.
+
+Two things this exposed, and fixed:
+
+- **A blocking call inside a coroutine deadlocked.** `run_async` ran it with
+  `run_coroutine_threadsafe` on the running loop and waited, on that loop's own thread. It now
+  raises, and the typed runtime raises first with the form to use instead.
+- **The batch state was thread-local**, and two tasks on one loop share a thread: one task's open
+  batch would capture another's writes while it awaited. It is context-local now (`contextvars`),
+  which is per task and still per thread. A batch opened inside another now joins it -- in both
+  languages it used to send its own ops ahead of the outer block's earlier ones.
+
+### 24.2 Rust
+
+The members had `_async` twins already, except struct members, which now have them too.
+`world::batch_async(body)` is the async batch: `body` is synchronous and runs before the call
+returns, because inside a batch a setter only queues and the queue is thread-local -- an `.await`
+in the body could resume on another thread. A direct read inside it is refused, as in Python. The
+future is boxed, holding only what was queued: an `impl Future` would capture the body's type and
+keep everything it borrowed borrowed, including the `Option` a `Deferred` was put in. `Deferred`'s
+slot is an `Arc<Mutex>` rather than an `Rc<RefCell>`, and `FromValue`, `Class` and `UnrealEnum`
+require `Send`, so the future can be awaited in a spawned task.
+
+### 24.3 Registering before `main`
+
+Rust has no import side effects, so a crate's class table was registered by the first handle made
+through it -- and `world::check_schema()`, called first thing as the guide shows, found nothing. The
+generated `hierarchy.rs` now registers it from the platform's static initializers (`.init_array`,
+`__mod_init_func`, `.CRT$XCU`), which is where a C++ global's constructor goes, without the `ctor`
+crate. The lazy registration stays, for a platform outside those three.
+
+Registering from two crates surfaced a latent bug: the registry compared `dyn Hierarchy` pointers,
+which carry a vtable each crate may instantiate for itself, so the published table registered once
+from tempo-sim and again through the project's `depends_on`. It compares addresses now, which needs
+the tables not to be zero-sized.
+
+### 24.4 Phases
+
+| Phase | What | |
+|---|---|---|
+| **7a** | Python: async batch, `get_async`/`call_async`, `snapshot_async`/`watch_async`, `world` twins, the deadlock refused, context-local state | **Done.** |
+| **7b** | Rust: async struct members, `batch_async`, `Send` deferreds, startup registration | **Done.** |
+| **7c** | the example clients on the typed classes | **Done.** |

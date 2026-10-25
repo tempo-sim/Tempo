@@ -330,7 +330,10 @@ impl ObjectRef {
 /// Every implementor must be a `#[repr(transparent)]` newtype whose only field is an
 /// [`ObjectRef`]. [`upcast`] reinterprets a reference on that basis, which is how a generated
 /// class reaches its superclass's members. Only `gen_rust_classes.py` implements this.
-pub unsafe trait Class: Sized {
+///
+/// `Send`, as every value the typed API reads is: a deferred read's result crosses the await of
+/// [`batch_async`], which a multi-threaded runtime may resume on another thread.
+pub unsafe trait Class: Sized + Send {
     /// The Unreal class path this type stands for — a path rather than a name, because two
     /// Blueprints in different folders can share a name.
     const PATH: &'static str;
@@ -341,10 +344,9 @@ pub unsafe trait Class: Sized {
 
     /// The class table of the crate this type was generated into.
     ///
-    /// Rust has no import side effects, so a generated crate cannot announce itself the way
-    /// Python's `__init__.py` does. Instead every path that makes a handle registers through this,
-    /// which means [`ObjectRef::is_a`] and `world::check_schema` work without the caller
-    /// remembering to do anything.
+    /// A generated crate registers its table before `main`, from the platform's static
+    /// initializers. Every path that makes a handle registers through this as well, so a table
+    /// whose initializer a linker dropped is still there before [`ObjectRef::is_a`] needs it.
     fn hierarchy() -> &'static (dyn Hierarchy + 'static);
 }
 
@@ -367,7 +369,7 @@ pub fn upcast<T: Class>(object: &ObjectRef) -> &T {
 }
 
 /// An Unreal enum, which travels as its authored name rather than its numeric value.
-pub trait UnrealEnum: Sized {
+pub trait UnrealEnum: Sized + Send {
     /// The enumerator's name as Unreal declares it.
     fn unreal_name(&self) -> &'static str;
 
@@ -376,8 +378,8 @@ pub trait UnrealEnum: Sized {
 
 // -- Value conversion ----------------------------------------------------------------------------
 
-/// A Rust type one `Value` variant can be read into.
-pub trait FromValue: Sized {
+/// A Rust type one `Value` variant can be read into. `Send` for the reason [`Class`] is.
+pub trait FromValue: Sized + Send {
     fn from_value(value: &pb::Value) -> Result<Self, TempoError>;
 }
 
@@ -928,8 +930,19 @@ impl<T: StructType + ToValue> ToValue for Vec<T> {
 
 // -- batching ------------------------------------------------------------------------------------
 
-/// What a queued op's result is delivered to, once the batch carrying it has run.
-type Resolver = Box<dyn FnOnce(Result<pb::BatchOpResult, TempoError>)>;
+/// What a queued op's result is delivered to, once the batch carrying it has run. `Send`, because
+/// an awaited batch carries it across the await, and a multi-threaded runtime may resume that on
+/// another thread.
+type Resolver = Box<dyn FnOnce(Result<pb::BatchOpResult, TempoError>) + Send>;
+
+/// Where a deferred result lands: shared between the [`Deferred`] and the op's resolver, and
+/// behind a lock rather than a cell for the same reason the resolver is `Send`.
+type Slot<T> = std::sync::Arc<std::sync::Mutex<Option<Result<T, String>>>>;
+
+fn lock<T>(slot: &Slot<T>) -> std::sync::MutexGuard<'_, Option<Result<T, String>>> {
+    // Nothing panics while holding it, but a poisoned slot still holds a usable value.
+    slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 /// One op queued in a batch.
 struct Queued {
@@ -940,10 +953,12 @@ struct Queued {
 }
 
 thread_local! {
-    // Thread-local because the client is not thread-safe anyway -- the gRPC channel is bound to
-    // the loop that created it -- so a batch opened on one thread has no business capturing writes
-    // made on another.
+    // Thread-local because a batch is collected synchronously, by the closure handed to `batch` or
+    // `batch_async`, so it is the closure's thread that owns it -- and a batch opened on one thread
+    // has no business capturing writes made on another.
     static BATCH: RefCell<Option<Vec<Queued>>> = const { RefCell::new(None) };
+    // Whether the open batch is `batch_async`'s, where nothing may block.
+    static ASYNC: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     // Set while `defer` runs its closure: the read the closure makes is queued, and its Deferred
     // left here for `defer` to hand back.
     static CAPTURE: RefCell<Option<Vec<Box<dyn std::any::Any>>>> = const { RefCell::new(None) };
@@ -979,43 +994,85 @@ const ABORTED: i32 = 10;
 /// The server stops at the first failure, and this reports it, naming the op. Nothing is sent if
 /// `body` returns an error before a read forced a flush: a half-applied configuration is harder to
 /// reason about than one that never started.
+///
+/// A batch opened inside another joins it, so the whole of it is still one flush, in order.
 pub fn batch<F>(body: F) -> Result<(), TempoError>
 where
     F: FnOnce() -> Result<(), TempoError>,
 {
-    let outer = BATCH.with(|slot| slot.borrow_mut().replace(Vec::new()));
-    let result = body();
-    let queued = BATCH.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        let mine = slot.take().unwrap_or_default();
-        *slot = outer;
-        mine
-    });
+    flush(collect(body, false)?)
+}
 
-    match result {
-        Ok(()) => flush(queued),
-        Err(error) => Err(error),
+/// [`batch`], sent without blocking -- the form for async code, where the blocking one's flush
+/// would panic inside the runtime.
+///
+/// ```no_run
+/// # use tempo_sim::unreal::{batch_async, defer};
+/// # async fn configure() -> Result<(), tempo_sim::TempoError> {
+/// batch_async(|| {
+///     // lidar.set_horizontal_beams(1024)?;
+///     // let beams = defer(|| lidar.horizontal_beams())?;
+///     Ok(())
+/// })
+/// .await
+/// # }
+/// ```
+///
+/// `body` is synchronous, and runs before this returns. That is the design rather than a
+/// limitation: inside a batch a write only queues, so there is nothing in it to wait for, and the
+/// queue belongs to this thread, which an `.await` in the body could leave. A read or call is
+/// deferred with [`defer`]; one made directly would have to block, and is refused. The future
+/// holds only what was queued, so it is `Send` and can be awaited in a spawned task.
+pub fn batch_async<F>(body: F) -> BatchFuture
+where
+    F: FnOnce() -> Result<(), TempoError>,
+{
+    let queued = collect(body, true);
+    Box::pin(async move { flush_async(queued?).await })
+}
+
+/// What [`batch_async`] returns. Boxed rather than `impl Future`, which would capture the body's
+/// type and so keep everything the body borrowed borrowed until the batch was awaited -- including
+/// the `Option` a [`Deferred`] was put in, which is then unreadable.
+pub type BatchFuture = std::pin::Pin<Box<dyn Future<Output = Result<(), TempoError>> + Send>>;
+
+/// Run `body` with a batch open and hand back what it queued: nothing, when a batch was already
+/// open, since the ops then joined that one.
+fn collect<F>(body: F, asynchronous: bool) -> Result<Vec<Queued>, TempoError>
+where
+    F: FnOnce() -> Result<(), TempoError>,
+{
+    if batch_open() {
+        // Joined rather than nested: a flush of its own would send these ahead of the outer
+        // batch's earlier ops.
+        return body().map(|()| Vec::new());
     }
+    BATCH.with(|slot| *slot.borrow_mut() = Some(Vec::new()));
+    let was = ASYNC.with(|flag| flag.replace(asynchronous));
+    let result = body();
+    ASYNC.with(|flag| flag.set(was));
+    let queued = BATCH.with(|slot| slot.borrow_mut().take().unwrap_or_default());
+    result.map(|()| queued)
 }
 
 /// A read or call queued in a [`batch`], available once the batch has run.
 pub struct Deferred<T> {
-    slot: std::rc::Rc<RefCell<Option<Result<T, String>>>>,
+    slot: Slot<T>,
 }
 
 impl<T> Deferred<T> {
     fn ready(value: T) -> Self {
-        Self { slot: std::rc::Rc::new(RefCell::new(Some(Ok(value)))) }
+        Self { slot: std::sync::Arc::new(std::sync::Mutex::new(Some(Ok(value)))) }
     }
 
     /// Whether the batch carrying this has run.
     pub fn is_done(&self) -> bool {
-        self.slot.borrow().is_some()
+        lock(&self.slot).is_some()
     }
 
     /// Take the result out. The op's own error if it failed; an error if the batch has not run.
     pub fn take(&self) -> Result<T, TempoError> {
-        match self.slot.borrow_mut().take() {
+        match lock(&self.slot).take() {
             Some(Ok(value)) => Ok(value),
             Some(Err(error)) => Err(TempoError::Batch(error)),
             None => Err(TempoError::Protocol(
@@ -1039,7 +1096,9 @@ impl<T> Deferred<T> {
 ///
 /// A generated method with out parameters cannot be deferred: it decodes its tuple after the call
 /// returns, and there is nothing yet to decode. Call it directly instead.
-pub fn defer<T: 'static>(read: impl FnOnce() -> Result<T, TempoError>) -> Result<Deferred<T>, TempoError> {
+pub fn defer<T: Send + 'static>(
+    read: impl FnOnce() -> Result<T, TempoError>,
+) -> Result<Deferred<T>, TempoError> {
     let previous = CAPTURE.with(|slot| slot.borrow_mut().replace(Vec::new()));
     let returned = read();
     let captured = CAPTURE
@@ -1086,20 +1145,29 @@ fn enqueue(op: pb::BatchOp, description: String) -> bool {
 
 /// Run one op whose result is wanted: as its own RPC when no batch is open, and through the batch
 /// otherwise -- queued and deferred inside [`defer`], or sent at once with everything before it.
-fn perform<T: 'static>(
+fn perform<T: Send + 'static>(
     op: pb::BatchOp,
     description: String,
-    decode: impl FnOnce(pb::BatchOpResult) -> Result<T, TempoError> + 'static,
+    decode: impl FnOnce(pb::BatchOpResult) -> Result<T, TempoError> + Send + 'static,
     direct: impl FnOnce() -> Result<T, TempoError>,
 ) -> Result<T, TempoError> {
     if !batch_open() {
         return direct();
     }
 
-    let slot = std::rc::Rc::new(RefCell::new(None));
+    let capturing = CAPTURE.with(|capture| capture.borrow().is_some());
+    if !capturing && ASYNC.with(|flag| flag.get()) {
+        return Err(TempoError::Protocol(format!(
+            "{} was made directly inside batch_async, where nothing is sent until the batch is \
+             awaited. Defer it with `defer(|| ...)`, or await its `_async` form outside the batch.",
+            description
+        )));
+    }
+
+    let slot: Slot<T> = std::sync::Arc::new(std::sync::Mutex::new(None));
     let sink = slot.clone();
     let resolve: Resolver = Box::new(move |outcome| {
-        *sink.borrow_mut() = Some(outcome.and_then(decode).map_err(|error| error.to_string()));
+        *lock(&sink) = Some(outcome.and_then(decode).map_err(|error| error.to_string()));
     });
     BATCH.with(|batch| {
         if let Some(queue) = batch.borrow_mut().as_mut() {
@@ -1107,20 +1175,18 @@ fn perform<T: 'static>(
         }
     });
 
-    let capturing = CAPTURE.with(|capture| match capture.borrow_mut().as_mut() {
-        Some(captured) => {
-            captured.push(Box::new(Deferred::<T> { slot: slot.clone() }));
-            true
-        }
-        None => false,
-    });
     if capturing {
+        CAPTURE.with(|capture| {
+            if let Some(captured) = capture.borrow_mut().as_mut() {
+                captured.push(Box::new(Deferred::<T> { slot: slot.clone() }));
+            }
+        });
         return Err(TempoError::Deferred);
     }
 
     let queued = BATCH.with(|batch| batch.borrow_mut().as_mut().map(std::mem::take).unwrap_or_default());
     let flushed = flush(queued);
-    let outcome = slot.borrow_mut().take();
+    let outcome = lock(&slot).take();
     match outcome {
         Some(Ok(value)) => Ok(value),
         // The op that failed first, which may be an earlier one this op depended on.
@@ -1135,9 +1201,25 @@ fn flush(queued: Vec<Queued>) -> Result<(), TempoError> {
     if queued.is_empty() {
         return Ok(());
     }
-    let count = queued.len();
     let ops = queued.iter().map(|queued| queued.op.clone()).collect();
-    let response = match crate::tempo_world::run_batch(ops, true) {
+    settle(queued, crate::tempo_world::run_batch(ops, true))
+}
+
+async fn flush_async(queued: Vec<Queued>) -> Result<(), TempoError> {
+    if queued.is_empty() {
+        return Ok(());
+    }
+    let ops = queued.iter().map(|queued| queued.op.clone()).collect();
+    settle(queued, crate::tempo_world::run_batch_async(ops, true).await)
+}
+
+/// Hand each queued op its result, and report the first failure.
+fn settle(
+    queued: Vec<Queued>,
+    response: Result<pb::RunBatchResponse, TempoError>,
+) -> Result<(), TempoError> {
+    let count = queued.len();
+    let response = match response {
         Ok(response) => response,
         Err(error) => {
             let message = error.to_string();
@@ -1286,7 +1368,7 @@ impl ObjectRef {
     /// Read one property and decode it into what the caller wants. The decoder is applied where
     /// the value arrives, which inside [`defer`] is after the batch runs -- so a deferred read is
     /// typed as what it decodes to, not as the raw value.
-    fn read_as<T: 'static>(
+    fn read_as<T: Send + 'static>(
         &self,
         property: &str,
         decode: fn(&pb::Value) -> Result<T, TempoError>,
@@ -1304,7 +1386,7 @@ impl ObjectRef {
     }
 
     /// Call a function and decode its return value, as `read_as` does a property.
-    fn call_as<T: 'static>(
+    fn call_as<T: Send + 'static>(
         &self,
         function: &str,
         args: Vec<pb::FunctionArg>,
@@ -1917,6 +1999,9 @@ impl ObjectRef {
 /// derives from which (for [`ObjectRef::is_a`]), which Rust type a class path maps to (for the
 /// dynamic path), and the schema header the classes were generated from (for
 /// `world::check_schema`). Everything else a generated method needs, it already knows statically.
+///
+/// An implementor must not be zero-sized: the registry tells tables apart by address, and a
+/// zero-sized static need not have an address of its own.
 pub trait Hierarchy: Send + Sync {
     /// The class a class derives from, or `None` for a root or an unknown class.
     ///
@@ -2013,11 +2098,12 @@ pub fn register_classes(hierarchy: &'static (dyn Hierarchy + 'static)) {
     while let Some(hierarchy) = next {
         if let Ok(mut registered) = HIERARCHIES.write() {
             // Every handle made through a crate registers it, so this runs constantly for the same
-            // table. Compared by address, since each crate has exactly one.
-            if registered
-                .iter()
-                .any(|existing| std::ptr::eq(*existing as *const _, hierarchy as *const _))
-            {
+            // table. Compared by address, since each crate has exactly one -- the table's address
+            // alone, not the vtable a `dyn` pointer also carries, since each crate that names a
+            // table may instantiate a vtable for it of its own.
+            if registered.iter().any(|existing| {
+                std::ptr::addr_eq(*existing as *const dyn Hierarchy, hierarchy as *const dyn Hierarchy)
+            }) {
                 return;
             }
             registered.push(hierarchy);

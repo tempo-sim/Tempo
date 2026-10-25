@@ -8,7 +8,9 @@ name = "sensor_playground"
 path = "src/sensor_playground.rs"
 
 [dependencies]
-tempo-sim = { path = "../../../TempoCore/Content/Rust/API" }
+# `reflected`: the typed classes, which Scripts/GenTypedAPI.sh generates into the crate (Package.sh
+# runs it, with TEMPO_GEN_RUST_API=1).
+tempo-sim = { path = "../../../TempoCore/Content/Rust/API", features = ["reflected"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 tokio-stream = "0.1"
 inquire = "0.7"

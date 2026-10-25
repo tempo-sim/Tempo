@@ -351,6 +351,34 @@ fn a_batch_defers_reads_and_keeps_order() {
 }
 
 #[test]
+fn async_code_batches_and_reaches_struct_members() {
+    connect();
+    let actor = spawn();
+    let component = actor.actor().static_mesh_component0();
+
+    tempo_sim::context::RUNTIME.block_on(async {
+        let mut damaged = None;
+        world::batch_async(|| {
+            actor.actor().set_b_can_be_damaged(false)?;
+            actor.actor().set_net_update_frequency(30.0)?;
+            component.body_instance().set_linear_damping(0.25)?;
+            damaged = Some(world::defer(|| actor.actor().b_can_be_damaged())?);
+            Ok(())
+        })
+        .await
+        .expect("batch_async");
+        assert!(!damaged.expect("deferred").take().expect("bCanBeDamaged"));
+        assert_eq!(actor.actor().net_update_frequency_async().await.expect("read"), 30.0);
+
+        // A member of a struct property, written and read without blocking.
+        let body = component.body_instance();
+        body.set_linear_damping_async(0.5).await.expect("set LinearDamping");
+        let damping = body.linear_damping_async().await.expect("read LinearDamping");
+        assert!((damping - 0.5).abs() < 1e-4);
+    });
+}
+
+#[test]
 fn a_catalog_asset_goes_through_a_typed_setter() {
     use project::reflected::assets::engine::basic_shapes::Cube;
 

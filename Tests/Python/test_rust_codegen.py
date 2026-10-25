@@ -354,6 +354,87 @@ def test_a_deferred_read_is_typed_by_what_it_reads(workspace):
 """), "a deferred read must keep the type of what it reads"
 
 
+def test_struct_members_have_async_forms(workspace):
+    assert check(workspace, """
+    let _ = async {
+        let _: f64 = widget.settings().scale_async().await?;
+        widget.settings().set_scale_async(2.0).await?;
+        widget.settings().inner().set_offset_async(FVector::default()).await?;
+        Ok::<(), TempoError>(())
+    };
+""") == []
+
+
+def test_an_async_batch_is_send_and_typed(workspace):
+    """Its future holds only what was queued, so a spawned task can await it."""
+    assert check(workspace, """
+    fn assert_send<T: Send>(_: &T) {}
+    let mut enabled = None;
+    let sent = world::batch_async(|| {
+        widget.set_b_enabled(true)?;
+        widget.settings().set_scale(2.0)?;
+        enabled = Some(world::defer(|| widget.b_enabled())?);
+        Ok(())
+    });
+    assert_send(&sent);
+    let enabled: world::Deferred<bool> = enabled.unwrap();
+    assert_send(&enabled);
+""") == []
+
+
+def test_an_immediate_read_inside_an_async_batch_is_refused(workspace):
+    """It would have to block, which panics inside a runtime; refused before anything is sent."""
+    stdout, stderr, status = run(workspace, """
+    let sent = world::batch_async(|| {
+        widget.set_b_enabled(true)?;
+        let _ = widget.b_enabled()?;
+        Ok(())
+    });
+    let outcome = tempo_sim::context::RUNTIME.block_on(sent);
+    println!("{}", outcome.err().map(|e| e.to_string()).unwrap_or_default());
+""")
+    assert status == 0, stderr
+    assert "made directly inside batch_async" in stdout
+    assert "a.bEnabled" in stdout, "the refusal names the read"
+
+
+def test_a_batch_opened_inside_another_joins_it(workspace):
+    """The inner one sends nothing of its own -- it would go out ahead of the outer's earlier ops.
+    Nothing listens on port 1, so only the outer batch, which does send, fails."""
+    stdout, stderr, status = run(workspace, """
+    tempo_sim::set_server("localhost", 1);
+    let mut inner = None;
+    let outer = world::batch(|| {
+        widget.set_b_enabled(true)?;
+        inner = Some(world::batch(|| widget.set_b_enabled(false)).is_ok());
+        Ok(())
+    });
+    println!("{} {}", inner.unwrap(), outer.is_err());
+""")
+    assert status == 0, stderr
+    assert stdout.strip() == "true true"
+
+
+def test_the_classes_are_registered_before_main(workspace):
+    """So check_schema works first thing. The snippet's handles are built directly, which registers
+    nothing, so only the startup registration can have done it."""
+    stdout, stderr, status = run(workspace, """
+    println!("{}", tempo_sim::unreal::hierarchies().len());
+    let _ = &widget;
+""")
+    assert status == 0, stderr
+    assert stdout.strip() == "1"
+
+
+def test_the_published_classes_are_registered_beside_the_projects(reexporting):
+    stdout, stderr, status = run(reexporting, """
+    println!("{}", tempo_sim::unreal::hierarchies().len());
+    let _ = &widget;
+""")
+    assert status == 0, stderr
+    assert stdout.strip() == "2"
+
+
 def test_the_asset_catalog_compiles(workspace):
     assert check(workspace, """
     use fixture_project::reflected::assets::game::widgets::W_Main;

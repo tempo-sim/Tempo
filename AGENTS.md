@@ -172,7 +172,14 @@ fails under Pyright instead of at runtime. See `TYPED_WORLD_API_PLAN.md`.
   with handles where `tempo_world` takes names (`destroy_actor`, `add_component`,
   `set_actor_location`, `get_component_transform`, `stream_actor_state`, `raycast`, …). Keep it
   mirroring: a new actor- or component-addressed TempoWorld RPC gets a `world` twin in all three
-  clients.
+  clients, and an `_async` twin in Python and Rust. Python's `world` writes each function once, as
+  the async one, and derives the blocking one (`_blocking`); attribute access itself stays
+  synchronous, so a coroutine writes in `async with world.batch()` and reads with
+  `await world.get_async(lambda: ...)`, and a blocking call made inside a coroutine raises rather
+  than deadlocking its own loop. The batch, capture and snapshot state is `contextvars`, not
+  thread-local -- two tasks share a thread. Rust's async batch is `world::batch_async`, whose
+  closure is synchronous because it only queues. A generated Rust crate registers its class table
+  before `main` (`hierarchy.rs`, a static-initializer entry), so `check_schema` can come first.
   `tempo_sim::unreal` / `tempo_sim::world` are the Rust mirrors, hand-written in the same
   `Content/Rust/API/src` the generator otherwise owns (whitelisted in its `.gitignore`, as
   `context.rs` is). The typed Rust surface has two `unsafe` reinterpretations, both of a

@@ -86,9 +86,16 @@ It works on Linux, macOS and Windows — rerun ships native viewers for all thre
 
 ### Typed classes
 
-The examples above run against any Tempo sim, because they address everything by string. A
-[typed classes](typed-classes.md) example cannot: its whole value is naming one project's classes in
-code a type checker reads, so it belongs with the project whose classes it names.
+The examples above run against any Tempo sim. Where they set or read a fixed property, they do it
+through the [typed classes](typed-classes.md) every build has, which ship inside `tempo-sim` as
+`tempo_sim.reflected`: `SensorPlayground`'s post-process randomizer and RerunPlayground's FOV
+lookup address `SceneCaptureComponent2D` by type, from async code. The property explorers --
+`WorldPlayground`, the Properties panel -- pick properties by name at run time, so they stay on the
+string-keyed API, which is what it is for.
+
+An example of a project's own classes cannot run against any sim: its whole value is naming that
+project's classes in code a type checker reads, so it belongs with the project whose classes it
+names.
 
 TempoSample's is `Content/Python/ExampleClients/TypedClasses.py` — spawn an actor by its class, read
 and write its properties, reach its components, call a function, batch, watch, and discover by type:
@@ -126,7 +133,9 @@ cd Plugins/Tempo/ExampleClients/Rust/WorldPlayground
 cargo run
 ```
 
-Requires the Rust client to have been generated — see [Rust](rust.md).
+Requires the Rust client to have been generated — see [Rust](rust.md). `SensorPlayground` also
+uses tempo-sim's `reflected` feature, the typed classes, which `Package.sh` generates with
+`TEMPO_GEN_RUST_API=1`.
 
 ## C++
 
@@ -144,3 +153,5 @@ If you are unsure how to do something over the API, these are the fastest answer
 | How do I decode depth or label images? | `tempo_sim.TempoImageUtils` |
 | How do I edit properties from a GUI? | `tempo_panel.py`, shared by `WorldPlaygroundGUI` and `RerunPlayground` |
 | How do I call the API from another thread? | `tempo_panel.py`'s `AsyncBridge` |
+| How do I write typed properties from async code? | `SensorPlayground.py`'s `randomize_camera_post_process`, and the Rust one's |
+| How do I read a typed property from async code? | `RerunPlayground/discovery.py`'s `_discover_camera_fov` |

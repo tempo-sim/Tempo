@@ -222,6 +222,11 @@ property, writing these is enough.
 The batch matters more here than it does elsewhere: four separate writes are four round trips, and
 the lidar would see up to four of them on separate frames and rebuild its tiles each time.
 
+In a coroutine, write `async with world.batch():` instead, and read with
+`await world.get_async(lambda: lidar.HorizontalBeams)`. Plain attribute access blocks, and a
+coroutine that blocks waits on its own event loop, so the typed classes refuse it there and say
+which form to use ([From a coroutine](../clients/typed-classes.md#from-a-coroutine)).
+
 !!! note "What a Tempo class offers is what it declares"
 
     A property reaches the typed classes only when it is declared `BlueprintReadWrite` (writable) or
@@ -373,7 +378,7 @@ Three things read differently from Python, and the
 - **A read is a call that can fail**, not an attribute, so chaining through a reference unwraps
   first: `widget.target()?.visible()?`.
 - **Async is a separate `_async` twin** — `lidar.horizontal_beams_async().await?` — matching every
-  other generated Tempo Rust API.
+  other generated Tempo Rust API, with `world::batch_async` for a batch.
 
 ## Next
 

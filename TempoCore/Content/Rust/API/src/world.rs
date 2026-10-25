@@ -48,7 +48,7 @@
 use crate::error::TempoError;
 use crate::unreal::{note_origin, Class, ObjectRef};
 
-pub use crate::unreal::{batch, defer, Deferred};
+pub use crate::unreal::{batch, batch_async, defer, BatchFuture, Deferred};
 
 /// The SI types, re-exported: this module mirrors `tempo_world`, and takes and returns what it
 /// does — meters, radians and right-handed — with handles where `tempo_world` takes names. The
@@ -907,7 +907,8 @@ fn compare(
         return Err(TempoError::SchemaMismatch(
             "no generated classes are linked, so there is nothing to check. Add this build's \
              project crate (e.g. `tempo-sample`, whose classes are its `reflected` module), which \
-             ships in Packaged/API/Rust alongside the tempo-sim crate."
+             ships in Packaged/API/Rust alongside the tempo-sim crate, and use its classes: a \
+             dependency the program never names is not linked at all."
                 .to_string(),
         ));
     }
@@ -1026,7 +1027,8 @@ mod tests {
 
     const WIDGET: &str = "/Script/Engine.Widget";
 
-    struct Fake;
+    // Not zero-sized, as a registered table must not be.
+    struct Fake(u8);
 
     static CLASSES: &[(&str, &str)] = &[(WIDGET, "WIDGET-HASH")];
     static STRUCTS: &[(&str, &str)] = &[("FWidgetSettings", "SETTINGS-HASH")];
@@ -1062,7 +1064,7 @@ mod tests {
         }
     }
 
-    static FAKE: Fake = Fake;
+    static FAKE: Fake = Fake(0);
 
     /// Register the fake once, however many tests run. Registration is process-wide, and the
     /// registry already refuses a table it holds, so this only has to happen before the first

@@ -366,6 +366,42 @@ if the block raises before anything forced a flush.
 A snapshot is a point-in-time copy: the simulation moves on and the values do not. A write inside
 the block drops that entry, so a read after it sees the new value.
 
+A batch opened inside another joins it, so the whole block is still one call, in order.
+
+### From a coroutine
+
+Attribute access is synchronous, because an assignment cannot be awaited. Made inside a coroutine,
+a blocking round trip would wait on the very event loop its reply has to arrive on, so it fails
+with an error naming the form to use. The async forms are these:
+
+```python
+async with world.batch() as b:     # sent, without blocking, when the block ends
+    truck.MaxSpeed = 1200.0        # an assignment only queues, so it is fine here
+    speed = b.get(lambda: truck.MaxSpeed)
+print(speed.value)
+
+speed = await world.get_async(lambda: truck.MaxSpeed)        # one read, typed as float
+moved = await world.call_async(lambda: truck.TeleportTo(p, r, False, False))
+
+async with truck.snapshot_async():  # one read; attribute reads served from it
+    print(truck.MaxSpeed, truck.Mass)
+
+async for speed in truck.watch_async("MaxSpeed"):
+    ...
+```
+
+Inside `async with world.batch()` nothing is sent until the block ends, so a read or call there
+goes through `b.get` / `b.call`; one made directly would have to block, and is refused. A batch is
+per task, not per thread: two coroutines on one loop each have their own, and one awaiting inside
+its batch does not capture the other's writes.
+
+`world`'s functions have async twins as well, named with `_async` as Rust's are:
+`await world.spawn_actor_async(Cls)`, `await world.destroy_actor_async(truck)`,
+`async with world.spawn_actor_deferred_async(Cls) as truck`, `async for state in
+world.stream_actor_state_async(truck)`, and so on through the module. Two names rather than
+`tempo_world`'s one name serving both, because a type checker reads that one as always returning a
+coroutine.
+
 ## Assets
 
 Every asset the build cooked is in a generated catalog, one module per mount point, with folders as
@@ -432,7 +468,9 @@ plain spawn has already run both by the time you have a handle.
 | Actors and components | `spawn_actor`, `spawn_actor_deferred`, `destroy_actor`, `add_component`, `destroy_component`, `activate_component`, `deactivate_component` |
 | Transforms | `set_`/`get_` `actor_`/`component_` `transform`, `location`, `rotation`, `scale3d` |
 | World state | `get_current_actor_state`, `stream_actor_state`, `get_current_actor_states_near`, `stream_actor_states_near`, `stream_overlap_events`, `raycast` |
-| Batching and checking | `batch`, `defer` (Rust, C++), `check_schema` |
+| Batching and checking | `batch`, `batch_async` (Rust), `defer` (Rust, C++), `check_schema`; in Python, `get_async` and `call_async` |
+
+Every one of them has an `_async` twin in Python and Rust, which takes the same arguments.
 
 `world` also re-exports the TempoCore types it takes — `world.Vector`, `world.Rotation`,
 `world.Transform`, `world.Vector2D` — so a scenario using it needs no proto import. A handle of the
@@ -594,6 +632,31 @@ Rust states the guarantee more sharply than Pyright does in one respect: a read-
 no setter at all, so writing to one is `no method named set_max_speed`, which names the thing that
 does not exist rather than complaining about an assignment.
 
+Every member has an `_async` twin, struct members included —
+`camera.post_process_settings().set_white_temp_async(6500.0).await?` — and a batch has one too.
+Its closure is synchronous, since inside a batch a setter only queues and there is nothing to
+wait for; the send is what is awaited:
+
+```rust
+let mut speed = None;
+world::batch_async(|| {
+    truck.set_max_speed(1200.0)?;
+    speed = Some(world::defer(|| truck.max_speed())?);
+    Ok(())
+})
+.await?;
+let speed: f64 = speed.unwrap().take()?;
+```
+
+A read made directly inside `batch_async`, rather than through `defer`, would have to block, and
+is refused. The returned future holds only what was queued, so it can be awaited in a spawned task.
+A blocking method called from async code panics inside the runtime, as every blocking Tempo Rust
+function does, so async code uses the twins throughout.
+
+The classes register themselves when the program starts, so `world::check_schema()` can be the
+first thing it does. That needs the program to use the crate's classes somewhere: a dependency
+that is never named is not linked at all.
+
 ### What differs from Python
 
 | | Python | Rust |
@@ -601,7 +664,7 @@ does not exist rather than complaining about an assignment.
 | Member names | Unreal's own, verbatim — `truck.MaxSpeed` | snake_case — `truck.max_speed()` |
 | Reading | an attribute — `truck.MaxSpeed` | a call that can fail — `truck.max_speed()?` |
 | Writing | an assignment — `truck.MaxSpeed = 1200.0` | `truck.set_max_speed(1200.0)?` |
-| Async | none yet: attribute access is synchronous, so call it from synchronous code | a separate `_async` twin |
+| Async | `async with world.batch()` to write, `await world.get_async(lambda: ...)` to read | a separate `_async` twin, and `world::batch_async` |
 | Inheritance | real in the stubs, flat at run time | a `Deref` chain, both |
 | Batching | `with world.batch() as b:` | `world::batch(\|\| { ... })?` |
 | Deferred read | `b.get(lambda: truck.MaxSpeed)` | `world::defer(\|\| truck.max_speed())?` |
