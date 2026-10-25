@@ -13,12 +13,78 @@
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
 import time
 
 STARTUP_GRACE_SECONDS = 300
+QUIT_GRACE_SECONDS = 30
+
+
+def _launch(arguments, log):
+    """Start the sim as the leader of a process group of its own.
+
+    What a package calls its binary is not always the game. On Linux it is a launcher script that
+    runs the game as a child, so signalling the process we started stops the script and orphans the
+    game, which then keeps running. A group of its own is what lets _stop reach both.
+    """
+    if os.name == "nt":
+        return subprocess.Popen(arguments, stdout=log, stderr=subprocess.STDOUT,
+                                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+    return subprocess.Popen(arguments, stdout=log, stderr=subprocess.STDOUT,
+                            start_new_session=True)
+
+
+def _group_alive(process):
+    try:
+        os.killpg(process.pid, 0)
+        return True
+    except (ProcessLookupError, PermissionError):
+        return False
+
+
+def _signal_group(process, signal_number):
+    try:
+        os.killpg(process.pid, signal_number)
+    except ProcessLookupError:
+        pass
+
+
+def _stop(process, quit_sim):
+    """Stop the sim and everything it started.
+
+    Asked first, as the test harness does: a sim that quits on its own takes its launcher with it.
+    Signalled only if it does not, and then as a group, for the reason _launch gives. Waiting on
+    the launcher alone would not do either, since it can exit while the game it started runs on.
+    """
+    if process.poll() is None:
+        try:
+            quit_sim()
+        except Exception:  # never answered, or went away mid-call; the signals below still apply
+            pass
+
+    if os.name == "nt":
+        try:
+            process.wait(timeout=QUIT_GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
+            # taskkill's /T is the Windows counterpart of signalling the group.
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            process.wait()
+        return
+
+    for signal_number in (None, signal.SIGTERM, signal.SIGKILL):
+        if signal_number is not None:
+            _signal_group(process, signal_number)
+        deadline = time.monotonic() + QUIT_GRACE_SECONDS
+        while _group_alive(process) and time.monotonic() < deadline:
+            process.poll()  # reaps the launcher, which would otherwise linger as a zombie member
+            time.sleep(0.5)
+        if not _group_alive(process):
+            break
+    process.wait()
 
 
 def _point_client_at(socket_name, port):
@@ -85,6 +151,7 @@ def _surface(response):
 
 def query(binary, port, timeout, socket_name):
     import tempo_sim
+    import tempo_sim.tempo_core as tempo_core
     import tempo_sim.tempo_world as tempo_world
 
     endpoint_args, point_client = _point_client_at(socket_name, port)
@@ -92,7 +159,7 @@ def query(binary, port, timeout, socket_name):
 
     log = tempfile.NamedTemporaryFile(prefix="tempo-class-query-", suffix=".log", delete=False)
     print("  launching {} (log: {})".format(os.path.basename(binary), log.name))
-    process = subprocess.Popen(arguments, stdout=log, stderr=subprocess.STDOUT)
+    process = _launch(arguments, log)
 
     try:
         point_client()
@@ -136,11 +203,7 @@ def query(binary, port, timeout, socket_name):
                 time.sleep(2.0)
         raise RuntimeError("the sim did not answer within {}s: {}".format(timeout, last_error))
     finally:
-        process.terminate()
-        try:
-            process.wait(timeout=30)
-        except subprocess.TimeoutExpired:
-            process.kill()
+        _stop(process, tempo_core.quit)
 
 
 def main(argv):
