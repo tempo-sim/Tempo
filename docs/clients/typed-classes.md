@@ -601,7 +601,7 @@ does not exist rather than complaining about an assignment.
 | Member names | Unreal's own, verbatim — `truck.MaxSpeed` | snake_case — `truck.max_speed()` |
 | Reading | an attribute — `truck.MaxSpeed` | a call that can fail — `truck.max_speed()?` |
 | Writing | an assignment — `truck.MaxSpeed = 1200.0` | `truck.set_max_speed(1200.0)?` |
-| Async | the same name, awaited | a separate `_async` twin |
+| Async | none yet: attribute access is synchronous, so call it from synchronous code | a separate `_async` twin |
 | Inheritance | real in the stubs, flat at run time | a `Deref` chain, both |
 | Batching | `with world.batch() as b:` | `world::batch(\|\| { ... })?` |
 | Deferred read | `b.get(lambda: truck.MaxSpeed)` | `world::defer(\|\| truck.max_speed())?` |
