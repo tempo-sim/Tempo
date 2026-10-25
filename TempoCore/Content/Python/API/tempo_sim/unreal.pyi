@@ -22,47 +22,47 @@ _V = TypeVar("_V")
 _T = TypeVar("_T")
 _C = TypeVar("_C", covariant=True)
 
-class Vector:
+class UnrealVector:
     X: float
     Y: float
     Z: float
     def __init__(self, X: float = ..., Y: float = ..., Z: float = ...) -> None: ...
 
-class Vector2D:
+class UnrealVector2D:
     X: float
     Y: float
     def __init__(self, X: float = ..., Y: float = ...) -> None: ...
 
-class IntVector:
+class UnrealIntVector:
     X: int
     Y: int
     Z: int
     def __init__(self, X: int = ..., Y: int = ..., Z: int = ...) -> None: ...
 
-class IntPoint:
+class UnrealIntPoint:
     X: int
     Y: int
     def __init__(self, X: int = ..., Y: int = ...) -> None: ...
 
-class Rotator:
+class UnrealRotator:
     Roll: float
     Pitch: float
     Yaw: float
     def __init__(self, Roll: float = ..., Pitch: float = ..., Yaw: float = ...) -> None: ...
 
-class Quat:
+class UnrealQuat:
     X: float
     Y: float
     Z: float
     W: float
     def __init__(self, X: float = ..., Y: float = ..., Z: float = ..., W: float = ...) -> None: ...
 
-class Transform:
-    Location: Vector
-    Rotation: Rotator
-    def __init__(self, Location: Vector = ..., Rotation: Rotator = ...) -> None: ...
+class UnrealTransform:
+    Location: UnrealVector
+    Rotation: UnrealRotator
+    def __init__(self, Location: UnrealVector = ..., Rotation: UnrealRotator = ...) -> None: ...
 
-class Color:
+class UnrealColor:
     R: int
     G: int
     B: int

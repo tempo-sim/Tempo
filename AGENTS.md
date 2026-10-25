@@ -89,8 +89,9 @@ Reference implementations: `UTempoTimeServiceSubsystem`, `UTempoCoreServiceSubsy
 `TempoCore/Content/Python/API/tempo_sim/`, `TempoCore/Content/Rust/`).
 
 - `TempoCore/Content/Python/gen_protos.py` — discovers all protos across plugins (respecting
-  module deps), validates naming, runs `protoc` → C++ `.pb.{h,cc}` + Python `_pb2`/`_pb2_grpc`,
-  and re-exports protos for the C++/Rust generators.
+  module deps), validates naming, runs `protoc` → C++ `.pb.{h,cc}` + Python `_pb2`/`_pb2_grpc`
+  and the `_pb2.pyi` stubs (without which every message type is `Unknown` to a type checker), and
+  re-exports protos for the C++/Rust generators.
 - `TempoCore/Content/Python/gen_api.py` — introspects proto descriptors, uses Jinja2 to emit
   ergonomic per-module wrappers with sync + async variants (`tempo_sim.tempo_core`, etc.).
 - Rust (`gen_rust_api.py`, opt-in `TEMPO_GEN_RUST_API=1`) and C++ (`gen_cpp_api.py`) generators.
@@ -281,7 +282,12 @@ committed; fetched.
 - **Units in the typed class API**: the one place in Tempo that is **Unreal-native** — centimetres,
   degrees, left-handed. Raw `UPROPERTY` values carry no semantic tagging, so converting them is
   guesswork. That is what `native_units` on `GetProperty`/`SetProperty`/`CallFunction` selects, and
-  why `tempo_sim.unreal.Vector` is *not* `TempoCore.Geometry_pb2.Vector`.
+  why the runtime's value types are named `UnrealVector`, `UnrealRotator`, `UnrealTransform` and so
+  on — never plain `Vector`, which is `TempoCore.Geometry_pb2.Vector`, metres and right-handed.
+  `tempo_sim.conversion` / `tempo_sim::conversion` convert between the two (`unreal_to_si`,
+  `si_to_unreal`, overloaded on the type) with the server's own `TempoConversion.h` rules; a vector
+  is taken to be a length, and a direction has its own handedness-only pair. Don't re-derive the
+  rule anywhere else in the clients.
 - **Blueprint exposure is how a Tempo class declares its public scenario API.** The typed class
   surface is walked with `bBlueprintAccessibleOnly`, so a property reaches it only when it is
   declared `BlueprintReadWrite` (writable) or `BlueprintReadOnly`/`VisibleAnywhere` (read-only). Add

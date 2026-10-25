@@ -182,11 +182,56 @@ hit = results["SweepHitResult"]          # FHitResult
 centimetres, degrees, left-handed. Raw `UPROPERTY` values carry no semantic tagging, so converting
 them would be guesswork, and the typed API therefore does not convert at all.
 
-!!! danger "Two `Vector` types"
+That is why every value type the typed classes use is named `Unreal…` — `UnrealVector`,
+`UnrealRotator`, `UnrealTransform` and the rest, in `tempo_sim.unreal` and `tempo_sim::unreal`.
+`UnrealVector` is centimetres and left-handed; `TempoCore.Geometry_pb2.Vector`
+(`tempo_sim::proto::tempo_core::Vector`), which every other RPC uses, is metres and right-handed.
+They are not interchangeable.
 
-    `tempo_sim.unreal.Vector` is centimetres and left-handed. `TempoCore.Geometry_pb2.Vector`, which
-    every other RPC uses, is metres and right-handed. They are not interchangeable — convert
-    explicitly.
+To move a value between the two, convert it explicitly. `unreal_to_si` and `si_to_unreal` are
+overloaded on what they are given, and a type checker knows what each returns:
+
+=== "Python"
+
+    ```python
+    from tempo_sim import tempo_world as tw
+    from tempo_sim.conversion import si_to_unreal, unreal_to_si
+
+    location = sweeper.K2_GetActorLocation()           # UnrealVector, centimetres
+    tw.set_actor_location(actor="Marker", location=unreal_to_si(location))   # Vector, metres
+
+    state = tw.get_current_actor_state(actor="Marker")
+    pose = si_to_unreal(state.transform)               # UnrealTransform
+    ```
+
+=== "Rust"
+
+    ```rust
+    use tempo_sim::conversion::{si_to_unreal, unreal_to_si};
+
+    let location = sweeper.k2_get_actor_location()?;   // UnrealVector, centimetres
+    let metres = unreal_to_si(&location);              // proto::tempo_core::Vector, metres
+
+    let state = tempo_sim::tempo_world::get_current_actor_state("Marker".into(), false)?;
+    let pose = si_to_unreal(&state.transform.unwrap_or_default());   // UnrealTransform
+    ```
+
+| Unreal | TempoCore | Rule |
+|---|---|---|
+| `UnrealVector` | `Vector` | a length: cm ↔ m, Y negated |
+| `UnrealVector2D` | `Vector2D` | likewise |
+| `UnrealRotator` | `Rotation` | degrees ↔ radians, pitch and yaw negated, roll kept |
+| `UnrealTransform` | `Transform` | its location and rotation, each as above |
+
+These are the server's own rules ([Conventions](../concepts/conventions.md)).
+
+!!! warning "A direction is not a length"
+
+    The type alone cannot say whether a vector is a location or a direction, so `unreal_to_si`
+    takes it to be a length and scales it — right for a location or a velocity, wrong for a normal
+    or a unit axis. For those use `unreal_direction_to_si` and `si_direction_to_unreal`, which
+    change the handedness and nothing else. `UnrealQuat`, `UnrealIntVector`, `UnrealIntPoint` and
+    `UnrealColor` have no TempoCore counterpart and are not converted.
 
 ### One call instead of twenty
 

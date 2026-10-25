@@ -46,6 +46,11 @@ pose. A bare float or vector does not.
     Values you *read back* through `get_*_properties` are likewise Unreal-native and unconverted,
     as are values returned by [`call_function`](../plugins/tempo-world.md#calling-functions).
 
+The [typed classes](../clients/typed-classes.md#units) are Unreal-native throughout, and name their
+value types to match — `UnrealVector`, `UnrealRotator`, `UnrealTransform`. `tempo_sim.conversion`
+(Python) and `tempo_sim::conversion` (Rust) convert them to and from the TempoCore messages with the
+rules above.
+
 ## Scale is unitless
 
 Every other `Vector` in the API is meters and right-handed, and is converted on the way in. A

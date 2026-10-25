@@ -445,11 +445,11 @@ This also regularizes the documented wart where scalar and vector setters don't 
 transform-shaped ones do (`docs/concepts/conventions.md#the-exception-set_property`). Inside the
 typed API there is no exception.
 
-**Consequence to flag loudly:** two `Vector` types in one client —
-`tempo_sim.unreal.Vector` (cm, left-handed, typed API) and
+**Consequence to flag loudly:** two vector types in one client —
+`tempo_sim.unreal.UnrealVector` (cm, left-handed, typed API) and
 `tempo_sim.TempoCore.Geometry_pb2.Vector` (m, right-handed, every other RPC). Distinct names and an
-explicit conversion helper, never implicit coercion. Generated struct and enum names must be checked
-against the hand-written runtime names so a harvested `Vector` cannot shadow `tempo_sim.unreal.Vector`.
+explicit conversion helper, never implicit coercion (§22). Generated struct and enum names must be
+checked against the hand-written runtime names so a harvested struct cannot shadow a runtime type.
 
 ---
 
@@ -729,6 +729,7 @@ an empty subscription map, so a project that never streams pays nothing measurab
 | **10 — Asset catalog** | cooked assets from the packaged build; `AssetRef[T]` typed by class; a generated catalog per mount point; drift reporting | Designed in §19. **Done**; see §19.5. |
 | **11 — One package per project** | a project's classes in its own client package and crate (`tempo_sample.reflected`, `tempo_sample::reflected`) rather than a `-classes` one beside it | §20. **Done.** |
 | **12 — Subsystems** | a `subsystem` address on the typed requests; `world.get_subsystem` in both clients | §21. **Done.** |
+| **13 — Unreal-native values, named and converted** | the runtime value types renamed `Unreal…`; `unreal_to_si`/`si_to_unreal` in both clients; `_pb2` stubs | §22. **Done.** |
 
 ### Phase 0 results (measured)
 
@@ -829,8 +830,8 @@ requirements file. Worth preferring over a system dependency given how the CI im
 5. **Four classifiers drifting.** → §3a makes it one, in a public header.
 6. **Round-trip amplification.** 1,000 actors × one property = 1,000 RPCs. → `batch()`/`snapshot()`
    in Phase 1, documented from the start.
-7. **Two `Vector` types**, and generated names shadowing runtime ones. → distinct module paths,
-   explicit conversion, a generation-time name check (§7).
+7. **Two `Vector` types**, and generated names shadowing runtime ones. → distinct names
+   (`UnrealVector`), explicit conversion (§22), a generation-time name check (§7).
 8. **Consumer CI not enforcing strictness** — the guarantee is only as strong as the weakest
    consuming repo's Pyright config. → §10.4 ships the policy, not just advice.
 
@@ -1733,4 +1734,55 @@ component — which Rust's types already rule out and Python refuses at run time
 branch, adds a trailing positional parameter to their generated Rust wrappers (`set_property`,
 `call_function`). Python's wrappers take keywords and are unaffected; the Rust `Call` builder keeps
 its `call(actor, component, function)` and gains a `.subsystem(...)` method.
+
+---
+
+## 22. Unreal-native values, named and converted
+
+§7's decision stands: the typed API does not convert, because a raw `UPROPERTY` does not say what
+it measures. What it got wrong was the names. `tempo_sim.unreal.Vector` and
+`tempo_sim.TempoCore.Geometry_pb2.Vector` — and in Rust `tempo_sim::unreal::Vector` and
+`tempo_sim::proto::tempo_core::Vector` — were one import away from each other and a factor of a
+hundred and a sign apart, and nothing at a call site said which was which. §7 asked for "distinct
+names and an explicit conversion helper"; this delivers both.
+
+**The names.** Every hand-written value type carries the prefix: `UnrealVector`, `UnrealVector2D`,
+`UnrealIntVector`, `UnrealIntPoint`, `UnrealRotator`, `UnrealQuat`, `UnrealTransform`,
+`UnrealColor`, in both languages. All of them and not only the ones with a TempoCore namesake, so
+the rule is one sentence: a type from `unreal` is Unreal-native, and says so. The `Value` variants
+and the generated members are untouched; only the types they carry are renamed, in
+`gen_py_classes.SIMPLE_TYPES` and `gen_rust_classes`'s table.
+
+**The conversions.** `tempo_sim.conversion` and `tempo_sim::conversion`, beside the runtime and
+hand-written like it. `unreal_to_si` and `si_to_unreal` are overloaded on the type —
+`typing.overload` in Python, a pair of traits (`UnrealToSi`, `SiToUnreal`) behind generic functions
+in Rust — so the argument decides what comes back and a type checker knows it:
+
+| Unreal | TempoCore | Rule (`TempoConversion.h`'s) |
+|---|---|---|
+| `UnrealVector` | `Vector` | a length: cm ↔ m, Y negated |
+| `UnrealVector2D` | `Vector2D` | likewise |
+| `UnrealRotator` | `Rotation` | degrees ↔ radians, pitch and yaw negated, roll kept |
+| `UnrealTransform` | `Transform` | its location and rotation, each as above |
+
+A type alone cannot say whether a vector is a location or a direction, and the server itself treats
+them differently (a raycast's impact point is scaled, its normal only reflected). So the overloads
+take a vector to be a length — a velocity in cm/s converts the same way — and a direction has its
+own pair, `unreal_direction_to_si` and `si_direction_to_unreal`, which change the handedness alone.
+`UnrealQuat`, `UnrealIntVector`, `UnrealIntPoint` and `UnrealColor` have no TempoCore counterpart
+and are not converted: an integer vector cannot be scaled to metres, and there is no quaternion
+message. `spawn_actor`'s transform, which had its own copy of the rule in each client, now goes
+through `unreal_to_si`.
+
+**The stubs it needed.** A `_pb2` module builds its classes at import time, so without stubs Pyright
+sees no `Geometry_pb2.Vector` at all; every message type was `Unknown`, and the first overload of
+`si_to_unreal` matched anything, typing a converted `Rotation` as an `UnrealVector`. `gen_protos.py`
+now passes `--pyi_out`, so every `_pb2` module ships its `.pyi` (both packages already include
+`*.pyi`). That is a change beyond the conversions: every RPC wrapper's message annotations, which
+were `Unknown` until now, are real types.
+
+**Tests.** The `codegen` group checks the values against the rule in Python and Rust, that a
+round trip returns what went in, that an unconvertible value is refused, and — with Pyright and
+`rustc` — that a conversion is typed by what it converts, that the wrong direction or a value with
+no counterpart is an error, and that the old unprefixed names are gone.
 

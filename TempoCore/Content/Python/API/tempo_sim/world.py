@@ -18,7 +18,8 @@
 from contextlib import contextmanager
 from typing import Any, Iterator, List, Optional, TypeVar, overload
 
-from .unreal import (Batch, DynamicObject, Object, Rotator, Transform, Vector,
+from .conversion import unreal_to_si
+from .unreal import (Batch, DynamicObject, Object, UnrealRotator, UnrealTransform, UnrealVector,
                      registered_classes)
 
 T = TypeVar("T", bound=Object)
@@ -29,27 +30,14 @@ def _world():
     return tempo_world
 
 
-def _spawn_transform(transform: Optional[Transform]):
-    """A Transform as the message SpawnActor takes.
+def _spawn_transform(transform: Optional[UnrealTransform]):
+    """An UnrealTransform as the message SpawnActor takes.
 
     SpawnActor converts: it reads meters, radians and right-handed, unlike the typed property API,
-    which is Unreal-native throughout. So a native-unit Transform has to be converted on the way
-    in, rather than passed through.
+    which is Unreal-native throughout. So a native-unit transform has to be converted on the way in,
+    rather than passed through.
     """
-    import math
-
-    import tempo_sim.TempoCore.Geometry_pb2 as Geometry
-
-    transform = transform or Transform()
-    message = Geometry.Transform()
-    # cm -> m, and Unreal's left-handed Y is the API's right-handed -Y.
-    message.location.x = transform.Location.X / 100.0
-    message.location.y = -transform.Location.Y / 100.0
-    message.location.z = transform.Location.Z / 100.0
-    message.rotation.r = math.radians(transform.Rotation.Roll)
-    message.rotation.p = -math.radians(transform.Rotation.Pitch)
-    message.rotation.y = -math.radians(transform.Rotation.Yaw)
-    return message
+    return unreal_to_si(transform or UnrealTransform())
 
 
 def get_actors(cls: type[T]) -> List[T]:
@@ -133,7 +121,7 @@ def get_subsystem(cls: type[T]) -> T:
     return cls(subsystem=cls.__tempo_class__, class_path=cls.__tempo_class__)
 
 
-def spawn_actor(cls: type[T], transform: Optional[Transform] = None,
+def spawn_actor(cls: type[T], transform: Optional[UnrealTransform] = None,
                 relative_to: str = "") -> T:
     """Spawn one actor of a class and return a handle to it.
 
@@ -146,7 +134,7 @@ def spawn_actor(cls: type[T], transform: Optional[Transform] = None,
 
 
 @contextmanager
-def spawn_actor_deferred(cls: type[T], transform: Optional[Transform] = None,
+def spawn_actor_deferred(cls: type[T], transform: Optional[UnrealTransform] = None,
                          relative_to: str = "") -> Iterator[T]:
     """Spawn an actor, configure it, and only then let it begin.
 

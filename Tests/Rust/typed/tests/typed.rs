@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use project::reflected::classes::engine::{Actor, StaticMeshActor};
 use project::reflected::enums::EWalkableSlopeBehavior;
 use project::reflected::structs::FWalkableSlopeOverride;
-use tempo_sim::unreal::{Class, Vector};
+use tempo_sim::unreal::{Class, UnrealVector};
 use tempo_sim::world;
 
 /// Point the client at the sim and block until its gRPC server answers.
@@ -165,7 +165,7 @@ fn a_component_is_reachable_through_its_owner() {
 
     // Typed as StaticMeshComponent, so this is its own property and not the actor's.
     let component = actor.actor().static_mesh_component0();
-    let _: Vector = component.relative_location().expect("read RelativeLocation");
+    let _: UnrealVector = component.relative_location().expect("read RelativeLocation");
 }
 
 #[test]
@@ -253,7 +253,7 @@ fn an_out_struct_comes_back_with_the_return_value() {
     // returned only its bool. It is now a value, read back by name.
     let (moved, hit) = actor
         .actor()
-        .k2_set_actor_location(Vector { x: 100.0, y: 0.0, z: 0.0 }, false, true)
+        .k2_set_actor_location(UnrealVector { x: 100.0, y: 0.0, z: 0.0 }, false, true)
         .expect("K2_SetActorLocation");
     assert!(moved);
     assert_eq!(hit.b_blocking_hit, Some(false), "nothing to hit with the sweep off");

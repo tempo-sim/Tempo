@@ -305,7 +305,7 @@ def test_writing_a_read_only_property_is_refused_before_the_wire(sim_server):
     # RelativeLocation is BlueprintReadOnly, and the refusal happens client-side -- which is why it
     # does not matter that this handle addresses nothing.
     with pytest.raises(AttributeError, match="read-only"):
-        handle.RelativeLocation = unreal.Vector(1.0, 2.0, 3.0)
+        handle.RelativeLocation = unreal.UnrealVector(1.0, 2.0, 3.0)
 
 
 @requires_classes
@@ -558,7 +558,7 @@ def test_an_out_struct_comes_back_by_name(sim_server):
         root = next(c.name for c in tw.get_all_components(actor=spawned.actor).components
                     if "StaticMesh" in c.component_type)
         tw.set_enum_property(actor=spawned.actor, component=root, property="Mobility", value="Movable")
-        results = spawned.K2_SetActorLocation(unreal.Vector(100.0, 0.0, 0.0), False, True)
+        results = spawned.K2_SetActorLocation(unreal.UnrealVector(100.0, 0.0, 0.0), False, True)
         assert results["ReturnValue"] is True
         hit = results["SweepHitResult"]
         assert type(hit).__tempo_struct__ == "FHitResult"

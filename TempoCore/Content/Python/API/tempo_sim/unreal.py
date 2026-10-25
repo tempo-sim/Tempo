@@ -8,9 +8,10 @@
 # so converting them would be guesswork; the typed API therefore does not convert at all and says so
 # here rather than per property.
 #
-# WARNING: `Vector` here is NOT `tempo_sim.TempoCore.Geometry_pb2.Vector`. This one is centimeters
-# and left-handed, as Unreal stores it. That one is meters and right-handed, as every other Tempo
-# RPC speaks. They are not interchangeable; convert explicitly.
+# Which is why every value type here is named `Unreal...`: `UnrealVector` is centimeters and
+# left-handed, as Unreal stores it, and `tempo_sim.TempoCore.Geometry_pb2.Vector` is meters and
+# right-handed, as every other Tempo RPC speaks. They are not interchangeable, and a shared name
+# made them easy to mistake for one another. `tempo_sim.conversion` converts between the two.
 #
 # Note on `Object`: it declares no `__getattr__`. That is deliberate and load-bearing. A catch-all
 # visible to a type checker makes *every* attribute legal on *every* generated subclass, which would
@@ -29,7 +30,7 @@ from dataclasses import dataclass, field
 
 
 @dataclass
-class Vector:
+class UnrealVector:
     """A location or direction in centimeters, left-handed."""
     X: float = 0.0
     Y: float = 0.0
@@ -37,26 +38,26 @@ class Vector:
 
 
 @dataclass
-class Vector2D:
+class UnrealVector2D:
     X: float = 0.0
     Y: float = 0.0
 
 
 @dataclass
-class IntVector:
+class UnrealIntVector:
     X: int = 0
     Y: int = 0
     Z: int = 0
 
 
 @dataclass
-class IntPoint:
+class UnrealIntPoint:
     X: int = 0
     Y: int = 0
 
 
 @dataclass
-class Rotator:
+class UnrealRotator:
     """An orientation in degrees, left-handed."""
     Roll: float = 0.0
     Pitch: float = 0.0
@@ -64,7 +65,7 @@ class Rotator:
 
 
 @dataclass
-class Quat:
+class UnrealQuat:
     """A rotation, left-handed."""
     X: float = 0.0
     Y: float = 0.0
@@ -73,14 +74,14 @@ class Quat:
 
 
 @dataclass
-class Transform:
+class UnrealTransform:
     """A pose: centimeters and degrees, left-handed."""
-    Location: Vector = field(default_factory=Vector)
-    Rotation: Rotator = field(default_factory=Rotator)
+    Location: UnrealVector = field(default_factory=UnrealVector)
+    Rotation: UnrealRotator = field(default_factory=UnrealRotator)
 
 
 @dataclass
-class Color:
+class UnrealColor:
     """8-bit RGB."""
     R: int = 0
     G: int = 0
@@ -779,12 +780,12 @@ _COMPONENT_VARIANTS = {
 
 # How a component-shaped variant maps onto one of this module's value types.
 _COMPONENT_TYPES = {
-    "vector_value": (Vector, ("X", "Y", "Z")),
-    "vector2d_value": (Vector2D, ("X", "Y")),
-    "int_vector_value": (IntVector, ("X", "Y", "Z")),
-    "int_point_value": (IntPoint, ("X", "Y")),
-    "quat_value": (Quat, ("X", "Y", "Z", "W")),
-    "color_value": (Color, ("R", "G", "B")),
+    "vector_value": (UnrealVector, ("X", "Y", "Z")),
+    "vector2d_value": (UnrealVector2D, ("X", "Y")),
+    "int_vector_value": (UnrealIntVector, ("X", "Y", "Z")),
+    "int_point_value": (UnrealIntPoint, ("X", "Y")),
+    "quat_value": (UnrealQuat, ("X", "Y", "Z", "W")),
+    "color_value": (UnrealColor, ("R", "G", "B")),
 }
 
 
@@ -873,15 +874,15 @@ def _to_value(variant, value):
         return message
 
     if variant == "rotator_value":
-        if not isinstance(value, Rotator):
-            raise TypeError("expected Rotator, got {!r}".format(value))
+        if not isinstance(value, UnrealRotator):
+            raise TypeError("expected UnrealRotator, got {!r}".format(value))
         target = message.rotator_value
         target.r, target.p, target.y = value.Roll, value.Pitch, value.Yaw
         return message
 
     if variant == "transform_value":
-        if not isinstance(value, Transform):
-            raise TypeError("expected Transform, got {!r}".format(value))
+        if not isinstance(value, UnrealTransform):
+            raise TypeError("expected UnrealTransform, got {!r}".format(value))
         target = message.transform_value
         target.location.x, target.location.y, target.location.z = (
             value.Location.X, value.Location.Y, value.Location.Z)
@@ -931,12 +932,13 @@ def _from_value(message):
 
     if variant == "rotator_value":
         source = message.rotator_value
-        return Rotator(source.r, source.p, source.y)
+        return UnrealRotator(source.r, source.p, source.y)
 
     if variant == "transform_value":
         source = message.transform_value
-        return Transform(Vector(source.location.x, source.location.y, source.location.z),
-                         Rotator(source.rotation.r, source.rotation.p, source.rotation.y))
+        return UnrealTransform(
+            UnrealVector(source.location.x, source.location.y, source.location.z),
+            UnrealRotator(source.rotation.r, source.rotation.p, source.rotation.y))
 
     if variant in ("asset_array_value", "asset_set_value"):
         assets = [AssetRef(path) for path in getattr(message, variant).values]

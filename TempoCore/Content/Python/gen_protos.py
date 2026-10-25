@@ -608,6 +608,9 @@ class ProtoGenerator:
         python_cmd = [
             str(self.protoc),
             f"--python_out={python_out}",
+            # The stubs are what a type checker reads: a _pb2 module builds its classes at import
+            # time, so without them every message type is Unknown.
+            f"--pyi_out={python_out}",
             f"-I{include_dir}",
             str(proto_file),
         ]

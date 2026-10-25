@@ -157,11 +157,11 @@ RotationRate is now 120.0
 
 --- Components ---
 Body is a StaticMeshComponent
-Body.RelativeLocation = Vector(X=0.0, Y=0.0, Z=500.0)
+Body.RelativeLocation = UnrealVector(X=0.0, Y=0.0, Z=500.0)
 steering factor 1.0
 
 --- Functions ---
-moved to Vector(X=300.0, Y=0.0, Z=500.0)
+moved to UnrealVector(X=300.0, Y=0.0, Z=500.0)
 
 --- Batching and snapshots ---
 two writes, one call
@@ -191,8 +191,9 @@ The file is about 140 lines and each section stands alone. Worth knowing as you 
   calling `K2_SetActorLocation`, not by assigning to a transform, because assigning never calls
   `UpdateComponentToWorld`.
 - **Units are Unreal's own** — centimetres, degrees, left-handed. This is the one corner of the
-  Tempo API that does not convert, and `tempo_sim.unreal.Vector` is not the `Vector` the other RPCs
-  use. See [Units](../clients/typed-classes.md#units).
+  Tempo API that does not convert, which is why its types are named `UnrealVector` and so on rather
+  than `Vector`, the type the other RPCs use; `tempo_sim.conversion` converts between them. See
+  [Units](../clients/typed-classes.md#units).
 - **`is_a` asks about the actor**, not about the handle, which is what makes narrowing a broad query
   work.
 
@@ -245,7 +246,7 @@ Uncomment one, run `pyright`, and read what comes back:
 | Uncommented | Pyright |
 |---|---|
 | `sweeper.RotatoinRate = 45.0` | `Cannot assign to attribute "RotatoinRate" for class "BP_StreetSweeper_C"` |
-| `sweeper.Body.RelativeLocation = target` | `Cannot assign to attribute "RelativeLocation" for class "StaticMeshComponent" — "Vector" is not assignable to "property"` |
+| `sweeper.Body.RelativeLocation = target` | `Cannot assign to attribute "RelativeLocation" for class "StaticMeshComponent" — "UnrealVector" is not assignable to "property"` |
 | `sweeper.RotationRate = "fast"` | `Cannot assign to attribute "RotationRate" for class "BP_StreetSweeper_C"` |
 | `sweeper.Body.NoSuchThing` | `Cannot access attribute "NoSuchThing" for class "StaticMeshComponent"` |
 

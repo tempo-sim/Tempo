@@ -10,6 +10,7 @@
 !__init__.py
 !_tempo_context.py
 !_tempo_context.pyi
+!conversion.py
 !py.typed
 !unreal.py
 !unreal.pyi

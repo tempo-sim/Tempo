@@ -45,31 +45,19 @@
 //! compiler — and in a packaged build it is not even the name the editor showed, so a hard-coded
 //! one is its own kind of drift.
 
+use crate::conversion::unreal_to_si;
 use crate::error::TempoError;
-use crate::unreal::{note_origin, Class, ObjectRef, Transform};
+use crate::unreal::{note_origin, Class, ObjectRef, UnrealTransform};
 
 pub use crate::unreal::{batch, defer, Deferred};
 
-/// A `Transform` as `SpawnActor` takes it.
+/// An [`UnrealTransform`] as `SpawnActor` takes it.
 ///
 /// `SpawnActor` converts: it reads meters, radians and right-handed, unlike the typed property
-/// API, which is Unreal-native throughout. So a native-unit `Transform` has to be converted on the
+/// API, which is Unreal-native throughout. So a native-unit transform has to be converted on the
 /// way in, rather than passed through.
-fn spawn_transform(transform: Option<Transform>) -> crate::proto::tempo_core::Transform {
-    let transform = transform.unwrap_or_default();
-    crate::proto::tempo_core::Transform {
-        // cm -> m, and Unreal's left-handed Y is the API's right-handed -Y.
-        location: Some(crate::proto::tempo_core::Vector {
-            x: transform.location.x / 100.0,
-            y: -transform.location.y / 100.0,
-            z: transform.location.z / 100.0,
-        }),
-        rotation: Some(crate::proto::tempo_core::Rotation {
-            r: transform.rotation.roll.to_radians(),
-            p: -transform.rotation.pitch.to_radians(),
-            y: -transform.rotation.yaw.to_radians(),
-        }),
-    }
+fn spawn_transform(transform: Option<UnrealTransform>) -> crate::proto::tempo_core::Transform {
+    unreal_to_si(&transform.unwrap_or_default())
 }
 
 /// Every actor of this class, or of a class derived from it.
@@ -213,7 +201,7 @@ pub fn find_actor(name: &str) -> Result<ObjectRef, TempoError> {
 ///
 /// Typed for free: the RPC already takes the class, so there is nothing to infer.
 pub fn spawn_actor<T: Class>(
-    transform: Option<Transform>,
+    transform: Option<UnrealTransform>,
     relative_to: &str,
 ) -> Result<T, TempoError> {
     note_origin::<T>();
@@ -228,7 +216,7 @@ pub fn spawn_actor<T: Class>(
 
 /// Spawn one actor of a class, without blocking.
 pub async fn spawn_actor_async<T: Class>(
-    transform: Option<Transform>,
+    transform: Option<UnrealTransform>,
     relative_to: &str,
 ) -> Result<T, TempoError> {
     note_origin::<T>();
@@ -285,7 +273,7 @@ pub async fn spawn_actor_async<T: Class>(
 /// world but never initialized, which is worse than one configured only partway. The error from
 /// `configure` is what comes back.
 pub fn spawn_actor_deferred<T, F>(
-    transform: Option<Transform>,
+    transform: Option<UnrealTransform>,
     relative_to: &str,
     configure: F,
 ) -> Result<T, TempoError>

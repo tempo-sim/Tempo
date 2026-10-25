@@ -53,14 +53,14 @@ SIMPLE_TYPES = {
     "float": "float",
     "double": "float",
     "string": "str",
-    "vector": "Vector",
-    "vector2d": "Vector2D",
-    "intvector": "IntVector",
-    "intpoint": "IntPoint",
-    "rotator": "Rotator",
-    "quat": "Quat",
-    "transform": "Transform",
-    "color": "Color",
+    "vector": "UnrealVector",
+    "vector2d": "UnrealVector2D",
+    "intvector": "UnrealIntVector",
+    "intpoint": "UnrealIntPoint",
+    "rotator": "UnrealRotator",
+    "quat": "UnrealQuat",
+    "transform": "UnrealTransform",
+    "color": "UnrealColor",
 }
 
 # The names those runtime types are imported under.

@@ -748,8 +748,8 @@ impl Call {
     update_lib_rs(tempo_root_dir, tempo_generated)
     # Sweep stale wrappers: anything that's not infra (context/error/streaming),
     # not lib.rs/proto.rs, and not in the current generated set.
-    _tempo_keep = {"context.rs", "error.rs", "streaming.rs", "lib.rs", "proto.rs",
-                     "unreal.rs", "world.rs"}
+    _tempo_keep = {"context.rs", "conversion.rs", "error.rs", "streaming.rs", "lib.rs",
+                   "proto.rs", "unreal.rs", "world.rs"}
     _tempo_keep |= {f"{m}.rs" for m in tempo_generated}
     for entry in os.listdir(tempo_root_dir):
         full = os.path.join(tempo_root_dir, entry)
@@ -834,7 +834,9 @@ pub mod proto;
 pub mod streaming;
 
 // The typed World API: hand-written, unlike everything below, and the base a project's generated
-// types build on.
+// types build on, and the conversions between its Unreal-native values and the SI ones the RPCs
+// speak.
+pub mod conversion;
 pub mod unreal;
 pub mod world;
 

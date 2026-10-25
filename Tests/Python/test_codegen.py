@@ -211,7 +211,8 @@ import fixture_classes.structs as structs
 import tempo_sim.unreal as _unreal
 
 def ok(w: E.Widget) -> None:
-    w.Settings = structs.FWidgetSettings(Scale=2.0, Inner=structs.FWidgetTrim(Offset=_unreal.Vector()))
+    w.Settings = structs.FWidgetSettings(
+        Scale=2.0, Inner=structs.FWidgetTrim(Offset=_unreal.UnrealVector()))
     w.Settings.Scale = 3.0
     result: structs.FWidgetSettings = w.Configure(structs.FWidgetSettings(Scale=1.0))
     print(result.Scale, result.Label)
@@ -341,7 +342,7 @@ def drift(w: E.Widget) -> None:
     ("removed property", "w.bEnabledd = True"),
     # A property that became read-only. This is why read-only members are emitted as setter-less
     # properties rather than plain annotations: a plain annotation is writable.
-    ("read-only property", "w.Offset = _unreal.Vector()"),
+    ("read-only property", "w.Offset = _unreal.UnrealVector()"),
     # A property whose type changed.
     ("wrong type", 'w.bEnabled = "yes"'),
     # A function removed, or its signature changed.
@@ -376,3 +377,50 @@ def gone() -> enums.EWidgetMode:
     return enums.EWidgetMode.Removed
 """, tmp_path)
     assert errors, "a removed enumerator should be a type error"
+
+
+def test_conversions_are_typed_by_what_they_convert(generated, tmp_path):
+    # Leans on the _pb2 stubs: without them every message type is Unknown, the first overload of
+    # si_to_unreal matches anything, and a Rotation converts to a type-checked UnrealVector.
+    errors = check(generated, """
+import tempo_sim.TempoCore.Geometry_pb2 as Geometry
+from tempo_sim.conversion import (si_direction_to_unreal, si_to_unreal, unreal_direction_to_si,
+                                  unreal_to_si)
+from tempo_sim.unreal import UnrealRotator, UnrealTransform, UnrealVector, UnrealVector2D
+
+def ok() -> None:
+    v: Geometry.Vector = unreal_to_si(UnrealVector())
+    v2: Geometry.Vector2D = unreal_to_si(UnrealVector2D())
+    r: Geometry.Rotation = unreal_to_si(UnrealRotator())
+    t: Geometry.Transform = unreal_to_si(UnrealTransform())
+    d: Geometry.Vector = unreal_direction_to_si(UnrealVector())
+    uv: UnrealVector = si_to_unreal(Geometry.Vector())
+    uv2: UnrealVector2D = si_to_unreal(Geometry.Vector2D())
+    ur: UnrealRotator = si_to_unreal(Geometry.Rotation())
+    ut: UnrealTransform = si_to_unreal(Geometry.Transform())
+    ud: UnrealVector = si_direction_to_unreal(Geometry.Vector())
+""", tmp_path)
+    assert not errors, errors
+
+
+@pytest.mark.parametrize("case,source", [
+    ("a conversion typed as another quantity",
+     "v: UnrealVector = si_to_unreal(Geometry.Rotation())"),
+    ("an SI result typed as Unreal", "v: UnrealVector = unreal_to_si(UnrealVector())"),
+    ("converting an Unreal value the wrong way", "si_to_unreal(UnrealVector())"),
+    ("converting an SI value the wrong way", "unreal_to_si(Geometry.Vector())"),
+    ("a value with no SI counterpart", "unreal_to_si(UnrealQuat())"),
+    ("a direction that is not a vector", "unreal_direction_to_si(UnrealRotator())"),
+    # The rename itself: the unprefixed names were what made the two vectors easy to mistake.
+    ("the old unprefixed name", "from tempo_sim.unreal import Vector"),
+])
+def test_conversion_misuse_is_a_type_error(generated, tmp_path, case, source):
+    errors = check(generated, """
+import tempo_sim.TempoCore.Geometry_pb2 as Geometry
+from tempo_sim.conversion import si_to_unreal, unreal_direction_to_si, unreal_to_si
+from tempo_sim.unreal import UnrealQuat, UnrealRotator, UnrealVector
+
+def drift() -> None:
+    {}
+""".format(source), tmp_path)
+    assert errors, "{} should be a type error, but Pyright accepted it".format(case)

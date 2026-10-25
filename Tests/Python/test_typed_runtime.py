@@ -8,6 +8,8 @@ replaced, and the rest is real -- the generated package, the metadata, the Value
     pytest -m codegen Tests/Python
 """
 
+import dataclasses
+import math
 import os
 import subprocess
 import sys
@@ -246,8 +248,9 @@ def test_reading_an_expressible_struct_still_returns_a_live_proxy(classes, wire)
 
     widget = classes.Widget("MyActor")
     assert isinstance(widget.Settings, unreal.StructProxy)
-    widget.Settings.Inner.Offset = unreal.Vector(1.0, 2.0, 3.0)
-    assert wire["writes"] == [("MyActor", "", "Settings.Inner.Offset", unreal.Vector(1.0, 2.0, 3.0))]
+    widget.Settings.Inner.Offset = unreal.UnrealVector(1.0, 2.0, 3.0)
+    assert wire["writes"] == [
+        ("MyActor", "", "Settings.Inner.Offset", unreal.UnrealVector(1.0, 2.0, 3.0))]
 
 
 def test_a_member_nothing_can_read_is_not_offered(classes, wire):
@@ -334,22 +337,76 @@ def test_scalar_and_container_values_round_trip(classes, variant, value):
 def test_structured_values_round_trip(classes):
     import tempo_sim.unreal as unreal
 
-    for original in (unreal.Vector(1.0, 2.0, 3.0),
-                     unreal.Vector2D(4.0, 5.0),
-                     unreal.IntVector(1, 2, 3),
-                     unreal.IntPoint(6, 7),
-                     unreal.Rotator(10.0, 20.0, 30.0),
-                     unreal.Quat(0.0, 0.0, 0.0, 1.0),
-                     unreal.Color(1, 2, 3)):
+    for original in (unreal.UnrealVector(1.0, 2.0, 3.0),
+                     unreal.UnrealVector2D(4.0, 5.0),
+                     unreal.UnrealIntVector(1, 2, 3),
+                     unreal.UnrealIntPoint(6, 7),
+                     unreal.UnrealRotator(10.0, 20.0, 30.0),
+                     unreal.UnrealQuat(0.0, 0.0, 0.0, 1.0),
+                     unreal.UnrealColor(1, 2, 3)):
         variant = {
-            "Vector": "vector_value", "Vector2D": "vector2d_value", "IntVector": "int_vector_value",
-            "IntPoint": "int_point_value", "Rotator": "rotator_value", "Quat": "quat_value",
-            "Color": "color_value",
+            "UnrealVector": "vector_value", "UnrealVector2D": "vector2d_value",
+            "UnrealIntVector": "int_vector_value", "UnrealIntPoint": "int_point_value",
+            "UnrealRotator": "rotator_value", "UnrealQuat": "quat_value",
+            "UnrealColor": "color_value",
         }[type(original).__name__]
         assert unreal._from_value(unreal._to_value(variant, original)) == original
 
-    pose = unreal.Transform(unreal.Vector(1.0, 2.0, 3.0), unreal.Rotator(4.0, 5.0, 6.0))
+    pose = unreal.UnrealTransform(unreal.UnrealVector(1.0, 2.0, 3.0),
+                                  unreal.UnrealRotator(4.0, 5.0, 6.0))
     assert unreal._from_value(unreal._to_value("transform_value", pose)) == pose
+
+
+def _flat(value):
+    """A value type's fields in order, a nested one's spliced in, for an approximate comparison."""
+    return [leaf for item in dataclasses.astuple(value)
+            for leaf in (item if isinstance(item, tuple) else (item,))]
+
+
+def test_conversions_apply_the_servers_rule(classes):
+    # The expected numbers are TempoConversion.h's: cm -> m with Y negated for a length, degrees ->
+    # radians with pitch and yaw negated for a rotation, and a direction's handedness alone.
+    import tempo_sim.unreal as unreal
+    from tempo_sim.conversion import (si_direction_to_unreal, si_to_unreal,
+                                      unreal_direction_to_si, unreal_to_si)
+
+    v = unreal_to_si(unreal.UnrealVector(100.0, 50.0, -25.0))
+    assert (v.x, v.y, v.z) == (1.0, -0.5, -0.25)
+    v2 = unreal_to_si(unreal.UnrealVector2D(100.0, 50.0))
+    assert (v2.x, v2.y) == (1.0, -0.5)
+    r = unreal_to_si(unreal.UnrealRotator(Roll=90.0, Pitch=45.0, Yaw=180.0))
+    assert (r.r, r.p, r.y) == pytest.approx((math.pi / 2, -math.pi / 4, -math.pi))
+    t = unreal_to_si(unreal.UnrealTransform(unreal.UnrealVector(100.0, 50.0, 0.0),
+                                            unreal.UnrealRotator(Yaw=90.0)))
+    assert (t.location.x, t.location.y, t.rotation.y) == pytest.approx((1.0, -0.5, -math.pi / 2))
+
+    d = unreal_direction_to_si(unreal.UnrealVector(0.0, 1.0, 0.0))
+    assert (d.x, d.y, d.z) == (0.0, -1.0, 0.0)
+    assert si_direction_to_unreal(d) == unreal.UnrealVector(0.0, 1.0, 0.0)
+
+    for value in (unreal.UnrealVector(1.0, 2.0, 3.0), unreal.UnrealVector2D(4.0, 5.0),
+                  unreal.UnrealRotator(10.0, 20.0, 30.0),
+                  unreal.UnrealTransform(unreal.UnrealVector(1.0, 2.0, 3.0),
+                                         unreal.UnrealRotator(4.0, 5.0, 6.0))):
+        back = si_to_unreal(unreal_to_si(value))
+        assert type(back) is type(value)
+        assert _flat(back) == pytest.approx(_flat(value)), (value, back)
+
+
+def test_conversions_refuse_what_they_cannot_convert(classes):
+    import tempo_sim.TempoCore.Geometry_pb2 as Geometry
+    import tempo_sim.unreal as unreal
+    from tempo_sim.conversion import si_to_unreal, unreal_to_si
+
+    # No TempoCore counterpart, and an integer vector cannot be scaled to meters anyway.
+    for value in (unreal.UnrealQuat(), unreal.UnrealIntVector(), unreal.UnrealIntPoint(),
+                  unreal.UnrealColor()):
+        with pytest.raises(TypeError, match="unreal_to_si"):
+            unreal_to_si(value)
+    with pytest.raises(TypeError, match="si_to_unreal"):
+        si_to_unreal(unreal.UnrealVector())
+    with pytest.raises(TypeError, match="unreal_to_si"):
+        unreal_to_si(Geometry.Vector())
 
 
 def test_enum_values_travel_as_their_authored_name(classes):
@@ -1148,8 +1205,8 @@ def test_struct_values_round_trip_with_nesting(classes):
     import tempo_sim.unreal as unreal
     import fixture_classes.structs as structs
 
-    original = structs.FWidgetSettings(Scale=1.5,
-                                       Inner=structs.FWidgetTrim(Offset=unreal.Vector(1.0, 2.0, 3.0)))
+    original = structs.FWidgetSettings(
+        Scale=1.5, Inner=structs.FWidgetTrim(Offset=unreal.UnrealVector(1.0, 2.0, 3.0)))
     back = unreal._from_value(unreal._to_value("struct_value", original))
     # The generated value type, not a bare one: it is what the stub promised a read returns.
     assert type(back) is structs.FWidgetSettings
