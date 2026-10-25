@@ -26,6 +26,7 @@ from gen_common import (
     gather_enums,
     gather_messages,
     gather_services,
+    is_proto_module,
     package_import_name,
     pascal_to_snake,
     prost_to_snake,
@@ -999,22 +1000,16 @@ if __name__ == "__main__":
     crate_artifact = tempo_crate_dir / "target" / "package" / f"tempo-sim-{crate_version}.crate"
 
     # Discover modules by inspecting the nested pb2 trees: each subdir of a
-    # package dir holding pb2 is one module. {module: (namespace, dir)}. A subdir
-    # without any is something else -- the typed classes, `reflected`, sit beside the
-    # proto modules in both packages -- and counting it would both report a
-    # project module that does not exist and collide the two packages' `reflected`.
-    def _is_proto_module(d):
-        return d.is_dir() and d.name != "__pycache__" and any(d.rglob("*_pb2.py"))
-
+    # package dir holding pb2 is one module. {module: (namespace, dir)}.
     module_dirs = {}
     for name in sorted(os.listdir(tempo_sim_pb2_dir)):
         d = Path(tempo_sim_pb2_dir, name)
-        if _is_proto_module(d):
+        if is_proto_module(d):
             module_dirs[name] = (INFRA_PACKAGE, d)
     if project_pb2_dir.exists():
         for name in sorted(os.listdir(project_pb2_dir)):
             d = project_pb2_dir / name
-            if _is_proto_module(d):
+            if is_proto_module(d):
                 if name in module_dirs:
                     raise RuntimeError(
                         f"Module name collision: {name!r} exists in both the "

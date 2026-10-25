@@ -385,8 +385,8 @@ fn compare(
     if linked.is_empty() {
         return Err(TempoError::SchemaMismatch(
             "no generated classes are linked, so there is nothing to check. Add this build's \
-             project crate (e.g. `tempo-sample`, whose classes are its `ue` module), which ships \
-             in Packaged/API/Rust alongside the tempo-sim crate."
+             project crate (e.g. `tempo-sample`, whose classes are its `reflected` module), which \
+             ships in Packaged/API/Rust alongside the tempo-sim crate."
                 .to_string(),
         ));
     }

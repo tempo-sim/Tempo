@@ -26,6 +26,7 @@ from gen_common import (
     gather_enums,
     gather_messages,
     gather_services,
+    is_proto_module,
     package_import_name,
     pascal_to_snake,
     project_package_name,
@@ -468,7 +469,7 @@ class CppApiGenerator:
             if not pb2_root.exists():
                 continue
             for d in sorted(pb2_root.iterdir()):
-                if d.is_dir() and d.name != "__pycache__":
+                if is_proto_module(d):
                     if d.name in module_dirs:
                         raise RuntimeError(
                             f"Module name collision: {d.name!r} exists in both the "
