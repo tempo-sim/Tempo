@@ -186,7 +186,8 @@ fails under Pyright instead of at runtime. See `TYPED_WORLD_API_PLAN.md`.
   `#[repr(transparent)]` newtype: `unreal::upcast`, behind an `unsafe trait Class` whose "I am a
   newtype over `ObjectRef`" contract only the generator satisfies, and `AssetRef`'s `Deref` to its
   superclass's `AssetRef`, sound because the class is only a `PhantomData`. Generated Rust contains
-  none.
+  no `unsafe` block; its one `unsafe` is the `unsafe impl Class` each class carries, which states
+  that newtype contract.
 - **`gen_cpp_classes.py`** emits the C++ typed classes for the C++ client, behind
   `TEMPO_GEN_CPP_API`: a header per class (including its superclass, forward-declaring the rest), a
   header per module, enums, structs, assets and the hierarchy, with every definition out of line;
@@ -394,9 +395,11 @@ sim (not the editor). They cover the client-facing API contract and behavior ove
   surface), `core` (time control), `world` (spawn/query/move/destroy + coordinate round trips, and
   the typed class API), `movement` (commandable pawns; skips if the map has none), `sensors` (camera
   frame — needs a GPU, **default-off**), `codegen` (the typed class generator, its runtime, and the
-  schema diff — **no sim and no wheel**: it runs the in-tree source against a fixture schema and
-  needs `pyright`, which `pip install pyright` brings with its own Node; the Rust half of the same
-  group needs `cargo` and is skipped without it). Run:
+  schema diff — **no sim**: it runs the in-tree source against a fixture schema. It needs the
+  generated proto modules, which a local build leaves in the tree and which the runner otherwise
+  extracts from the packaged wheel (the only thing it takes from a package), and `pyright`, which
+  `pip install pyright` brings with its own Node; the Rust and C++ halves of the same group need
+  `cargo` and a C++ compiler and are skipped without them). Run:
   `Scripts/TestPythonAPI.sh [group]`.
 - **The `codegen` group tests behavior, not text.** A golden-output test would notice that the
   emitted stubs changed; what matters is whether Pyright *rejects* what it must. So each case

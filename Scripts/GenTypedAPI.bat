@@ -1,14 +1,17 @@
 @echo off
 setlocal enabledelayedexpansion
 
-REM Generates the typed class surface for this build: runs the schema commandlet in the editor,
-REM then turns the one schema into classes for the project's Python package and (when Rust
-REM generation is opted in) its Rust crate.
+REM Generates the typed class surface from the editor's reflection: runs the schema commandlet in
+REM the editor, then turns the one schema into classes for the project's Python package and (when
+REM Rust generation is opted in) its Rust crate.
 REM
-REM Called by Package.bat before the clients are built. Can be run on its own to refresh the
-REM classes after changing a Blueprint or a UPROPERTY:
+REM Run on its own, to refresh the classes after changing a Blueprint or a UPROPERTY:
 REM
 REM   Scripts\GenTypedAPI.bat
+REM
+REM Nothing calls it: Package.bat builds no client packages, so nothing this generates ships. That
+REM is also why this mirror stops short of the .sh -- it generates from the editor's unfiltered
+REM walk and so makes neither the published subset nor the C++ library (see the notes below).
 REM
 REM The schema lands in Saved\TempoSchema\tempo_schema.json. The classes go into the project's own
 REM client package and crate, beside the wrappers its protos generate: <project>.reflected in
@@ -117,20 +120,11 @@ goto :cpp
 echo Skipping the typed Rust classes (set TEMPO_GEN_RUST_API=1 to generate them)
 
 :cpp
-REM The C++ classes, from the same schema, compiled into libtempo_reflected beside the C++ client,
-REM which a build with TEMPO_GEN_CPP_API=1 has already made.
-if not defined TEMPO_GEN_CPP_API goto :no_cpp
-if "!TEMPO_GEN_CPP_API!"=="0" goto :no_cpp
-
-set "CPP_CLASSES_DIR=!SCHEMA_DIR!\cpp"
-if exist "!CPP_CLASSES_DIR!" rmdir /s /q "!CPP_CLASSES_DIR!"
-echo Generating tempo::reflected
-"!PYTHON_BIN!" "!PYTHON_DIR!\gen_cpp_classes.py" "!SCHEMA!" "!CPP_CLASSES_DIR!"
-if errorlevel 1 exit /b 1
-"!PYTHON_BIN!" "!PYTHON_DIR!\build_cpp_classes.py" "!CPP_CLASSES_DIR!" "!SCRIPT_DIR!..\TempoCore\Content\Cpp\API" "!SCRIPT_DIR!..\TempoCore\Source\ThirdParty\gRPC"
-if errorlevel 1 exit /b 1
-exit /b 0
-
-:no_cpp
-echo Skipping the typed C++ classes (set TEMPO_GEN_CPP_API=1 to generate them)
+REM No C++ classes here either, under the same caveat. The .sh compiles them into libtempo_reflected
+REM and installs it beside the C++ client in TempoCore\Content\Cpp\API, which is what a consumer
+REM links. Built from the unfiltered walk, that library would declare the editor's classes and
+REM members, so a program against it compiles and then fails at runtime on a packaged sim -- and
+REM unlike the Python and Rust trees above, it would sit exactly where the next C++ build looks.
+REM A typed C++ library that cannot be trusted is worse than none.
+echo Skipping the typed C++ classes ^(this mirror generates from the editor's unfiltered walk^)
 exit /b 0

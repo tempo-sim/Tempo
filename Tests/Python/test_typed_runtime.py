@@ -105,7 +105,7 @@ def wire(monkeypatch):
 
     calls = {"reads": [], "writes": []}
 
-    def fake_read(target, address):
+    def fake_read(target, address, member=None):
         calls["reads"].append((target["actor"], target["component"], address))
         return "read-back"
 
@@ -489,6 +489,11 @@ def world_calls(monkeypatch, classes):
                                                          class_path="/Script/Engine.MeshThing"),
                         WorldControl.ComponentDescriptor(actor=kwargs["actor"], name="Other",
                                                          class_path="/Script/Engine.Widget")])
+                if name in ("get_all_actors", "get_actors_of_class"):
+                    # One Widget in the world, found when everything or Widgets are asked for.
+                    truck = WorldControl.ActorDescriptor(name="Truck", class_path=WIDGET_PATH)
+                    found = kwargs.get("actor_type", WIDGET_PATH) == WIDGET_PATH
+                    return WorldControl.GetAllActorsResponse(actors=[truck] if found else [])
                 return None
             return call
 
@@ -557,6 +562,24 @@ def test_adding_and_finding_components_is_typed(classes, world_calls):
         "only the components that are MeshThings, by their real class"
 
 
+def test_an_actor_that_does_not_exist_is_a_lookup_error_either_way(classes, world_calls):
+    """The untyped form used to hand back a DynamicObject for any name at all, and the typo surfaced
+    as a confusing failure on first attribute access; the typed form raised here. Both do now."""
+    import tempo_sim.unreal as unreal
+    import tempo_sim.world as world
+
+    with pytest.raises(LookupError, match="Nope"):
+        world.get_actor("Nope")
+    with pytest.raises(LookupError, match="Nope"):
+        world.get_actor("Nope", classes.Widget)
+    with pytest.raises(TypeError, match="is not /Script/Engine.MeshThing"):
+        world.get_actor("Truck", classes.MeshThing)
+
+    found = world.get_actor("Truck")
+    assert type(found) is unreal.DynamicObject
+    assert found.is_a(classes.Widget), "the lookup that checks it exists also learns its class"
+
+
 def test_enum_values_travel_as_their_authored_name(classes):
     import tempo_sim.unreal as unreal
     import fixture_classes.enums as enums
@@ -578,6 +601,214 @@ def test_an_object_handle_travels_as_its_address(classes):
     assert unreal._to_value("actor_value", classes.Widget("Thing")).actor_value == "Thing"
     assert unreal._to_value("component_value",
                             classes.Widget("Thing", "Mesh")).component_value == "Thing:Mesh"
+
+
+# -- references and enums read back as what the stub says ----------------------------------------
+#
+# The wire carries names: an actor's, a component's as "Actor:Component", a class's path, an enum's
+# authored spelling. The stub types the same slots as a handle of the declared class, as the
+# generated class and as the generated enum member, because the generator read the same schema. The
+# runtime has to deliver that, or `widget.Target.Visible` passes Pyright and raises AttributeError
+# on a str.
+
+
+@pytest.fixture
+def held(monkeypatch, classes):
+    """Let a test say what the sim holds, per property name, as the Value the server would send."""
+    import tempo_sim.unreal as unreal
+    import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+    values = {}
+
+    class FakeWorld:
+        @staticmethod
+        def get_property(**kwargs):
+            return values[kwargs["property"]]
+
+        @staticmethod
+        def get_properties(**kwargs):
+            named = [WorldControl.NamedValue(name=name, value=values[name])
+                     for name in kwargs["properties"]]
+
+            class Response:
+                pass
+            Response.values = named
+            return Response()
+
+        @staticmethod
+        def stream_property(**kwargs):
+            yield values[kwargs["property"]]
+
+        @staticmethod
+        def run_batch(ops, stop_on_failure):
+            results = []
+            for op in ops:
+                result = WorldControl.BatchOpResult()
+                result.value.CopyFrom(values[op.get.property])
+                results.append(result)
+
+            class Response:
+                pass
+            Response.results = results
+            return Response()
+
+    monkeypatch.setattr(unreal, "_world", lambda: _BothWays(FakeWorld))
+    return values
+
+
+def test_an_actor_reference_reads_as_a_handle_of_its_declared_class(classes, held):
+    import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+    held["Target"] = WorldControl.Value(actor_value="Thing")
+    held["Visible"] = WorldControl.Value(bool_value=True)
+    target = classes.Widget("MyActor").Target
+    assert type(target) is classes.MeshThing
+    assert (target.actor, target.component) == ("Thing", "")
+    assert target.is_a(classes.MeshThing)
+    assert target.Visible is True, "its own members are addressable in turn"
+    assert target == classes.MeshThing("Thing"), "a handle is an address, however it is typed"
+
+    held["Target"] = WorldControl.Value(actor_value="")
+    assert classes.Widget("MyActor").Target is None, "a reference to nothing"
+
+
+def test_a_component_reference_reads_as_a_component_handle(classes):
+    """The fixture's one component-kinded property stands down to the component accessor, so this
+    reads the Value with the metadata such a property carries."""
+    import tempo_sim.unreal as unreal
+    import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+    member = {"variant": "component_value", "class": "/Script/Engine.MeshThing"}
+    handle = unreal._from_value(WorldControl.Value(component_value="Thing:Mesh"), member)
+    assert type(handle) is classes.MeshThing
+    assert (handle.actor, handle.component) == ("Thing", "Mesh")
+    assert unreal._to_value("component_value", handle).component_value == "Thing:Mesh", \
+        "what was read can be written back"
+
+
+def test_a_reference_to_a_class_no_package_declares_is_a_dynamic_object(classes):
+    import tempo_sim.unreal as unreal
+    import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+    member = {"variant": "actor_value", "class": "/Script/NotInThisBuild.Thing"}
+    handle = unreal._from_value(WorldControl.Value(actor_value="Thing"), member)
+    assert type(handle) is unreal.DynamicObject
+    assert handle.actor == "Thing"
+    assert handle.is_a("/Script/NotInThisBuild.Thing"), "the declared class is still recorded"
+
+
+def test_a_container_of_references_reads_as_handles(classes):
+    import tempo_sim.unreal as unreal
+    import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+    member = {"variant": "actor_array_value", "class": "/Script/Engine.MeshThing"}
+    handles = unreal._from_value(WorldControl.Value(actor_array_value={"values": ["A", "B"]}),
+                                 member)
+    assert [type(handle) for handle in handles] == [classes.MeshThing] * 2
+    assert [handle.actor for handle in handles] == ["A", "B"]
+
+    member = {"variant": "actor_set_value", "class": "/Script/Engine.MeshThing"}
+    handles = unreal._from_value(WorldControl.Value(actor_set_value={"values": ["A", "B"]}), member)
+    assert handles == {classes.MeshThing("A"), classes.MeshThing("B")}
+
+
+def test_a_class_reads_as_the_generated_class(classes):
+    import tempo_sim.unreal as unreal
+    import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+    member = {"variant": "class_value"}
+    assert unreal._from_value(WorldControl.Value(class_value=WIDGET_PATH), member) is classes.Widget
+    assert unreal._from_value(WorldControl.Value(class_value=""), member) is None
+    assert unreal._from_value(
+        WorldControl.Value(class_array_value={"values": [WIDGET_PATH, "/Script/Engine.MeshThing"]}),
+        {"variant": "class_array_value"}) == [classes.Widget, classes.MeshThing]
+
+    # A class no installed package declares: a DynamicObject subclass standing for the reported
+    # path, so writing it back names that class and not DynamicObject's own.
+    unknown = unreal._from_value(WorldControl.Value(class_value="/Script/Elsewhere.Thing"), member)
+    assert issubclass(unknown, unreal.DynamicObject)
+    assert unknown.__tempo_class__ == "/Script/Elsewhere.Thing"
+    assert unreal._to_value("class_value", unknown).class_value == "/Script/Elsewhere.Thing"
+    assert unreal._from_value(WorldControl.Value(class_value="/Script/Elsewhere.Thing"),
+                              member) is unknown, "one class per path"
+
+
+def test_an_enum_reads_as_the_generated_member(classes, held):
+    import fixture_classes.enums as enums
+    import tempo_sim.unreal as unreal
+    import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+    held["Mode"] = WorldControl.Value(enum_value="Advanced")
+    mode = classes.Widget("MyActor").Mode
+    assert mode is enums.EWidgetMode.Advanced
+    assert mode.name == "Advanced" and mode == "Advanced"
+
+    # An enumerator a newer sim has and this package does not: the string it travelled as, which
+    # still compares equal to one.
+    held["Mode"] = WorldControl.Value(enum_value="Removed")
+    assert classes.Widget("MyActor").Mode == "Removed"
+
+    # Symbol-only enumerators resolve by their authored value.
+    member = {"variant": "enum_set_value", "enum": "EWidgetComparison"}
+    assert unreal._from_value(WorldControl.Value(enum_set_value={"values": ["==", "Greater"]}),
+                              member) == {enums.EWidgetComparison.Enumerator0,
+                                          enums.EWidgetComparison.Greater}
+
+
+def test_a_snapshot_a_watch_and_a_deferred_read_are_typed_too(classes, held):
+    import fixture_classes.enums as enums
+    import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+    from tempo_sim import world
+
+    held["Target"] = WorldControl.Value(actor_value="Thing")
+    held["Mode"] = WorldControl.Value(enum_value="Simple")
+    widget = classes.Widget("MyActor")
+    with widget.snapshot("Target", "Mode"):
+        assert type(widget.Target) is classes.MeshThing
+        assert widget.Mode is enums.EWidgetMode.Simple
+    assert list(widget.watch("Mode")) == [enums.EWidgetMode.Simple]
+    with world.batch() as b:
+        target = b.get(lambda: widget.Target)
+    assert type(target.value) is classes.MeshThing
+
+
+def test_a_function_result_is_typed_by_its_signature(classes):
+    """The return value and each out parameter, by the record the generator keeps for it. The
+    fixture has no function returning a reference, so the signature is spelled as recorded."""
+    import fixture_classes.enums as enums
+    import tempo_sim.unreal as unreal
+    import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+    signature = {
+        "inputs": [],
+        "returns": {"variant": "actor_value", "struct": "", "class": "/Script/Engine.MeshThing"},
+        "outputs": {"Mode": {"variant": "enum_value", "struct": "", "enum": "EWidgetMode"}},
+    }
+
+    class Response:
+        results = [
+            WorldControl.FunctionResult(name="ReturnValue",
+                                        typed_value=WorldControl.Value(actor_value="Thing")),
+            WorldControl.FunctionResult(name="Mode",
+                                        typed_value=WorldControl.Value(enum_value="Simple")),
+        ]
+
+    result = unreal._function_result(Response(), signature)
+    assert type(result["ReturnValue"]) is classes.MeshThing
+    assert result["ReturnValue"].actor == "Thing"
+    assert result["Mode"] is enums.EWidgetMode.Simple
+
+
+def test_a_read_with_no_metadata_keeps_the_name_it_travelled_as(classes):
+    """The schema-free path: with nothing to say what a slot is, a reference is its name."""
+    import tempo_sim.unreal as unreal
+    import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+    assert unreal._from_value(WorldControl.Value(actor_value="Thing")) == "Thing"
+    assert unreal._from_value(WorldControl.Value(component_value="Thing:Mesh")) == "Thing:Mesh"
+    assert unreal._from_value(WorldControl.Value(class_value=WIDGET_PATH)) == WIDGET_PATH
+    assert unreal._from_value(WorldControl.Value(enum_value="Advanced")) == "Advanced"
+    assert unreal._from_value(WorldControl.Value(actor_array_value={"values": ["A"]})) == ["A"]
 
 
 # -- batching and snapshots ----------------------------------------------------------------------
@@ -739,6 +970,26 @@ def test_a_failed_op_is_named_and_what_follows_it_did_not_run(classes, fake_worl
         _ = later.value
 
 
+def test_a_result_that_cannot_be_decoded_fails_only_its_own_deferred(classes, fake_world,
+                                                                        monkeypatch):
+    """The server ran every op; it is this client that could not read one answer. Settling used to
+    stop there, leaving every later Deferred pending forever."""
+    import tempo_sim.unreal as unreal
+    from tempo_sim import world
+
+    def undecodable(response, signature):
+        raise ValueError("undecodable")
+
+    monkeypatch.setattr(unreal, "_function_result", undecodable)
+    widget = classes.Widget("MyActor")
+    with world.batch() as b:
+        resized = b.call(lambda: widget.Resize(4))
+        enabled = b.get(lambda: widget.bEnabled)
+    assert enabled.done and enabled.value is True, "the ops after it still settle"
+    with pytest.raises(ValueError, match="undecodable"):
+        _ = resized.value
+
+
 def test_a_deferred_lambda_cannot_transform_what_it_reads(classes, fake_world):
     """There is no value yet inside the lambda, so working on one has to fail rather than be skipped."""
     from tempo_sim import world
@@ -820,14 +1071,19 @@ def test_a_snapshot_with_no_names_fetches_the_readable_properties(classes, fake_
 
 def test_writing_inside_a_snapshot_drops_the_stale_entry(classes, fake_world):
     widget = classes.Widget("MyActor")
-    with widget.snapshot("bEnabled"):
+    with widget.snapshot("bEnabled", "ScaleFactor"):
         assert widget.bEnabled is True          # served from the snapshot
         widget.bEnabled = False                 # the snapshot is now stale for this property
         _ = widget.bEnabled                     # so this must ask the server
+        assert widget.ScaleFactor is True       # served from the snapshot
+        widget.ScaleFactor = 2.0                # through its BlueprintSetter: a call, and as stale
+        _ = widget.ScaleFactor                  # so this must ask the server too
     assert fake_world == [
-        ("get_properties", ["bEnabled"]),
+        ("get_properties", ["bEnabled", "ScaleFactor"]),
         ("set_property", "bEnabled"),
         ("get_property", "bEnabled"),
+        ("call_function", "SetScaleFactor"),
+        ("get_property", "ScaleFactor"),
     ]
 
 
@@ -994,6 +1250,77 @@ def test_the_world_mirror_has_an_awaitable_twin(classes, world_calls):
     assert [name for name, _ in world_calls] == ["destroy_actor", "get_all_components"]
     assert world.destroy_actor.__name__ == "destroy_actor"
     assert world.destroy_actor.__doc__ == world.destroy_actor_async.__doc__
+
+
+# -- from more than one thread ------------------------------------------------------------------
+#
+# A blocking call made with no loop running goes to a loop kept for synchronous callers. A loop runs
+# on one thread at a time, so that loop is per thread, and each loop keeps a channel of its own.
+
+
+def test_blocking_calls_from_two_threads_run_at_once(classes):
+    """One loop for the process had the second thread fail with "this event loop is already
+    running" whenever the first was mid-call."""
+    import asyncio
+    import threading
+    from tempo_sim._tempo_context import run_async
+
+    ready = threading.Barrier(2)
+    outcomes = {}
+
+    async def work(name):
+        # Long enough that the two calls overlap.
+        await asyncio.sleep(0.2)
+        return name
+
+    def call(name):
+        ready.wait()
+        try:
+            outcomes[name] = run_async(work(name))
+        except BaseException as failure:  # noqa: BLE001  -- the failure is the finding
+            outcomes[name] = failure
+
+    threads = [threading.Thread(target=call, args=(name,)) for name in ("first", "second")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert outcomes == {"first": "first", "second": "second"}
+
+
+def test_a_blocking_call_inside_a_coroutine_is_still_refused(classes):
+    import asyncio
+    from tempo_sim._tempo_context import run_async
+
+    async def inner():
+        return 1
+
+    async def outer():
+        return run_async(inner())
+
+    with pytest.raises(RuntimeError, match="inside a coroutine"):
+        asyncio.run(outer())
+
+
+def test_each_loop_keeps_its_own_channel(classes):
+    """A channel belongs to the loop that opened it. One channel rebound to whichever loop asked
+    last was torn out from under the other loop's streams."""
+    import asyncio
+    from tempo_sim._tempo_context import TempoContext
+
+    context = TempoContext()
+    first, second = asyncio.new_event_loop(), asyncio.new_event_loop()
+    try:
+        on_first = first.run_until_complete(context._ensure_channel())
+        on_second = second.run_until_complete(context._ensure_channel())
+        assert on_first is not on_second
+        assert first.run_until_complete(context._ensure_channel()) is on_first, \
+            "the second loop's channel must not displace the first's"
+        assert second.run_until_complete(context._ensure_channel()) is on_second
+    finally:
+        for loop, connection in ((first, on_first), (second, on_second)):
+            loop.run_until_complete(connection.channel.close())
+            loop.close()
 
 
 # -- calling functions ----------------------------------------------------------------------------

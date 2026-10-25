@@ -23,7 +23,7 @@ FIXTURE = os.path.join(HERE, "fixtures", "mini_schema.json")
 pytestmark = pytest.mark.codegen
 
 sys.path.insert(0, os.path.join(PLUGIN_ROOT, "TempoCore", "Content", "Python"))
-from diff_schema import compare  # noqa: E402
+from diff_schema import compare, main  # noqa: E402
 
 
 @pytest.fixture
@@ -42,6 +42,16 @@ def changes(baseline, mutate):
     mutate(new)
     breaking, additions = compare(baseline, new)
     return [change for _, change in breaking], [change for _, change in additions]
+
+
+def exit_status(baseline, mutate, tmp_path):
+    """What the tool exits with for the same change -- the status is what gates a pull request."""
+    new = copy.deepcopy(baseline)
+    mutate(new)
+    old_path, new_path = tmp_path / "old.json", tmp_path / "new.json"
+    old_path.write_text(json.dumps(baseline))
+    new_path.write_text(json.dumps(new))
+    return main(["diff_schema.py", str(old_path), str(new_path)])
 
 
 def test_an_unchanged_schema_has_no_drift(baseline):
@@ -118,6 +128,55 @@ def test_a_function_becoming_uncallable_is_breaking(baseline):
     assert breaking == ["function Refresh is no longer callable: now latent"]
 
 
+def test_a_function_that_is_no_longer_positional_is_breaking(baseline, tmp_path):
+    """The generators withhold a function whose inputs cannot all travel as one value, so to a
+    client it is gone -- gen_py_classes.py and gen_rust_classes.py both test `positional`."""
+    def mutate(new):
+        for f in widget(new)["functions"]:
+            if f["name"] == "Refresh":
+                f["positional"] = False
+    breaking, _ = changes(baseline, mutate)
+    assert breaking == ["function Refresh is no longer offered: an input can no longer be passed "
+                        "as one value"]
+    assert exit_status(baseline, mutate, tmp_path) == 1
+
+
+def test_a_removed_component_is_breaking(baseline, tmp_path):
+    """A component is a typed accessor of its own, so losing one is losing a member."""
+    def mutate(new):
+        w = widget(new)
+        w["components"] = [c for c in w["components"] if c["name"] != "Mesh"]
+    breaking, _ = changes(baseline, mutate)
+    assert breaking == ["component Mesh removed"]
+    assert exit_status(baseline, mutate, tmp_path) == 1
+
+
+def test_a_component_whose_class_changed_is_breaking(baseline, tmp_path):
+    """The accessor is typed as the component's class, so a different class is a different member
+    under the same name: `widget.Mesh.Visible` type-checked against the old one and will not now."""
+    def mutate(new):
+        for c in widget(new)["components"]:
+            if c["name"] == "Mesh":
+                c["class"] = "/Script/Engine.Widget"
+    breaking, _ = changes(baseline, mutate)
+    assert breaking == ["component Mesh: /Script/Engine.MeshThing -> /Script/Engine.Widget"]
+    assert exit_status(baseline, mutate, tmp_path) == 1
+
+
+def test_a_struct_member_becoming_read_only_is_breaking(baseline, tmp_path):
+    """A writable member is a keyword argument of the struct's constructor; a read-only one is not,
+    so `FWidgetSettings(Scale=2.0)` stops type-checking."""
+    def mutate(new):
+        for s in new["structs"]:
+            if s["name"] == "FWidgetSettings":
+                for m in s["members"]:
+                    if m["name"] == "Scale":
+                        m["writable"] = False
+    breaking, _ = changes(baseline, mutate)
+    assert breaking == ["struct member Scale became read-only"]
+    assert exit_status(baseline, mutate, tmp_path) == 1
+
+
 def test_a_removed_enumerator_is_breaking(baseline):
     def mutate(new):
         for e in new["enums"]:
@@ -144,6 +203,8 @@ def test_a_removed_struct_member_is_breaking(baseline):
         {"name": "NewCall", "signature": "void NewCall()", "callable": True,
          "positional": True, "parameters": []})),
     ("a new enumerator", lambda new: new["enums"][0]["enumerators"].append("Expert")),
+    ("a new component", lambda new: widget(new)["components"].append(
+        {"name": "Extra", "class": "/Script/Engine.MeshThing"})),
     ("a new class", lambda new: new["classes"].append(
         {"name": "Other", "path": "/Script/Engine.Other", "super": "/Script/CoreUObject.Object",
          "package": "/Script/Engine", "abstract": False, "blueprint": False,

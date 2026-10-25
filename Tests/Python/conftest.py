@@ -19,6 +19,7 @@ Configuration comes from the environment (set by Scripts/TestPythonAPI.sh):
   TEMPO_TEST_REPORT_DIR        If set, the sim's full log is written here (sim.log) so CI uploads it.
 """
 
+import importlib.util
 import os
 import subprocess
 import tempfile
@@ -27,20 +28,32 @@ from pathlib import Path
 
 import pytest
 
-# Groups that test this repository's own tooling rather than a shipped client -- the generated class
-# surface and the runtime that serves it -- need neither a packaged sim nor an installed wheel.
+# Groups that test this repository's own tooling rather than a shipped client -- the class
+# generators, the runtime that serves the generated classes, and the schema tools -- need neither a
+# packaged sim nor a shipped wheel.
 #
-# Every other module here imports tempo_sim at module scope, so without the wheel they cannot even
-# be collected, and `pytest -m codegen` would fail before running anything. Ignoring them keeps the
-# repo-side groups runnable on their own; a new sim-facing module is covered automatically, and a
-# new repo-side one is added to the set below.
+# Every other module here imports the generated client (tempo_sim.tempo_core, the *_pb2 modules) at
+# module scope. Those modules are generated, not tracked: in a clean checkout the tempo_sim package
+# is importable -- its hand-written __init__ is in git -- but they are absent, so the sim-facing
+# modules cannot even be collected and `pytest -m codegen` would fail before running anything.
+# Ignoring them keeps the repo-side groups runnable on their own; a new sim-facing module is
+# covered automatically, and a new repo-side one is added to the set below.
 REPO_SIDE_MODULES = {"test_codegen.py", "test_typed_runtime.py", "test_schema_diff.py",
-                     "test_filter_schema.py", "test_subset_schema.py"}
+                     "test_filter_schema.py", "test_subset_schema.py",
+                     "test_cpp_codegen.py", "test_rust_codegen.py"}
+
+
+def _generated_client_present():
+    # The presence of one generated wrapper stands for all of them: tempo_sim itself importing
+    # proves only that the tracked __init__ is there.
+    try:
+        return importlib.util.find_spec("tempo_sim.tempo_world") is not None
+    except ImportError:
+        return False
+
 
 collect_ignore = []
-try:
-    import tempo_sim  # noqa: F401
-except ImportError:
+if not _generated_client_present():
     collect_ignore = [path.name for path in sorted(Path(__file__).parent.glob("test_*.py"))
                       if path.name not in REPO_SIDE_MODULES]
 
@@ -62,7 +75,7 @@ def _tail(path, n=200):
 def sim_server():
     if not PACKAGED_BINARY:
         pytest.fail(
-            "TEMPO_PACKAGED_BINARY is not set. Run these tests via Scripts/TestPython.sh, or "
+            "TEMPO_PACKAGED_BINARY is not set. Run these tests via Scripts/TestPythonAPI.sh, or "
             "point it at the packaged launcher (e.g. Packaged/Linux/<Project>.sh)."
         )
     if not os.path.exists(PACKAGED_BINARY):

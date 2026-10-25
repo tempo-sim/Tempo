@@ -283,7 +283,7 @@ returns:
     truck = world.spawn_actor(BP_Cat745_C, transform=world.Transform(location=ue_to_si(location)))
 
     pose = si_to_ue(tempo_world.get_current_actor_state(actor="Marker").transform)   # FTransform
-    reach = ue_to_si(sweeper.Body.BoundsRadius)           # a float: centimetres to metres
+    reach = ue_to_si(sweeper.TempoLidar.MaxDistance)      # a float: centimetres to metres
     ```
 
 === "Rust"
@@ -343,7 +343,7 @@ with world.batch() as b:       # one RunBatch, in order, between two ticks of th
     truck.MaxSpeed = 1200.0
     truck.ScaleFactor = 2.0                     # a BlueprintSetter write: a call, same batch
     speed = b.get(lambda: truck.MaxSpeed)       # Deferred[float]
-    moved = b.call(lambda: truck.TeleportTo(p, r, False, False))
+    moved = b.call(lambda: truck.K2_TeleportTo(p, r))
 print(speed.value, moved.value)
 
 with truck.snapshot():         # one read; attribute reads served from it
@@ -381,7 +381,7 @@ async with world.batch() as b:     # sent, without blocking, when the block ends
 print(speed.value)
 
 speed = await world.get_async(lambda: truck.MaxSpeed)        # one read, typed as float
-moved = await world.call_async(lambda: truck.TeleportTo(p, r, False, False))
+moved = await world.call_async(lambda: truck.K2_TeleportTo(p, r))
 
 async with truck.snapshot_async():  # one read; attribute reads served from it
     print(truck.MaxSpeed, truck.Mass)
@@ -470,7 +470,8 @@ plain spawn has already run both by the time you have a handle.
 | World state | `get_current_actor_state`, `stream_actor_state`, `get_current_actor_states_near`, `stream_actor_states_near`, `stream_overlap_events`, `raycast` |
 | Batching and checking | `batch`, `batch_async` (Rust), `defer` (Rust, C++), `check_schema`; in Python, `get_async` and `call_async` |
 
-Every one of them has an `_async` twin in Python and Rust, which takes the same arguments.
+Every function in the first four rows has an `_async` twin in Python and Rust, taking the same
+arguments; the last row lists the async forms themselves.
 
 `world` also re-exports the TempoCore types it takes — `world.Vector`, `world.Rotation`,
 `world.Transform`, `world.Vector2D` — so a scenario using it needs no proto import. A handle of the

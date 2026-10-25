@@ -21,6 +21,7 @@ tempo-sim's dependencies.
 
 import os
 import shutil
+from pathlib import Path
 import subprocess
 import sys
 
@@ -118,6 +119,14 @@ def tempo_sim_copy(name, published=None, scratch=None):
     if published is None:
         if os.path.exists(reflected):
             shutil.rmtree(reflected)
+        # As a tempo-sim without published types ships: lib.rs declares the module, so an empty
+        # placeholder stands in for it (gen_project_package.ensure_published_module).
+        sys.path.insert(0, PYTHON_DIR)
+        try:
+            import gen_project_package as package
+        finally:
+            sys.path.remove(PYTHON_DIR)
+        package.ensure_published_module(Path(os.path.join(copy, "src")))
     else:
         with open(os.path.join(RUST_API, "src", "lib.rs")) as f:
             assert "pub mod reflected;" in f.read(), \

@@ -3,9 +3,10 @@
 #
 # This is the "fan-out" half of the test pipeline. A build-and-package workflow produces a single
 # packaged artifact (which ships the generated client libraries: the tempo-sim Python wheel under
-# Packaged/API/Python and the tempo-sim Rust crate under Packaged/API/Rust). Callers invoke this
-# workflow once per (group x language x Unreal version), in parallel — each job downloads the same
-# artifact and runs one `test_command` against it. Build once, test many.
+# Packaged/API/Python, the tempo-sim Rust crate under Packaged/API/Rust and the C++ client under
+# Packaged/API/Cpp). Callers invoke this workflow once per (group x language x Unreal version), in
+# parallel — each job downloads the same artifact and runs one `test_command` against it. Build
+# once, test many.
 #
 # It is deliberately language-agnostic and reusable by DOWNSTREAM projects (a project that uses
 # Tempo as a submodule can call this with its own test_command/checkout/submodules to test its own
@@ -18,7 +19,7 @@
 #   TEMPO_SIM_STARTUP_TIMEOUT_S = readiness timeout
 #   TEMPO_SIM_RENDER            = "1" if `render: true` (sensor/GPU groups), else "0"
 #   TEMPO_TEST_REPORT_DIR       = a folder to write a report into (uploaded as an artifact)
-# Scripts/TestPythonAPI.sh and Scripts/TestRustAPI.sh both honor these.
+# Scripts/TestPythonAPI.sh, Scripts/TestRustAPI.sh and Scripts/TestCppAPI.sh all honor these.
 # ======
 
 name: Test a Packaged Tempo Project

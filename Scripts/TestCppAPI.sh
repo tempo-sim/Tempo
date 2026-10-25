@@ -76,11 +76,19 @@ cmake --build "$BUILD_DIR" --config Release --parallel "$JOBS" --target "$GROUP"
 EXECUTABLE=$(find "$BUILD_DIR" -maxdepth 2 \( -name "$GROUP" -o -name "$GROUP.exe" \) -type f | head -1)
 
 SIM_PID=""
+# The sim is launched under job control (set -m), which makes it the leader of a process group of
+# its own, so this signals the group: what a package calls its binary is a launcher script on
+# Linux, and signalling the launcher alone stops the script and orphans the game, which keeps the
+# port. Terminated first, killed if the group is still there after a grace period.
 cleanup() {
-  if [ -n "$SIM_PID" ] && kill -0 "$SIM_PID" 2>/dev/null; then
-    kill "$SIM_PID" 2>/dev/null || true
-    wait "$SIM_PID" 2>/dev/null || true
-  fi
+  [ -n "$SIM_PID" ] || return 0
+  kill -TERM -- -"$SIM_PID" 2>/dev/null || kill -TERM "$SIM_PID" 2>/dev/null || true
+  for _ in $(seq 1 30); do
+    kill -0 -- -"$SIM_PID" 2>/dev/null || break
+    sleep 1
+  done
+  kill -KILL -- -"$SIM_PID" 2>/dev/null || true
+  wait "$SIM_PID" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -96,9 +104,12 @@ if [ "$GROUP" != "contract" ]; then
     ENDPOINT_ARG=(-ServerPort="$PORT")
     echo "Launching sim: $BINARY (port $PORT)"
   fi
+  # Under job control, so the sim leads a process group cleanup can signal as a whole.
+  set -m
   "$BINARY" -nullrhi -unattended -nopause -nosound -nosplash \
     "${ENDPOINT_ARG[@]}" -stdout -fullstdoutlogoutput > "$REPORT_DIR/sim.log" 2>&1 &
   SIM_PID=$!
+  set +m
 
   echo "Waiting for sim gRPC endpoint ${SOCKET:-port $PORT} ..."
   for _ in $(seq 1 "${TEMPO_SIM_STARTUP_TIMEOUT_S:-300}"); do

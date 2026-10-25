@@ -134,6 +134,14 @@ on:
         type: boolean
         description: Generate the Tempo C++ API during the build (sets TEMPO_GEN_CPP_API=1 in the container)
         default: false
+      require_typed_api:
+        type: boolean
+        description: >-
+          Fail the Package step if the typed classes cannot be generated (sets TEMPO_REQUIRE_TYPED_API=1 in
+          the container). Package.sh alone treats that as a warning and ships without them; a pipeline whose
+          test jobs exercise the typed classes wants the failure here, where its cause is in the log, rather
+          than in every one of those jobs.
+        default: true
     secrets:
       submodules_app_private_key:
         description: Private key (PEM) for the GitHub App identified by submodules_app_id. Required only when submodules_app_id is set.
@@ -476,6 +484,7 @@ jobs:
           -v ${{ github.workspace }}/${{ inputs.project_root }}:/home/ue4/${{ inputs.project_root }} \
           -e TEMPO_GEN_RUST_API=${{ inputs.gen_rust_api && '1' || '0' }} \
           -e TEMPO_GEN_CPP_API=${{ inputs.gen_cpp_api && '1' || '0' }} \
+          -e TEMPO_REQUIRE_TYPED_API=${{ inputs.require_typed_api && '1' || '0' }} \
           -e TEMPO_SKIP_PREBUILD=1 \
           tempo_unreal_image \
           /home/ue4/${{ inputs.tempo_root }}/Scripts/Package.sh $PACKAGE_ARGS

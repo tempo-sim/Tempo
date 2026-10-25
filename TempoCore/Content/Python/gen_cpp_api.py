@@ -767,6 +767,9 @@ class CppApiGenerator:
         # rebuild after a package.
         reflected = self.include_dir / "tempo" / "reflected"
         kept = self.build_dir / "kept_reflected"
+        # A run that died between the two moves leaves kept behind, and a move into a directory that
+        # exists nests inside it rather than replacing it.
+        shutil.rmtree(kept, ignore_errors=True)
         if reflected.exists():
             shutil.move(str(reflected), str(kept))
         if self.include_dir.exists():

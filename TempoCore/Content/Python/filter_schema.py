@@ -47,18 +47,24 @@ def narrow_to_surface(schema, surface):
     PivotOffset, RuntimeGrid and the rest are WITH_EDITORONLY_DATA -- to every one of the two
     thousand classes that derive from it.
 
-    Three corrections, in order of how much they matter:
+    Four corrections, in order of how much they matter:
 
     - **A member the build does not have is dropped.** It is a stub that type-checks and then fails
       at runtime, which is the one outcome this whole exercise exists to prevent.
+    - **A class's superclass comes from the build.** The two documents should agree -- a packaged
+      build is compiled from the same headers -- but a schema walked beside a different build (a
+      stale `Saved/TempoSchema` next to a fresh package) need not, and a superclass is the one field
+      whose drift strips every inherited member at once rather than one at a time. A disagreement
+      is named rather than only counted, because it says the two documents are not of one build.
     - **A function's signature and parameter names come from the build.** A CallFunction argument is
       matched against the function's own parameters by name, and a cooked build cases some of them
       differently, so an editor-sourced name is a FAILED_PRECONDITION at the first call.
     - **Readability, writability and value-expressibility come from the build** -- a member's, a
-      struct's as a whole, and a function's `positional`. They are derived from flags that survive
-      cooking, so they should already agree; taken from the build so that nothing rests on
-      "should". A struct's can genuinely differ: one editor-only member that cannot be carried
-      makes the whole struct inexpressible in the editor alone.
+      struct's as a whole, and a function's `callable` and `positional`, which together decide
+      whether a function is offered at all. They are derived from flags that survive cooking, so
+      they should already agree; taken from the build so that nothing rests on "should". A struct's
+      can genuinely differ: one editor-only member that cannot be carried makes the whole struct
+      inexpressible in the editor alone.
 
     What is deliberately *not* done is adding a member the build has and the editor does not -- 23
     classes have a property like that and 7 a function, nearly all a Blueprint variable the cook
@@ -66,10 +72,11 @@ def narrow_to_surface(schema, surface):
     which is how a property gets written wrongly rather than not at all. The typed API offers less
     instead, which is its documented failure mode.
 
-    Returns a count per correction, for the caller to report.
+    Returns a count per correction, for the caller to report, and under `super_disagreements` the
+    superclass corrections themselves as (class path, editor's superclass, build's superclass).
     """
     stats = {"members_dropped": 0, "functions_dropped": 0, "components_dropped": 0,
-             "signatures_corrected": 0, "flags_corrected": 0,
+             "signatures_corrected": 0, "flags_corrected": 0, "super_disagreements": [],
              "members_only_in_build": 0, "functions_only_in_build": 0}
 
     def correct_flags(member, reported):
@@ -85,6 +92,13 @@ def narrow_to_surface(schema, surface):
         if declared is None:
             continue
         cls["content_hash"] = declared["content_hash"]
+
+        # Older reports carry no superclass, and then the editor's stands. The build's can name a
+        # class the narrowed document lacks; `reroot` settles that afterwards.
+        if "super" in declared and (cls.get("super") or "") != (declared["super"] or ""):
+            stats["super_disagreements"].append(
+                (cls["path"], cls.get("super") or "", declared["super"] or ""))
+            cls["super"] = declared["super"] or ""
 
         kept = []
         for member in cls.get("properties", []):
@@ -103,11 +117,13 @@ def narrow_to_surface(schema, surface):
             if reported is None:
                 stats["functions_dropped"] += 1
                 continue
-            # Whether every input travels as one value, which decides whether the function is
-            # offered. Older reports do not carry it, and then the editor's answer stands.
-            if "positional" in reported and function.get("positional") != reported["positional"]:
-                function["positional"] = reported["positional"]
-                stats["flags_corrected"] += 1
+            # Whether the function can be called at all, and whether every input travels as one
+            # value: together they decide whether the function is offered. Older reports carry
+            # neither, and then the editor's answer stands.
+            for flag in ("callable", "positional"):
+                if flag in reported and function.get(flag) != reported[flag]:
+                    function[flag] = reported[flag]
+                    stats["flags_corrected"] += 1
             if function.get("signature") != reported["signature"]:
                 function["signature"] = reported["signature"]
                 # The parameter list is positional in both documents, so the names line up with
@@ -241,6 +257,51 @@ def filter_schema(schema, keep_paths):
     return filtered
 
 
+def reroot(schema, all_classes):
+    """Point each class at its nearest *kept* ancestor, and report what that skipped.
+
+    The schema has one structural invariant: every class's superclass is also in the document. The
+    editor's full walk keeps it by construction. Narrowing can break it in two ways. A published
+    subset chosen by module does so by design -- 32 classes in the published set derive from
+    something outside it, and ten of those are in `/Script/Engine` itself: `UEngineReplicationBridge`
+    derives from IrisCore, `UTempoChaosWheeledVehicleMovementComponent` from ChaosVehicles,
+    `UWidgetAnimation` from MovieScene. The packaged filter does so only when the editor's walk and
+    the build disagree -- a class the build lacks but the schema's hierarchy passes through, or a
+    superclass the build reports under a path the walk never saw -- which a schema and a report
+    taken from the same build never do, and a stale schema beside a fresh report can.
+
+    Leaving the dangling path in place is the one outcome to avoid, because both generators read an
+    unresolvable superclass as "this class is a root". A rooted `TempoWheeledVehiclePawn` would
+    carry its own two properties and nothing else -- no `Actor`, no `Pawn` -- and in Rust it would
+    get no `Deref`, so it could not even be passed where an actor is wanted. Silently, with the
+    stubs still type-checking.
+
+    Rerooting instead says the true thing less completely. `TempoWheeledVehiclePawn` *is* a `Pawn`,
+    so deriving it from `Pawn` is sound; what it gives up is the members `WheeledVehiclePawn`
+    declared in between. Nothing a rerooted class declares itself is lost, and nothing it claims is
+    wrong -- there is only less of it.
+
+    `all_classes` maps every class path in the *unnarrowed* schema to its entry, because walking
+    past a dropped ancestor means reading that ancestor's own superclass -- which is no longer in
+    the document being rerooted. A superclass absent from it too ends the walk at a root.
+
+    Returns the list of (class path, new super, skipped paths), for the caller to report.
+    """
+    kept = {cls["path"] for cls in schema["classes"]}
+    rerooted = []
+    for cls in schema["classes"]:
+        super_path = cls.get("super") or ""
+        if not super_path or super_path in kept:
+            continue
+        skipped = []
+        while super_path and super_path not in kept:
+            skipped.append(super_path)
+            super_path = (all_classes.get(super_path) or {}).get("super") or ""
+        cls["super"] = super_path
+        rerooted.append((cls["path"], super_path, skipped))
+    return rerooted
+
+
 def main(argv):
     if len(argv) < 4:
         print("usage: filter_schema.py <schema.json> <class_paths.json> <filtered.json>",
@@ -262,6 +323,15 @@ def main(argv):
     filtered = filter_schema(schema, keep_paths)
     after = len(filtered["classes"])
 
+    if not after:
+        # The two documents share no class, so they are not of one build: a stale schema beside a
+        # fresh report, most likely. Writing the empty intersection would hand the generators a
+        # package that imports and declares nothing, which no later step would complain about.
+        print("refusing to write an empty schema: none of the {} class(es) {} reports is in {}; "
+              "the two describe different builds, so regenerate the schema".format(
+                  len(keep_paths), argv[2], argv[1]), file=sys.stderr)
+        return 1
+
     # Narrow the members too, which is the other half of "the build is the authority on what
     # ships". Older reports carry no surface, in which case the class list is all that can be
     # narrowed and the members stay the editor's -- said out loud, because it is the difference
@@ -274,6 +344,15 @@ def main(argv):
                       corrections["components_dropped"]))
         print("corrected {} signature(s) and {} member flag(s) from the build".format(
             corrections["signatures_corrected"], corrections["flags_corrected"]))
+        if corrections["super_disagreements"]:
+            # Each one in full: the editor and the build disagree about a class's ancestry, which
+            # a schema and a report taken from the same build never do.
+            print("warning: {} class(es) have a different superclass in the build than in the "
+                  "schema; the build's is taken:".format(len(corrections["super_disagreements"])),
+                  file=sys.stderr)
+            for class_path, editor_super, build_super in corrections["super_disagreements"]:
+                print("   {}: {} -> {}".format(class_path, editor_super or "(root)",
+                                              build_super or "(root)"), file=sys.stderr)
         if corrections["members_only_in_build"] or corrections["functions_only_in_build"]:
             # Not carried over: without the editor's metadata there is no BlueprintSetter for it,
             # and writing such a property directly is how it gets written wrongly rather than not
@@ -292,6 +371,17 @@ def main(argv):
     else:
         print("warning: this report has no declared surface, so only the class list is narrowed; "
               "regenerate it with the current query_packaged_classes.py", file=sys.stderr)
+
+    # A class whose superclass the build lacks -- the chain passed through a class the build does
+    # not have, or the build named one the editor's walk never saw -- is pointed at its nearest kept
+    # ancestor, as a published subset's are. Left dangling, both generators would read it as a root
+    # and silently strip every inherited member while the stubs still type-check.
+    rerooted = reroot(filtered, {cls["path"]: cls for cls in schema["classes"]})
+    if rerooted:
+        print("rerooted {} class(es) whose superclass the build does not have:".format(len(rerooted)))
+        for class_path, new_super, skipped in rerooted:
+            print("   {} -> {} (skipping {})".format(
+                class_path, new_super or "(root)", ", ".join(skipped)))
 
     # The asset catalog comes from the build alone. An editor has no business contributing to it:
     # it lists assets the cook dropped, and a catalog entry for one type-checks and then fails.
@@ -315,6 +405,9 @@ def main(argv):
     header["engine_version"] = reported["header"]["engine_version"]
     header["schema_version"] = reported["header"]["schema_version"]
     header["filtered_against_packaged_build"] = True
+    # Which classes declare a narrower ancestry than the build really gives them, and what they were
+    # derived from. The per-class hashes still match the build, so this is the only record of it.
+    header["rerooted"] = {path: skipped[0] for path, _, skipped in rerooted}
     filtered["header"] = header
 
     # Everything the schema had and the build does not. Reported rather than silently dropped,

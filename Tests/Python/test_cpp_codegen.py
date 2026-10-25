@@ -11,12 +11,14 @@ CMake workspace kept under Saved/, so only the first run pays for compiling the 
 The runtime is the working tree's (TempoCore/Content/Python/cpp_api_template), compiled here rather
 than taken from a built libtempo, which may be older. What does have to come from a build is what
 the runtime compiles against: the protoc-generated headers of a C++ client built with
-TEMPO_GEN_CPP_API=1, and the vendored gRPC. Skipped, not failed, when either is absent, or when
-there is no C++ compiler.
+TEMPO_GEN_CPP_API=1, and the vendored gRPC -- from this checkout, or else from a packaged build
+(TEMPO_PACKAGED_DIR/API/Cpp, self-contained), which is all a test_packaged.yml checkout has.
+Skipped, not failed, when neither is there, or when there is no C++ compiler.
 
     Scripts/TestPythonAPI.sh codegen
 """
 
+import functools
 import os
 import shutil
 import subprocess
@@ -82,15 +84,52 @@ def compiler():
     return None
 
 
+class Client:
+    """What the runtime compiles and links against, wherever a build left it: the protoc-generated
+    headers, the vendored gRPC's headers and shared library, and libtempo."""
+
+    def __init__(self, include, grpc_include, grpc_lib, lib):
+        self.include = include            # tempo.h, tempo/, proto/
+        self.grpc_include = grpc_include  # grpcpp/, google/protobuf/, absl/
+        self.grpc_lib = grpc_lib          # the shared tempogrpc library
+        self.lib = lib                    # libtempo.a, or tempo.lib on Windows
+
+    @property
+    def archive(self):
+        return os.path.join(self.lib, "tempo.lib" if host_platform_name() == "Win64" else "libtempo.a")
+
+
+@functools.lru_cache(maxsize=None)
+def client():
+    """The client a build with TEMPO_GEN_CPP_API=1 left in this checkout, beside the vendored gRPC;
+    failing that, the one in a packaged build (TEMPO_PACKAGED_DIR/API/Cpp), which carries the gRPC
+    headers and shared library itself. None when neither is there."""
+    host = host_platform_name()
+    if (os.path.isdir(os.path.join(CPP_API, "include", "proto", "TempoWorld"))
+            and os.path.isdir(os.path.join(GRPC, "Includes"))):
+        # The vendored gRPC calls Windows "Windows", where the C++ client's own folder is "Win64".
+        grpc_lib = os.path.join(GRPC, "Libraries", "Windows" if host == "Win64" else host)
+        return Client(os.path.join(CPP_API, "include"), os.path.join(GRPC, "Includes"), grpc_lib,
+                      os.path.join(CPP_API, "lib", host))
+    packaged = os.environ.get("TEMPO_PACKAGED_DIR", "")
+    root = os.path.join(packaged, "API", "Cpp") if packaged else ""
+    if (root and os.path.isdir(os.path.join(root, "include", "proto", "TempoWorld"))
+            and os.path.isdir(os.path.join(root, "third_party", "grpc", "include"))):
+        lib = os.path.join(root, "lib", host)
+        return Client(os.path.join(root, "include"), os.path.join(root, "third_party", "grpc", "include"),
+                      lib, lib)
+    return None
+
+
 @pytest.fixture(scope="module")
 def generated(tmp_path_factory):
     """The fixture schema as C++, after checking there is something to compile it against."""
     if compiler() is None:
         pytest.skip("no C++ compiler on PATH")
-    if not os.path.isdir(os.path.join(CPP_API, "include", "proto", "TempoWorld")):
-        pytest.skip("the C++ client has not been built (a build with TEMPO_GEN_CPP_API=1 makes it)")
-    if not os.path.isdir(os.path.join(GRPC, "Includes")):
-        pytest.skip("the vendored gRPC is not here (Scripts/SyncDeps.sh fetches it)")
+    if client() is None:
+        pytest.skip("no C++ client to compile against: neither this checkout's (a build with "
+                    "TEMPO_GEN_CPP_API=1 makes it, beside the vendored gRPC Scripts/SyncDeps.sh "
+                    "fetches) nor TEMPO_PACKAGED_DIR/API/Cpp")
     out = tmp_path_factory.mktemp("cpp-generated")
     subprocess.run([sys.executable, GENERATOR, FIXTURE, str(out)], check=True,
                    capture_output=True, text=True)
@@ -98,11 +137,11 @@ def generated(tmp_path_factory):
 
 
 def flags(generated):
+    built = client()
     # The working tree's runtime headers first, ahead of whatever copy a build installed.
     return (["-std=c++20", "-fno-rtti", "-I" + str(generated / "include"),
-             "-I" + os.path.join(TEMPLATE, "include"), "-I" + os.path.join(CPP_API, "include"),
-             "-I" + os.path.join(CPP_API, "include", "proto"),
-             "-isystem", os.path.join(GRPC, "Includes")]
+             "-I" + os.path.join(TEMPLATE, "include"), "-I" + built.include,
+             "-I" + os.path.join(built.include, "proto"), "-isystem", built.grpc_include]
             + ["-D" + define for define in DEFINES])
 
 
@@ -130,8 +169,8 @@ file(GLOB RUNTIME_SOURCES CONFIGURE_DEPENDS "${TEMPLATE}/src/*.cc")
 file(GLOB_RECURSE FIXTURE_SOURCES CONFIGURE_DEPENDS "${GENERATED}/src/*.cc")
 
 add_library(runtime STATIC ${RUNTIME_SOURCES})
-target_include_directories(runtime PUBLIC "${TEMPLATE}/include" "${API}/include" "${API}/include/proto")
-target_include_directories(runtime SYSTEM PUBLIC "${GRPC}/Includes")
+target_include_directories(runtime PUBLIC "${TEMPLATE}/include" "${CLIENT_INCLUDE}" "${CLIENT_INCLUDE}/proto")
+target_include_directories(runtime SYSTEM PUBLIC "${GRPC_INCLUDE}")
 target_compile_definitions(runtime PUBLIC ${DEFINES})
 target_compile_options(runtime PUBLIC -fno-rtti)
 
@@ -141,10 +180,10 @@ target_link_libraries(fixture PUBLIC runtime)
 
 # The protos and the service stubs come from the built libtempo; its own copy of the runtime is
 # never pulled in, since the working tree's above defines everything it would.
-find_library(TEMPOGRPC tempogrpc PATHS "${GRPC}/Libraries/${PLATFORM}" NO_DEFAULT_PATH REQUIRED)
+find_library(TEMPOGRPC tempogrpc PATHS "${GRPC_LIB}" NO_DEFAULT_PATH REQUIRED)
 add_executable(snippet snippet.cc)
-target_link_libraries(snippet PRIVATE fixture runtime "${API}/lib/${PLATFORM}/libtempo.a" "${TEMPOGRPC}")
-set_target_properties(snippet PROPERTIES BUILD_RPATH "${GRPC}/Libraries/${PLATFORM}")
+target_link_libraries(snippet PRIVATE fixture runtime "${TEMPO_ARCHIVE}" "${TEMPOGRPC}")
+set_target_properties(snippet PROPERTIES BUILD_RPATH "${GRPC_LIB}")
 """
 
 
@@ -155,8 +194,8 @@ def run(generated, source):
     """
     if shutil.which("cmake") is None:
         pytest.skip("cmake is not on PATH")
-    archive = os.path.join(CPP_API, "lib", host_platform_name(), "libtempo.a")
-    if not os.path.exists(archive):
+    built = client()
+    if not os.path.exists(built.archive):
         pytest.skip("libtempo has not been built for this platform")
     # A fixed path, so the runtime and the fixture are compiled once across runs; the fixture is
     # copied in, since the generated directory is a new temporary each session.
@@ -170,8 +209,9 @@ def run(generated, source):
     build = os.path.join(WORKSPACE, "build")
     configure = subprocess.run(
         ["cmake", "-S", WORKSPACE, "-B", build, "-DCMAKE_BUILD_TYPE=Release",
-         "-DTEMPLATE=" + TEMPLATE, "-DGENERATED=" + fixture_copy, "-DAPI=" + CPP_API,
-         "-DGRPC=" + GRPC, "-DPLATFORM=" + host_platform_name(), "-DDEFINES=" + ";".join(DEFINES)],
+         "-DTEMPLATE=" + TEMPLATE, "-DGENERATED=" + fixture_copy, "-DCLIENT_INCLUDE=" + built.include,
+         "-DGRPC_INCLUDE=" + built.grpc_include, "-DGRPC_LIB=" + built.grpc_lib,
+         "-DTEMPO_ARCHIVE=" + built.archive, "-DDEFINES=" + ";".join(DEFINES)],
         capture_output=True, text=True)
     assert configure.returncode == 0, configure.stdout + configure.stderr
     built = subprocess.run(["cmake", "--build", build, "--parallel", str(build_jobs())],
@@ -182,12 +222,16 @@ def run(generated, source):
 
 
 def sync(source, destination):
-    """Copy a tree, leaving files that did not change untouched so make does not rebuild them."""
+    """Copy a tree, leaving files that did not change untouched so make does not rebuild them, and
+    removing what the generator did not produce this time, so a source it stopped emitting is not
+    still globbed into the fixture library."""
+    produced = set()
     for root, _, names in os.walk(source):
         target_root = os.path.join(destination, os.path.relpath(root, source))
         os.makedirs(target_root, exist_ok=True)
         for name in names:
             src, dst = os.path.join(root, name), os.path.join(target_root, name)
+            produced.add(os.path.normpath(dst))
             with open(src, "rb") as f:
                 data = f.read()
             if os.path.exists(dst):
@@ -196,6 +240,13 @@ def sync(source, destination):
                         continue
             with open(dst, "wb") as f:
                 f.write(data)
+    for root, _, names in os.walk(destination, topdown=False):
+        for name in names:
+            path = os.path.join(root, name)
+            if os.path.normpath(path) not in produced:
+                os.remove(path)
+        if os.path.normpath(root) != os.path.normpath(destination) and not os.listdir(root):
+            os.rmdir(root)
 
 
 # -- the surface exists and is typed -------------------------------------------------------------
@@ -535,6 +586,24 @@ def test_values_conversions_and_batches_behave(generated):
     note_origin<Widget>();
     Widget typed(ObjectRef::actor("w").with_class(std::string(Widget::kPath)));
     expect(typed.is_a<Object>() && !typed.is_a<MeshThing>(), "is_a walks the hierarchy");
+
+    // A handle read from a reference-valued property records the declared class, so is_a agrees
+    // with the type system; and two handles are equal by what they address, not by class.
+    TempoWorld::Value pointee;
+    pointee.set_actor_value("m");
+    auto referenced = ValueTraits<MeshThing>::from(pointee);
+    expect(referenced.ok() && referenced.value().is_a<MeshThing>() && referenced.value().is_a<Object>() &&
+           !referenced.value().is_a<Widget>(), "a reference-valued handle knows its class");
+    TempoWorld::Value pointees;
+    pointees.mutable_actor_set_value()->add_values("m1");
+    pointees.mutable_actor_set_value()->add_values("m2");
+    auto referenced_all = ValueTraits<std::vector<MeshThing>>::from(pointees);
+    expect(referenced_all.ok() && referenced_all.value().size() == 2 && referenced_all.value()[1].is_a<Object>(),
+           "every handle in a reference container knows its class");
+    expect(referenced.value().object() == ObjectRef::actor("m") &&
+           ObjectRef::actor("m") == ObjectRef::actor("m").with_class(std::string(Widget::kPath)) &&
+           ObjectRef::actor("m") != ObjectRef::component("m", "c"),
+           "handles compare by identity, not class");
 
     // check_schema's comparison, against an answer built here.
     TempoWorld::DescribeClassesResponse reported;

@@ -41,8 +41,9 @@ _CM_PER_M = 100.0
 
 
 def _geometry():
-    # Imported on first use, as tempo_sim.world does: the messages are generated at build time, and
-    # the typed runtime has to import without them.
+    # Imported on first use: the messages are generated at build time, and the typed runtime has to
+    # import without them. (tempo_sim.world imports them at module scope, because it re-exports
+    # them; it is only importable once they exist.)
     import tempo_sim.TempoCore.Geometry_pb2 as Geometry
     return Geometry
 

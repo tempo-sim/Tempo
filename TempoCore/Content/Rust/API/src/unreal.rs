@@ -150,7 +150,7 @@ pub struct ClassRef(pub String);
 /// accepts. So a moved or renamed asset is a name that no longer resolves, and a material where a
 /// mesh is wanted does not compile.
 ///
-/// It derefs to `AssetRef<Superclass>` along the same chain a class handle does, so `&M_PAINT`, an
+/// It derefs to `AssetRef<Superclass>` along the same chain a class handle does, so `&M_Paint`, an
 /// `&AssetRef<Material>`, coerces to the `&AssetRef<MaterialInterface>` a setter takes. Built from a
 /// path, it takes whatever class the destination wants: that is the escape hatch for a path from
 /// data, and it is visible where it is written.
@@ -358,9 +358,11 @@ pub fn note_origin<T: Class>() {
 
 /// View an object as one of its superclasses.
 ///
-/// This is the whole of the `unsafe` in the typed Rust surface. Generated code calls it from its
-/// `Deref` impl, so that `lidar.relative_location()` reaches `SceneComponent` however many classes
-/// lie between them.
+/// One of the two `unsafe` reinterpretations in the typed Rust surface -- the other is
+/// [`AssetRef`]'s `Deref` -- and the one the [`Class`] contract exists for. Generated code contains
+/// no `unsafe` blocks; its one `unsafe` is the `unsafe impl Class` stating the newtype contract.
+/// It calls this from its `Deref` impl, so that `lidar.relative_location()` reaches
+/// `SceneComponent` however many classes lie between them.
 #[inline]
 pub fn upcast<T: Class>(object: &ObjectRef) -> &T {
     // SAFETY: by the `Class` contract, `T` is a `#[repr(transparent)]` newtype over `ObjectRef`,
@@ -400,10 +402,61 @@ fn wrong(value: &pb::Value, wanted: &str) -> TempoError {
         "expected {} from the server, got {}",
         wanted,
         match &value.value {
-            None => "nothing".to_string(),
-            Some(other) => format!("{:?}", std::mem::discriminant(other)),
+            None => "nothing",
+            Some(other) => variant_name(other),
         }
     ))
+}
+
+/// The variant a `Value` carries, by its name in `WorldControl.proto`, for an error that says what
+/// arrived. Exhaustive on purpose: a variant added to the proto has to be named here, where it will
+/// also need a `FromValue`.
+fn variant_name(value: &pb::value::Value) -> &'static str {
+    use pb::value::Value as V;
+    match value {
+        V::BoolValue(_) => "bool_value",
+        V::IntValue(_) => "int_value",
+        V::Int64Value(_) => "int64_value",
+        V::FloatValue(_) => "float_value",
+        V::StringValue(_) => "string_value",
+        V::EnumValue(_) => "enum_value",
+        V::VectorValue(_) => "vector_value",
+        V::Vector2dValue(_) => "vector2d_value",
+        V::IntVectorValue(_) => "int_vector_value",
+        V::IntPointValue(_) => "int_point_value",
+        V::RotatorValue(_) => "rotator_value",
+        V::QuatValue(_) => "quat_value",
+        V::TransformValue(_) => "transform_value",
+        V::ColorValue(_) => "color_value",
+        V::ClassValue(_) => "class_value",
+        V::AssetValue(_) => "asset_value",
+        V::ActorValue(_) => "actor_value",
+        V::ComponentValue(_) => "component_value",
+        V::BoolArrayValue(_) => "bool_array_value",
+        V::StringArrayValue(_) => "string_array_value",
+        V::EnumArrayValue(_) => "enum_array_value",
+        V::IntArrayValue(_) => "int_array_value",
+        V::Int64ArrayValue(_) => "int64_array_value",
+        V::FloatArrayValue(_) => "float_array_value",
+        V::ClassArrayValue(_) => "class_array_value",
+        V::AssetArrayValue(_) => "asset_array_value",
+        V::ActorArrayValue(_) => "actor_array_value",
+        V::ComponentArrayValue(_) => "component_array_value",
+        V::BoolSetValue(_) => "bool_set_value",
+        V::StringSetValue(_) => "string_set_value",
+        V::EnumSetValue(_) => "enum_set_value",
+        V::IntSetValue(_) => "int_set_value",
+        V::Int64SetValue(_) => "int64_set_value",
+        V::FloatSetValue(_) => "float_set_value",
+        V::ClassSetValue(_) => "class_set_value",
+        V::AssetSetValue(_) => "asset_set_value",
+        V::ActorSetValue(_) => "actor_set_value",
+        V::ComponentSetValue(_) => "component_set_value",
+        V::StructValue(_) => "struct_value",
+        V::StructArrayValue(_) => "struct_array_value",
+        V::NativeTransformValue(_) => "native_transform_value",
+        V::LinearColorValue(_) => "linear_color_value",
+    }
 }
 
 macro_rules! scalar_value {
@@ -693,7 +746,7 @@ impl<T> FromValue for Vec<AssetRef<T>> {
         let paths = match variant(value)? {
             pb::value::Value::AssetArrayValue(inner) => &inner.values,
             pb::value::Value::AssetSetValue(inner) => &inner.values,
-            _ => return Err(wrong(value, "an asset array")),
+            _ => return Err(wrong(value, "an asset array or set")),
         };
         Ok(paths.iter().map(|path| AssetRef::from_path(path.clone())).collect())
     }
@@ -710,11 +763,13 @@ impl<T> ToValue for Vec<AssetRef<T>> {
 }
 
 macro_rules! container_value {
-    ($($case:ident, $wanted:literal, $message:ident, $element:ty;)*) => { $(
+    ($($case:ident, $set_case:ident, $wanted:literal, $message:ident, $element:ty;)*) => { $(
         impl FromValue for Vec<$element> {
             fn from_value(value: &pb::Value) -> Result<Self, TempoError> {
                 match variant(value)? {
-                    pb::value::Value::$case(inner) => Ok(inner.values.clone()),
+                    pb::value::Value::$case(inner) | pb::value::Value::$set_case(inner) => {
+                        Ok(inner.values.clone())
+                    }
                     _ => Err(wrong(value, $wanted)),
                 }
             }
@@ -729,23 +784,24 @@ macro_rules! container_value {
     )* };
 }
 
-// Arrays only. A `TSet` travels in its own variants, which carry the same payload, so the
-// generated code reads a set with `get_set` rather than through a second `Vec` impl -- Rust cannot
-// carry two `FromValue` impls for one type.
+// A `TSet` travels in variants of its own that carry the same payload as the array's, and the
+// generated code gives both containers the one Rust shape, `Vec<T>` -- so a read accepts either
+// variant. A write sends the array variant, and the server stores it into whichever container the
+// property is.
 container_value! {
-    BoolArrayValue, "a bool array", BoolArray, bool;
-    IntArrayValue, "an int array", IntArray, i32;
-    Int64ArrayValue, "an int64 array", Int64Array, i64;
-    StringArrayValue, "a string array", StringArray, String;
+    BoolArrayValue, BoolSetValue, "a bool array or set", BoolArray, bool;
+    IntArrayValue, IntSetValue, "an int array or set", IntArray, i32;
+    Int64ArrayValue, Int64SetValue, "an int64 array or set", Int64Array, i64;
+    StringArrayValue, StringSetValue, "a string array or set", StringArray, String;
 }
 
 impl FromValue for Vec<f64> {
     fn from_value(value: &pb::Value) -> Result<Self, TempoError> {
         match variant(value)? {
-            pb::value::Value::FloatArrayValue(inner) => {
+            pb::value::Value::FloatArrayValue(inner) | pb::value::Value::FloatSetValue(inner) => {
                 Ok(inner.values.iter().map(|v| *v as f64).collect())
             }
-            _ => Err(wrong(value, "a float array")),
+            _ => Err(wrong(value, "a float array or set")),
         }
     }
 }
@@ -785,7 +841,7 @@ macro_rules! name_container {
 }
 
 name_container! {
-    ClassArrayValue, ClassSetValue, "a class array", ClassRef;
+    ClassArrayValue, ClassSetValue, "a class array or set", ClassRef;
 }
 
 // -- struct values -------------------------------------------------------------------------------
@@ -838,7 +894,6 @@ impl<'v> StructFields<'v> {
 
     /// One member that refers to an actor or a component, as a typed handle.
     pub fn object<T: Class>(&self, name: &str) -> Result<Option<T>, TempoError> {
-        note_origin::<T>();
         match self.find(name) {
             None => Ok(None),
             Some(value) => match variant(value)? {
@@ -848,7 +903,7 @@ impl<'v> StructFields<'v> {
                 {
                     Ok(None)
                 }
-                _ => Ok(Some(T::from_object(object_reference(value)?))),
+                _ => Ok(Some(object_of(value)?)),
             },
         }
     }
@@ -958,10 +1013,40 @@ thread_local! {
     // has no business capturing writes made on another.
     static BATCH: RefCell<Option<Vec<Queued>>> = const { RefCell::new(None) };
     // Whether the open batch is `batch_async`'s, where nothing may block.
-    static ASYNC: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static ASYNC: RefCell<bool> = const { RefCell::new(false) };
     // Set while `defer` runs its closure: the read the closure makes is queued, and its Deferred
     // left here for `defer` to hand back.
     static CAPTURE: RefCell<Option<Vec<Box<dyn std::any::Any>>>> = const { RefCell::new(None) };
+}
+
+/// A thread-local's value for one scope, the previous one put back when this drops -- which a panic
+/// unwinding through the scope does as surely as a return. Without it a panic inside [`batch`] or
+/// [`defer`], caught by a runtime or by `catch_unwind`, would leave its thread in a batch for good:
+/// every later write queued and never sent, every later read refused.
+struct Scoped<T: 'static> {
+    slot: &'static std::thread::LocalKey<RefCell<T>>,
+    previous: Option<T>,
+}
+
+impl<T: 'static> Scoped<T> {
+    fn set(slot: &'static std::thread::LocalKey<RefCell<T>>, value: T) -> Self {
+        let previous = slot.with(|cell| std::mem::replace(&mut *cell.borrow_mut(), value));
+        Self { slot, previous: Some(previous) }
+    }
+
+    /// Take the scope's value out, putting the previous one back now rather than at the drop.
+    fn finish(mut self) -> T {
+        let previous = self.previous.take().expect("a scope finishes once");
+        self.slot.with(|cell| std::mem::replace(&mut *cell.borrow_mut(), previous))
+    }
+}
+
+impl<T: 'static> Drop for Scoped<T> {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.take() {
+            self.slot.with(|cell| *cell.borrow_mut() = previous);
+        }
+    }
 }
 
 /// grpc's ABORTED: what `RunBatch` reports for an op it did not run because an earlier one failed.
@@ -1047,11 +1132,11 @@ where
         // batch's earlier ops.
         return body().map(|()| Vec::new());
     }
-    BATCH.with(|slot| *slot.borrow_mut() = Some(Vec::new()));
-    let was = ASYNC.with(|flag| flag.replace(asynchronous));
+    let queue = Scoped::set(&BATCH, Some(Vec::new()));
+    let asynchronous = Scoped::set(&ASYNC, asynchronous);
     let result = body();
-    ASYNC.with(|flag| flag.set(was));
-    let queued = BATCH.with(|slot| slot.borrow_mut().take().unwrap_or_default());
+    drop(asynchronous);
+    let queued = queue.finish().unwrap_or_default();
     result.map(|()| queued)
 }
 
@@ -1099,11 +1184,9 @@ impl<T> Deferred<T> {
 pub fn defer<T: Send + 'static>(
     read: impl FnOnce() -> Result<T, TempoError>,
 ) -> Result<Deferred<T>, TempoError> {
-    let previous = CAPTURE.with(|slot| slot.borrow_mut().replace(Vec::new()));
+    let capture = Scoped::set(&CAPTURE, Some(Vec::new()));
     let returned = read();
-    let captured = CAPTURE
-        .with(|slot| std::mem::replace(&mut *slot.borrow_mut(), previous))
-        .unwrap_or_default();
+    let captured = capture.finish().unwrap_or_default();
 
     match (returned, captured.len()) {
         // Answered without a request, or outside a batch: there is nothing to wait for.
@@ -1156,7 +1239,7 @@ fn perform<T: Send + 'static>(
     }
 
     let capturing = CAPTURE.with(|capture| capture.borrow().is_some());
-    if !capturing && ASYNC.with(|flag| flag.get()) {
+    if !capturing && ASYNC.with(|flag| *flag.borrow()) {
         return Err(TempoError::Protocol(format!(
             "{} was made directly inside batch_async, where nothing is sent until the batch is \
              awaited. Defer it with `defer(|| ...)`, or await its `_async` form outside the batch.",
@@ -1542,8 +1625,7 @@ impl ObjectRef {
 
     /// Read a reference-valued property as a typed handle.
     pub fn get_object<T: Class + 'static>(&self, property: &str) -> Result<T, TempoError> {
-        note_origin::<T>();
-        self.read_as(property, |value| Ok(T::from_object(object_reference(value)?)))
+        self.read_as(property, object_of::<T>)
     }
 
     /// Read a reference-valued property as a typed handle, without blocking.
@@ -1558,8 +1640,22 @@ impl ObjectRef {
             true,
             self.subsystem.clone(),
         );
-        note_origin::<T>();
-        async move { Ok(T::from_object(object_reference(&request.await?)?)) }
+        async move { object_of(&request.await?) }
+    }
+
+    /// Read a reference-valued property through its `BlueprintGetter`, as [`ObjectRef::get_via`]
+    /// reads a plain one: the getter may be the only thing that resolves the reference.
+    pub fn get_object_via<T: Class + 'static>(&self, getter: &str) -> Result<T, TempoError> {
+        self.call_as(getter, Vec::new(), object_of::<T>)
+    }
+
+    /// Read a reference-valued property through its `BlueprintGetter`, without blocking.
+    pub fn get_object_via_async<T: Class>(
+        &self,
+        getter: &str,
+    ) -> impl Future<Output = Result<T, TempoError>> + '_ {
+        let request = self.call_raw_async(getter, Vec::new());
+        async move { object_of(returned(&request.await?)?) }
     }
 
     /// Read an array or set of actor or component references as typed handles.
@@ -1567,13 +1663,7 @@ impl ObjectRef {
     /// Separate from [`ObjectRef::get`] for the same reason [`ObjectRef::get_enums`] is: a `Vec`
     /// of a generated class cannot implement [`FromValue`] in the crate that generated it.
     pub fn get_objects<T: Class + 'static>(&self, property: &str) -> Result<Vec<T>, TempoError> {
-        note_origin::<T>();
-        self.read_as(property, |value| {
-            Ok(reference_names(value)?
-                .iter()
-                .map(|name| T::from_object(ObjectRef::from_reference_name(name)))
-                .collect())
-        })
+        self.read_as(property, objects_of::<T>)
     }
 
     /// Read an array or set of references as typed handles, without blocking.
@@ -1581,7 +1671,6 @@ impl ObjectRef {
         &self,
         property: &str,
     ) -> impl Future<Output = Result<Vec<T>, TempoError>> + '_ {
-        note_origin::<T>();
         let request = crate::tempo_world::get_property_async(
             self.actor.clone(),
             self.component.clone(),
@@ -1589,13 +1678,21 @@ impl ObjectRef {
             true,
             self.subsystem.clone(),
         );
-        async move {
-            let value = request.await?;
-            Ok(reference_names(&value)?
-                .iter()
-                .map(|name| T::from_object(ObjectRef::from_reference_name(name)))
-                .collect())
-        }
+        async move { objects_of(&request.await?) }
+    }
+
+    /// Read an array or set of references through its `BlueprintGetter`.
+    pub fn get_objects_via<T: Class + 'static>(&self, getter: &str) -> Result<Vec<T>, TempoError> {
+        self.call_as(getter, Vec::new(), objects_of::<T>)
+    }
+
+    /// Read an array or set of references through its `BlueprintGetter`, without blocking.
+    pub fn get_objects_via_async<T: Class>(
+        &self,
+        getter: &str,
+    ) -> impl Future<Output = Result<Vec<T>, TempoError>> + '_ {
+        let request = self.call_raw_async(getter, Vec::new());
+        async move { objects_of(returned(&request.await?)?) }
     }
 
     /// Point an actor-valued array at some actors.
@@ -1730,8 +1827,7 @@ impl ObjectRef {
         function: &str,
         args: Vec<pb::FunctionArg>,
     ) -> Result<T, TempoError> {
-        note_origin::<T>();
-        self.call_as(function, args, |value| Ok(T::from_object(object_reference(value)?)))
+        self.call_as(function, args, object_of::<T>)
     }
 
     /// Call a function whose result is an actor or a component, without blocking.
@@ -1740,7 +1836,6 @@ impl ObjectRef {
         function: &str,
         args: Vec<pb::FunctionArg>,
     ) -> impl Future<Output = Result<T, TempoError>> + '_ {
-        note_origin::<T>();
         let request = self.call_raw_async(function, args);
         async move { Self::object_result_of(&request.await?, "ReturnValue") }
     }
@@ -1750,7 +1845,6 @@ impl ObjectRef {
         response: &pb::CallFunctionResponse,
         name: &str,
     ) -> Result<T, TempoError> {
-        note_origin::<T>();
         let value = response
             .results
             .iter()
@@ -1759,7 +1853,7 @@ impl ObjectRef {
             .ok_or_else(|| {
                 TempoError::Protocol(format!("the function returned no result named {:?}", name))
             })?;
-        Ok(T::from_object(object_reference(value)?))
+        object_of(value)
     }
 
     /// Yield this property's value once per simulation tick, until the caller stops asking.
@@ -1851,6 +1945,35 @@ fn object_reference(value: &pb::Value) -> Result<ObjectRef, TempoError> {
         pb::value::Value::ActorValue(name) => Ok(ObjectRef::actor(name)),
         pb::value::Value::ComponentValue(name) => Ok(ObjectRef::from_reference_name(name)),
         _ => Err(wrong(value, "an actor or component reference")),
+    }
+}
+
+/// A handle to what a reference-valued `Value` names, typed as the property or result declares.
+///
+/// The wire carries a name and nothing else, so the handle is stamped with the declared class:
+/// the type system has just said this is a `T`, and [`ObjectRef::is_a`] should agree rather than
+/// answer `false` for want of a class. The thing may really be of a subclass, which only a query
+/// that reports classes -- `world::get_actors`, `world::get_components` -- can say.
+fn object_of<T: Class>(value: &pb::Value) -> Result<T, TempoError> {
+    note_origin::<T>();
+    Ok(declared::<T>(object_reference(value)?))
+}
+
+/// Handles to what an array or set of references names, each typed as [`object_of`] types one.
+fn objects_of<T: Class>(value: &pb::Value) -> Result<Vec<T>, TempoError> {
+    note_origin::<T>();
+    Ok(reference_names(value)?
+        .iter()
+        .map(|name| declared::<T>(ObjectRef::from_reference_name(name)))
+        .collect())
+}
+
+/// `object` as a `T`, carrying `T`'s class when nothing said what the class really is.
+fn declared<T: Class>(object: ObjectRef) -> T {
+    if object.class_path.is_empty() {
+        T::from_object(object.with_class(T::PATH))
+    } else {
+        T::from_object(object)
     }
 }
 
@@ -2153,9 +2276,7 @@ impl ObjectRef {
     /// rule wants a local type that is not merely a parameter of a foreign one. Reading through
     /// `UnrealEnum` sidesteps that, and keeps the conversion in one place.
     pub fn get_enums<T: UnrealEnum + 'static>(&self, property: &str) -> Result<Vec<T>, TempoError> {
-        self.read_as(property, |value| {
-            enum_names(value)?.iter().map(|name| T::from_unreal_name(name)).collect()
-        })
+        self.read_as(property, enums_of::<T>)
     }
 
     /// Read an array or set of enums, without blocking.
@@ -2170,10 +2291,21 @@ impl ObjectRef {
             true,
             self.subsystem.clone(),
         );
-        async move {
-            let value = request.await?;
-            enum_names(&value)?.iter().map(|name| T::from_unreal_name(name)).collect()
-        }
+        async move { enums_of(&request.await?) }
+    }
+
+    /// Read an array or set of enums through its `BlueprintGetter`.
+    pub fn get_enums_via<T: UnrealEnum + 'static>(&self, getter: &str) -> Result<Vec<T>, TempoError> {
+        self.call_as(getter, Vec::new(), enums_of::<T>)
+    }
+
+    /// Read an array or set of enums through its `BlueprintGetter`, without blocking.
+    pub fn get_enums_via_async<T: UnrealEnum>(
+        &self,
+        getter: &str,
+    ) -> impl Future<Output = Result<Vec<T>, TempoError>> + '_ {
+        let request = self.call_raw_async(getter, Vec::new());
+        async move { enums_of(returned(&request.await?)?) }
     }
 
     /// Write an array of enums, or queue it when a [`batch`] is open.
@@ -2248,7 +2380,7 @@ fn reference_names(value: &pb::Value) -> Result<&Vec<String>, TempoError> {
         pb::value::Value::ActorSetValue(inner) => Ok(&inner.values),
         pb::value::Value::ComponentArrayValue(inner) => Ok(&inner.values),
         pb::value::Value::ComponentSetValue(inner) => Ok(&inner.values),
-        _ => Err(wrong(value, "an actor or component array")),
+        _ => Err(wrong(value, "an actor or component array or set")),
     }
 }
 
@@ -2270,8 +2402,12 @@ fn enum_names(value: &pb::Value) -> Result<&Vec<String>, TempoError> {
     match variant(value)? {
         pb::value::Value::EnumArrayValue(inner) => Ok(&inner.values),
         pb::value::Value::EnumSetValue(inner) => Ok(&inner.values),
-        _ => Err(wrong(value, "an enum array")),
+        _ => Err(wrong(value, "an enum array or set")),
     }
+}
+
+fn enums_of<T: UnrealEnum>(value: &pb::Value) -> Result<Vec<T>, TempoError> {
+    enum_names(value)?.iter().map(|name| T::from_unreal_name(name)).collect()
 }
 
 // -- generated declarations ----------------------------------------------------------------------
@@ -2479,5 +2615,174 @@ mod tests {
     fn an_array_of_structs_round_trips() {
         let trims = vec![Trim { label: Some("a".into()), ..Default::default() }, Trim::default()];
         assert_eq!(Vec::<Trim>::from_value(&trims.to_value()).unwrap(), trims);
+    }
+
+    fn value(inner: pb::value::Value) -> pb::Value {
+        pb::Value { value: Some(inner) }
+    }
+
+    fn strings(values: &[&str]) -> pb::StringArray {
+        pb::StringArray { values: values.iter().map(|s| s.to_string()).collect() }
+    }
+
+    #[test]
+    fn a_set_reads_as_the_vec_an_array_does() {
+        // The server encodes a TSet in a variant of its own, and the generated code types both
+        // containers as Vec -- so the set variants have to read.
+        use pb::value::Value as V;
+        let ints: Vec<i32> = Vec::from_value(&value(V::IntSetValue(pb::IntArray { values: vec![1, 2] })))
+            .expect("an int set");
+        assert_eq!(ints, [1, 2]);
+        let longs: Vec<i64> =
+            Vec::from_value(&value(V::Int64SetValue(pb::Int64Array { values: vec![1 << 40] })))
+                .expect("an int64 set");
+        assert_eq!(longs, [1 << 40]);
+        let floats: Vec<f64> =
+            Vec::from_value(&value(V::FloatSetValue(pb::FloatArray { values: vec![0.5] })))
+                .expect("a float set");
+        assert_eq!(floats, [0.5]);
+        let bools: Vec<bool> =
+            Vec::from_value(&value(V::BoolSetValue(pb::BoolArray { values: vec![true] })))
+                .expect("a bool set");
+        assert_eq!(bools, [true]);
+        let names: Vec<String> =
+            Vec::from_value(&value(V::StringSetValue(strings(&["a", "b"])))).expect("a string set");
+        assert_eq!(names, ["a", "b"]);
+        let classes: Vec<ClassRef> =
+            Vec::from_value(&value(V::ClassSetValue(strings(&["/Script/Engine.Pawn"]))))
+                .expect("a class set");
+        assert_eq!(classes, [ClassRef::new("/Script/Engine.Pawn")]);
+        let assets: Vec<AssetRef> =
+            Vec::from_value(&value(V::AssetSetValue(strings(&["/Game/M_Paint"])))).expect("an asset set");
+        assert_eq!(assets, [AssetRef::from_path("/Game/M_Paint")]);
+    }
+
+    #[test]
+    fn a_vec_is_written_as_an_array() {
+        // Whichever container the property is: the server stores into the one it has.
+        match vec![1, 2].to_value().value {
+            Some(pb::value::Value::IntArrayValue(inner)) => assert_eq!(inner.values, [1, 2]),
+            other => panic!("expected an int array, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn a_wrong_variant_is_named_in_the_error() {
+        let error = Vec::<String>::from_value(&value(pb::value::Value::IntSetValue(pb::IntArray {
+            values: vec![1],
+        })))
+        .expect_err("an int set is not a string container")
+        .to_string();
+        assert!(error.contains("a string array or set"), "{error}");
+        assert!(error.contains("int_set_value"), "{error}");
+    }
+
+    #[test]
+    fn a_panic_inside_a_batch_leaves_the_thread_usable() {
+        let object = ObjectRef::actor("Somewhere");
+
+        // A panic the body does not catch unwinds through `batch`, as one does through a tokio task
+        // or `catch_unwind`. The thread has to come out of it in no batch at all, or every later
+        // write would queue for good and every later read be refused.
+        let caught = std::panic::catch_unwind(|| {
+            batch(|| -> Result<(), TempoError> {
+                object.set("bHidden", true)?;
+                panic!("the body panicked")
+            })
+        });
+        assert!(caught.is_err());
+        assert!(!batch_open(), "the batch the panic unwound through is closed");
+
+        let caught = std::panic::catch_unwind(|| {
+            batch_async(|| -> Result<(), TempoError> { panic!("the body panicked") })
+        });
+        assert!(caught.is_err());
+        assert!(!batch_open());
+        assert!(!ASYNC.with(|flag| *flag.borrow()), "the async flag is back to what it was");
+
+        abandoned(|| {
+            let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                defer(|| -> Result<bool, TempoError> { panic!("the read panicked") })
+            }));
+            assert!(caught.is_err());
+            assert!(CAPTURE.with(|slot| slot.borrow().is_none()), "no longer capturing");
+            assert!(batch_open(), "the batch around the deferred read stays open");
+            let deferred = defer(|| object.get::<bool>("bHidden")).expect("a later defer works");
+            assert!(!deferred.is_done());
+        });
+        assert!(!batch_open());
+
+        // A fresh batch starts from nothing the panicked one queued.
+        abandoned(|| {
+            object.set("bHidden", false).expect("queued, not sent");
+            assert_eq!(BATCH.with(|slot| slot.borrow().as_ref().map(Vec::len)), Some(1));
+        });
+    }
+
+    #[repr(transparent)]
+    struct Pawn(ObjectRef);
+
+    // SAFETY: a transparent newtype over ObjectRef, as the generator writes one.
+    unsafe impl Class for Pawn {
+        const PATH: &'static str = "/Script/Engine.Pawn";
+        fn from_object(object: ObjectRef) -> Self {
+            Self(object)
+        }
+        fn as_object(&self) -> &ObjectRef {
+            &self.0
+        }
+        fn hierarchy() -> &'static (dyn Hierarchy + 'static) {
+            &PAWN_TABLE
+        }
+    }
+
+    // Not zero-sized, as a registered table must not be.
+    struct PawnTable(#[allow(dead_code)] u8);
+
+    static PAWN_TABLE: PawnTable = PawnTable(0);
+
+    impl Hierarchy for PawnTable {
+        fn superclass(&self, class_path: &str) -> Option<&'static str> {
+            match class_path {
+                "/Script/Engine.Pawn" => Some("/Script/Engine.Actor"),
+                "/Script/Engine.Actor" => Some("/Script/CoreUObject.Object"),
+                _ => None,
+            }
+        }
+
+        fn header(&self) -> SchemaIdentity {
+            SchemaIdentity::default()
+        }
+
+        fn hashes(&self, _kind: EntryKind) -> &'static [(&'static str, &'static str)] {
+            &[]
+        }
+
+        fn content_hash(&self, _kind: EntryKind, _name: &str) -> Option<&'static str> {
+            None
+        }
+    }
+
+    #[test]
+    fn a_reference_read_from_a_property_is_typed_as_declared() {
+        // The wire names the actor and nothing else, so the handle carries the declared class --
+        // the type system has just said this is a Pawn, and is_a agrees.
+        let truck: Pawn = object_of(&value(pb::value::Value::ActorValue("Truck".into())))
+            .expect("an actor reference");
+        assert_eq!(truck.as_object().actor_name(), "Truck");
+        assert_eq!(truck.as_object().class_path(), Pawn::PATH);
+        assert!(truck.as_object().is_a(Pawn::PATH));
+        assert!(
+            truck.as_object().is_a("/Script/Engine.Actor"),
+            "answered from the table the handle's crate registered on the way"
+        );
+        assert!(!truck.as_object().is_a("/Script/Engine.Character"));
+
+        let handles: Vec<Pawn> =
+            objects_of(&value(pb::value::Value::ActorSetValue(strings(&["A", "B:Mesh"]))))
+                .expect("a set of references");
+        assert_eq!(handles.len(), 2);
+        assert!(handles.iter().all(|handle| handle.as_object().is_a("/Script/Engine.Actor")));
+        assert_eq!(handles[1].as_object().component_name(), "Mesh");
     }
 }

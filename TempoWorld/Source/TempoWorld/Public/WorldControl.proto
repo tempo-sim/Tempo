@@ -385,11 +385,13 @@ message GetPropertyRequest {
   string actor = 1;
   string component = 2;
   string property = 3;
-  // False (the default) converts the way every other RPC does: rotations and transforms arrive in
-  // radians, right-handed, with lengths in meters. True reports the property exactly as Unreal
-  // stores it -- centimeters, degrees, left-handed -- with no conversion of any kind, and in
-  // Unreal's own shape: a transform as native_transform_value, with its scale, and an FLinearColor
-  // as linear_color_value rather than squeezed into 8 bits.
+  // False (the default) converts the way every other RPC does, with one exception. A rotator, a
+  // quaternion or a transform arrives in radians, right-handed, with the transform's location in
+  // meters; but a vector, a 2D vector and every scalar are reported exactly as stored -- Unreal's
+  // centimeters, degrees and left-handed axes -- because a raw property carries no unit to convert
+  // by. True reports the property exactly as Unreal stores it, with no conversion of any kind, and
+  // in Unreal's own shape: a transform as native_transform_value, with its scale, and an
+  // FLinearColor as linear_color_value rather than squeezed into 8 bits.
   bool native_units = 4;
   // Addresses a subsystem rather than an actor: the class of a world, game-instance, engine or
   // local-player subsystem, by path ("/Script/TempoAgents.TempoAgentsWorldSubsystem") or by name.
@@ -810,6 +812,13 @@ message StructArray { repeated StructValue values = 1; }
 // types it may be written to - exactly the same rules the singular
 // Set*Property RPCs follow, since they are now expressed in terms of this
 // message. See the README's property type table.
+//
+// A repeated variant names its element kind, not its container: the *_array_value
+// and *_set_value of a kind carry the same payload, and either one writes an
+// array or a set property, whichever the destination is. A read reports the
+// variant matching the property's own container. Each accepts every element
+// type the kind's scalar variant does, so int_array_value writes a TArray<uint8>
+// as readily as a TArray<int32>.
 message Value {
   oneof value {
     bool bool_value = 1;
@@ -819,12 +828,15 @@ message Value {
     string string_value = 5;
     // Enum value as its symbolic name.
     string enum_value = 6;
+    // Not converted in either direction: Unreal's own units and handedness, whatever native_units
+    // says. See GetPropertyRequest.native_units.
     TempoCore.Vector vector_value = 7;
     TempoCore.Vector2D vector2d_value = 8;
     IntVector int_vector_value = 9;
     IntPoint int_point_value = 10;
     // Roll/pitch/yaw in radians, right-handed.
     TempoCore.Rotation rotator_value = 11;
+    // Right-handed; converted to and from Unreal's left-handed FQuat.
     Quat quat_value = 12;
     // Location in meters, rotation in radians, right-handed.
     TempoCore.Transform transform_value = 13;
@@ -874,9 +886,11 @@ message SetPropertyRequest {
   string component = 2;
   string property = 3;
   Value value = 4;
-  // False (the default) converts the way every other RPC does: rotations and transforms are given
-  // in radians, right-handed, with lengths in meters. True writes the value exactly as given, in
-  // Unreal's own units -- centimeters, degrees, left-handed.
+  // False (the default) converts the way every other RPC does, with the exception a read has: a
+  // rotator, a quaternion or a transform is given in radians, right-handed, with the transform's
+  // location in meters, while a vector, a 2D vector and every scalar are written exactly as given,
+  // in whatever unit the property holds. True writes every value exactly as given, in Unreal's own
+  // units -- centimeters, degrees, left-handed.
   bool native_units = 5;
   // As GetPropertyRequest.subsystem.
   string subsystem = 6;
@@ -900,7 +914,8 @@ message CallFunctionRequest {
   // applied in order.
   repeated FunctionArg args = 4;
   // As SetPropertyRequest.native_units, applied to every argument in the call. An argument is the
-  // same Value a property takes, so it is converted by the same rules.
+  // same Value a property takes, so it is converted by the same rules, exception included: a
+  // vector or a scalar argument is passed exactly as given.
   bool native_units = 5;
   // As GetPropertyRequest.subsystem.
   string subsystem = 6;
@@ -1148,7 +1163,7 @@ message TypeDescriptor {
 
 message ClassPropertyDescriptor {
   string name = 1;
-  TypeDescriptor type = 2;
+  TypeDescriptor value_type = 2;
   // Blueprint-visible.
   bool readable = 3;
   // Blueprint-visible, not read-only, and expressible as one value.
@@ -1169,7 +1184,7 @@ message ClassPropertyDescriptor {
 
 message ClassParameterDescriptor {
   string name = 1;
-  TypeDescriptor type = 2;
+  TypeDescriptor value_type = 2;
   ParameterKind kind = 3;
 }
 

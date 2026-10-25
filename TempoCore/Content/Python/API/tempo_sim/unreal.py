@@ -266,6 +266,14 @@ class Object:
     def __repr__(self) -> str:
         return "{}({!r})".format(type(self).__name__, _describe(self._target()))
 
+    # Two handles to one thing are equal, however each is typed: a handle is an address, and a
+    # reference read back from the sim is a new handle to something the scenario may already hold.
+    def __eq__(self, other):
+        return isinstance(other, Object) and other._target() == self._target()
+
+    def __hash__(self):
+        return hash(_key(self._target()))
+
     def is_a(self, other) -> bool:
         """Whether the thing this handle addresses is `other`, or derives from it.
 
@@ -334,11 +342,13 @@ class Object:
     def _serving(self, response):
         """Serve this handle's reads from a GetProperties response for the length of the block."""
         values = {}
+        class_path = type(self).__tempo_class__
         for entry in response.values if response is not None else ():
             # An unreadable property does not fail the call; it simply is not in the snapshot,
             # and a read of it falls through to the server to report why.
             if entry.code == 0:
-                values[entry.name] = _from_value(entry.value)
+                values[entry.name] = _from_value(entry.value,
+                                                 _classes.find_property(class_path, entry.name))
         # A new mapping rather than an edit of the current one: the current one belongs to whichever
         # context set it, and another task may be reading through it.
         snapshots = dict(_snapshots.get())
@@ -378,18 +388,18 @@ class Object:
         against the class before the subscription opens, so a typo fails immediately rather than
         after the first tick.
         """
-        self._watchable(name)
+        member = self._watchable(name)
         _require_blocking("watch", "`async for value in handle.watch_async(name)`")
         for message in _world().stream_property(**self._target(), property=name,
                                                 native_units=True):
-            yield _from_value(message)
+            yield _from_value(message, member)
 
     async def watch_async(self, name):
         """`watch`, for a coroutine: `async for speed in truck.watch_async("MaxSpeed")`."""
-        self._watchable(name)
+        member = self._watchable(name)
         async for message in _world().stream_property(**self._target(), property=name,
                                                       native_units=True):
-            yield _from_value(message)
+            yield _from_value(message, member)
 
     def _watchable(self, name):
         member = self._property(name)
@@ -397,6 +407,7 @@ class Object:
             raise AttributeError(
                 "{}.{} cannot be watched: it is not readable as one value".format(
                     type(self).__name__, name))
+        return member
 
     def _property(self, name):
         member = _classes.find_property(type(self).__tempo_class__, name)
@@ -420,7 +431,7 @@ class Object:
         if member is not None:
             if _is_proxied(member):
                 return StructProxy(self, name, member["struct"])
-            return _read(self._target(), name)
+            return _read(self._target(), name, member)
 
         signature = _classes.find_function(type(self).__tempo_class__, name)
         if signature is not None:
@@ -563,6 +574,8 @@ class _Classes:
     def __init__(self):
         self._packages = []
         self._struct_classes = {}
+        self._dynamic_classes = {}
+        self._enum_classes = {}
 
     def register(self, package, directory):
         # Re-importing the same package is not a second one. It happens whenever a test reloads a
@@ -570,6 +583,8 @@ class _Classes:
         self._packages = [p for p in self._packages if p.package != package]
         self._packages.append(_Package(package, directory))
         self._struct_classes = {}
+        self._dynamic_classes = {}
+        self._enum_classes = {}
 
     @property
     def registered(self):
@@ -758,6 +773,46 @@ class _Classes:
         owner = self._owner(class_path)
         return owner.python_class(class_path) if owner else None
 
+    def handle_class(self, class_path):
+        """The class a handle to something of `class_path` is built as.
+
+        The generated class when a package declares it, so the handle's members are the declared
+        ones; DynamicObject otherwise, which says visibly that nothing about it is checked.
+        """
+        found = self.python_class(class_path) if class_path and self.registered else None
+        return found if found is not None else DynamicObject
+
+    def class_for(self, class_path):
+        """What a class-valued read hands back for an Unreal class path.
+
+        The generated class when a package declares it. When none does, a DynamicObject subclass
+        standing for that path and nothing else -- so `__tempo_class__` still names the class the
+        sim reported, and writing the value back sends that path rather than DynamicObject's own.
+        """
+        found = self.python_class(class_path) if self.registered else None
+        if found is not None:
+            return found
+        cached = self._dynamic_classes.get(class_path)
+        if cached is None:
+            name = _identifier(class_path.rsplit(".", 1)[-1] or class_path)
+            cached = type(name, (DynamicObject,), {"__slots__": (), "__tempo_class__": class_path})
+            self._dynamic_classes[class_path] = cached
+        return cached
+
+    def enum_class(self, name):
+        """The generated enum for an Unreal enum name, or None when no installed package has it."""
+        if name in self._enum_classes:
+            return self._enum_classes[name]
+        import importlib
+        found = None
+        for package in self._packages:
+            module = importlib.import_module("{}.enums".format(package.package))
+            found = getattr(module, _identifier(name), None)
+            if found is not None:
+                break
+        self._enum_classes[name] = found
+        return found
+
 
 _classes = _Classes()
 
@@ -818,6 +873,10 @@ _SCALAR_VARIANTS = frozenset((
     "bool_value", "int_value", "int64_value", "float_value", "string_value", "enum_value",
     "class_value", "asset_value", "actor_value", "component_value",
 ))
+
+# Element kinds that travel as a name and read back as something else when the slot's type is known:
+# a handle, a generated class, a generated enum member. See _reference.
+_REFERENCE_KINDS = frozenset(("actor", "component", "class", "enum"))
 
 # Variants whose payload is a message with these fields, in this order.
 _COMPONENT_VARIANTS = {
@@ -893,8 +952,9 @@ def _fill_struct(target, value):
 
 
 def _read_struct(source):
+    members = _classes.struct_members(source.struct_name)
     return _classes.struct_class(source.struct_name)._from_fields(
-        {field.name: _from_value(field.value) for field in source.fields})
+        {field.name: _from_value(field.value, members.get(field.name)) for field in source.fields})
 
 
 def _to_value(variant, value):
@@ -956,8 +1016,48 @@ def _to_value(variant, value):
     raise TypeError("no conversion for Value variant {!r}".format(variant))
 
 
-def _from_value(message):
-    """Read whichever variant a Value carries back into a Python value."""
+def _reference(kind, name, member):
+    """What one reference or enum reads back as, given the metadata of the slot it was read from.
+
+    The wire carries a name: an actor's, a component's as "Actor:Component", a class's path, an
+    enum's authored spelling. The stub, typed from the same schema the metadata came from, promises
+    a handle of the declared class, the generated class and the generated enum member -- so that is
+    what is built here.
+    """
+    if kind == "enum":
+        enum = _classes.enum_class(member.get("enum", ""))
+        if enum is not None:
+            try:
+                return enum(name)
+            except ValueError:
+                # An enumerator this package does not know, from a newer sim. Still comparable to
+                # a string, as a generated member is.
+                pass
+        return name
+    if not name:
+        # An empty name is a reference to nothing.
+        return None
+    if kind == "class":
+        return _classes.class_for(name)
+    if kind == "component":
+        actor, separator, component = name.partition(":")
+        if not separator:
+            # A component with no owner, which the server names bare.
+            actor, component = "", name
+    else:
+        actor, component = name, ""
+    declared = member.get("class", "")
+    return _classes.handle_class(declared)(actor, component, class_path=declared)
+
+
+def _from_value(message, member=None):
+    """Read whichever variant a Value carries back into a Python value.
+
+    `member` is the metadata record of the property, struct member or parameter being read, when
+    there is one. It is what turns a reference into a handle of its declared class, a class path into
+    the generated class and an enum's authored name into the generated member; without it those read
+    as the strings they travel as, which is all a schema-free read can know.
+    """
     variant = message.WhichOneof("value")
     if variant is None:
         return None
@@ -965,6 +1065,15 @@ def _from_value(message):
     if variant == "asset_value":
         # An empty path is a property that points at nothing.
         return AssetRef(message.asset_value) if message.asset_value else None
+
+    if member is not None:
+        for suffix in ("_value", "_array_value", "_set_value"):
+            kind = variant[:-len(suffix)] if variant.endswith(suffix) else None
+            if kind in _REFERENCE_KINDS:
+                if suffix == "_value":
+                    return _reference(kind, getattr(message, variant), member)
+                decoded = [_reference(kind, name, member) for name in getattr(message, variant).values]
+                return set(decoded) if suffix == "_set_value" else decoded
 
     if variant in _SCALAR_VARIANTS:
         return getattr(message, variant)
@@ -1159,8 +1268,15 @@ class Batch:
         def on_result(result, error):
             if error is not None:
                 deferred._fail(error)
+                return
+            try:
+                value = decode(result)
+            except Exception as failure:
+                # This op's failure, not the batch's: the rest still settle, and this one raises
+                # from its own .value.
+                deferred._fail(failure)
             else:
-                deferred._resolve(decode(result))
+                deferred._resolve(value)
 
         self._add(op, description, on_result)
         return deferred
@@ -1182,7 +1298,7 @@ class Batch:
         return self._capture(read)
 
     def call(self, invoke):
-        """Defer a call: `b.call(lambda: truck.TeleportTo(dest, rot, False, False))`."""
+        """Defer a call: `b.call(lambda: truck.K2_TeleportTo(dest, rot))`."""
         return self._capture(invoke)
 
     def _capture(self, body):
@@ -1294,7 +1410,7 @@ async def get_async(read):
 
 
 async def call_async(invoke):
-    """One deferred call, awaited: `await call_async(lambda: truck.TeleportTo(...))`."""
+    """One deferred call, awaited: `await call_async(lambda: truck.K2_TeleportTo(p, r))`."""
     if _batch.get() is not None:
         raise TypeError("inside a batch, defer the call with b.call instead; the batch sends it")
     async with Batch() as batch:
@@ -1320,7 +1436,8 @@ def _key(target):
     return tuple(sorted(target.items()))
 
 
-def _read(target, address):
+def _read(target, address, member=None):
+    """Read one property. `member` is its metadata, which types what comes back; see _from_value."""
     # A snapshot serves reads for the handle that opened it, so a block reading several properties
     # costs one call rather than one per property.
     cache = _snapshots.get().get(_key(target))
@@ -1335,15 +1452,20 @@ def _read(target, address):
         op = WorldControl.BatchOp(get=WorldControl.GetPropertyRequest(
             **target, property=address, native_units=True))
         description = "read {}".format(_where(target, address))
+
+        def decode(result):
+            return _from_value(result.value, member)
+
         capture = _capture.get()
         if capture is not None:
-            capture.append(batch.defer(op, description, lambda result: _from_value(result.value)))
+            capture.append(batch.defer(op, description, decode))
             return _PENDING
-        return batch.run_now(op, description, lambda result: _from_value(result.value))
+        return batch.run_now(op, description, decode)
 
     _require_blocking("Reading {}".format(_where(target, address)),
                       "`await world.get_async(lambda: ...)`")
-    return _from_value(_world().get_property(**target, property=address, native_units=True))
+    return _from_value(_world().get_property(**target, property=address, native_units=True),
+                       member)
 
 
 def _write(target, address, member, value):
@@ -1355,6 +1477,12 @@ def _write(target, address, member, value):
     """
     setter = member.get("setter")
     batch = _open_batch()
+
+    cache = _snapshots.get().get(_key(target))
+    if cache is not None:
+        # The snapshot is now stale for this property, however the write travels; drop it rather
+        # than serve the old value.
+        cache.pop(address, None)
 
     if setter:
         # Named, not positional: CallFunction rejects an unnamed arg outright, and matches the name
@@ -1371,11 +1499,6 @@ def _write(target, address, member, value):
                                           "value": _to_value(member["variant"], value)}])
         return
 
-    cache = _snapshots.get().get(_key(target))
-    if cache is not None:
-        # The snapshot is now stale for this property; drop it rather than serve the old value.
-        cache.pop(address, None)
-
     if batch is not None:
         batch.add_write(target, address, member["variant"], value)
         return
@@ -1389,10 +1512,11 @@ def _write(target, address, member, value):
 class DynamicObject(Object):
     """A handle with no generated type behind it.
 
-    What the schema-free lookups return, where the class is not known until runtime. It behaves
-    exactly like Object; the difference is entirely in the type checker's view, where this one
-    declares the catch-alls and Object does not. Reaching for it is therefore a visible choice, and
-    one that trades the drift guarantee for not needing the generated classes installed.
+    What the schema-free lookups return, where the class is not known until runtime, and what a
+    reference to a class no installed package declares reads back as. It behaves exactly like
+    Object; the difference is entirely in the type checker's view, where this one declares the
+    catch-alls and Object does not. Reaching for it is therefore a visible choice, and one that
+    trades the drift guarantee for not needing the generated classes installed.
     """
 
     __slots__ = ()
@@ -1480,12 +1604,19 @@ def _function_result(response, signature):
     has out parameters -- which is how a Blueprint usually hands back more than one thing -- returns
     a dict keyed by name, because position would be guesswork.
     """
-    results = {entry.name: _from_value(entry.typed_value)
+    returns = signature.get("returns")
+    outputs = signature.get("outputs") or {}
+
+    def record(name):
+        # Each result's declared type, so a reference or an enum reads back as the stub says.
+        return returns if name == "ReturnValue" else outputs.get(name)
+
+    results = {entry.name: _from_value(entry.typed_value, record(entry.name))
                for entry in response.results if entry.HasField("typed_value")}
     if not results:
         return None
 
-    has_return = signature.get("returns") is not None
+    has_return = returns is not None
     if has_return and len(results) == 1 and "ReturnValue" in results:
         return results["ReturnValue"]
     return results
@@ -1521,7 +1652,7 @@ class StructProxy:
         address = "{}.{}".format(self._address, name)
         if _is_proxied(member):
             return StructProxy(self._owner, address, member["struct"])
-        return _read(self._owner._target(), address)
+        return _read(self._owner._target(), address, member)
 
     def __setattr__(self, name, value):
         if name.startswith("_"):

@@ -78,17 +78,24 @@ CONTAINER_ELEMENTS = frozenset(
 # an impl on a Vec of a generated type.
 #
 # ASSET is read as PLAIN is, and written by reference: a setter taking `&AssetRef<MaterialInterface>`
-# is what lets `&M_PAINT`, an `&AssetRef<Material>`, coerce into it through AssetRef's Deref.
+# is what lets `&M_Paint`, an `&AssetRef<Material>`, coerce into it through AssetRef's Deref. (An
+# asset static is named as its asset is, not upper-cased.)
 PLAIN, OBJECT, ENUMS, OBJECTS, ACTOR_REF, COMPONENT_REF, ASSET = range(7)
 
 
 # Registers TABLE before main, so `world::check_schema` finds these classes before any handle has
 # been made -- the one thing a program may reasonably do first. Rust has no import side effects,
 # so this is the platform's own list of static initializers, which is what a C++ global's
-# constructor goes in: a function pointer in a section the loader runs. `#[used]` keeps it from
-# being optimized away. The linker keeps it only if it links this module's object, which it does
-# whenever the program uses a class, since every class's `hierarchy()` names TABLE beside it; a
-# crate the program never names is not linked at all, and has nothing to check.
+# constructor goes in: a function pointer in a section the loader runs.
+#
+# `#[used]` keeps the static in its object file. What keeps that object file in the program is not
+# anything the program references -- a program that only calls generated getters names nothing in
+# hierarchy.rs, and a linker pulls an archive member only to resolve a reference -- but rustc, which
+# lists every `#[used]` symbol in the link, upstream crates included, in a synthetic object
+# (`symbols.o`) it hands the linker beside the rlibs (rust-lang/rust#47384). Verified with a program
+# that built a handle by hand and took a generated getter's address, and nothing else: registered in
+# debug, in release without LTO, and in release with a codegen unit per module (rustc 1.93, macOS).
+# A crate the program never names at all is not linked, and has nothing to check.
 #
 # A platform outside these three falls back to the registration every handle makes on creation.
 REGISTER_AT_STARTUP = [
@@ -288,29 +295,30 @@ class Generator:
         lines = self.doc_lines(member, "    ")
         self.stats["properties"] += 1
 
-        read, read_async = {
-            PLAIN: ("get", "get_async"),
-            ASSET: ("get", "get_async"),
-            OBJECT: ("get_object", "get_object_async"),
-            ENUMS: ("get_enums", "get_enums_async"),
-            OBJECTS: ("get_objects", "get_objects_async"),
+        # How the runtime reads this kind: by the property's name, and through a BlueprintGetter
+        # when the property has one.
+        read, read_async, read_via, read_via_async = {
+            PLAIN: ("get", "get_async", "get_via", "get_via_async"),
+            ASSET: ("get", "get_async", "get_via", "get_via_async"),
+            OBJECT: ("get_object", "get_object_async", "get_object_via", "get_object_via_async"),
+            ENUMS: ("get_enums", "get_enums_async", "get_enums_via", "get_enums_via_async"),
+            OBJECTS: ("get_objects", "get_objects_async", "get_objects_via",
+                      "get_objects_via_async"),
         }[how]
 
-        # A BlueprintGetter is called rather than read through, because it may be the only thing
-        # that computes the value.
+        # A BlueprintGetter is called rather than read through, whatever the property's kind,
+        # because it may be the only thing that computes the value -- AActor's RootComponent is
+        # read through K2_GetRootComponent.
         accessor = member.get("getter") or ""
-        if accessor and how in (PLAIN, ASSET):
-            lines.append("    pub fn {}(&self) -> Result<{}, {}> {{ self.0.get_via({}) }}"
-                         .format(getter, rust, ERROR, rust_str(accessor)))
-            lines.append("    pub fn {}_async(&self) -> impl ::core::future::Future<Output = "
-                         "Result<{}, {}>> + '_ {{ self.0.get_via_async({}) }}"
-                         .format(getter, rust, ERROR, rust_str(accessor)))
+        if accessor:
+            read, read_async, address = read_via, read_via_async, rust_str(accessor)
         else:
-            lines.append("    pub fn {}(&self) -> Result<{}, {}> {{ self.0.{}({}) }}"
-                         .format(getter, rust, ERROR, read, literal))
-            lines.append("    pub fn {}_async(&self) -> impl ::core::future::Future<Output = "
-                         "Result<{}, {}>> + '_ {{ self.0.{}({}) }}"
-                         .format(getter, rust, ERROR, read_async, literal))
+            address = literal
+        lines.append("    pub fn {}(&self) -> Result<{}, {}> {{ self.0.{}({}) }}"
+                     .format(getter, rust, ERROR, read, address))
+        lines.append("    pub fn {}_async(&self) -> impl ::core::future::Future<Output = "
+                     "Result<{}, {}>> + '_ {{ self.0.{}({}) }}"
+                     .format(getter, rust, ERROR, read_async, address))
 
         if how in (PLAIN, ASSET):
             # Streaming is a plain read repeated, so only the plainly-carried kinds offer it.
@@ -592,10 +600,13 @@ class Generator:
                 "",
             ]
 
-        # A Blueprint component variable is two things at once: a component template, and the
-        # object property that holds it. Both would want the same accessor name; the component is
-        # the useful one, so it is emitted first and the property stands down.
-        used = set()
+        # The Class trait's methods and Deref's are taken first, so a Blueprint function of one of
+        # those names cannot shadow them: an inherent `hierarchy(&self)` would win the path lookup
+        # `T::hierarchy()` makes and fail to compile. Then the components: a Blueprint component
+        # variable is two things at once, a component template and the object property that holds
+        # it, and both would want the same accessor name; the component is the useful one, so it is
+        # emitted first and the property stands down.
+        used = {"as_object", "from_object", "hierarchy", "deref"}
         body = []
         for component in cls.get("components", []):
             body += self.emit_component(component, used)

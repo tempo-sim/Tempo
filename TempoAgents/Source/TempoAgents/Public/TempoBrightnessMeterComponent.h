@@ -31,7 +31,7 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	float Brightness = 0.0;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	FIntPoint SizeXY = FIntPoint(8, 8);
 
 	FTimerHandle TimerHandle;

@@ -10,7 +10,9 @@
 //
 //     auto trucks = tempo::world::get_actors<tempo::reflected::classes::game::vehicles::BP_Cat745_C>();
 //     if (!trucks) return 1;
-//     for (const auto& truck : trucks.value()) truck.set_max_speed(1200.0);
+//     for (const auto& truck : trucks.value()) {
+//         if (auto set = truck.set_max_speed(1200.0); !set) return 1;
+//     }
 //
 // There is no unchecked string in that at all, which is the point. Looking an actor up by name is
 // available and sometimes necessary, but a name is decided at runtime and cannot be verified by a

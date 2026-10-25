@@ -4,9 +4,15 @@
 #
 # A release regenerates the typed classes, and a scenario written against the old ones either still
 # type-checks or does not. This says which, before the release rather than after: removed classes,
-# removed or retyped properties, properties that became read-only, changed signatures, removed
-# enumerators, and moved, removed or retyped assets. Additions are counted but not listed -- nothing
-# breaks by gaining a member.
+# removed or retyped properties, properties that became read-only, changed signatures, functions no
+# longer offered, removed or retyped components, removed enumerators, struct members that went away
+# or became read-only, and moved, removed or retyped assets. Additions are counted but not listed --
+# nothing breaks by gaining a member.
+#
+# What counts as breaking is whatever the generators act on: a component gets a typed accessor of its
+# own (gen_py_classes.py), a function is withheld unless it is callable and positional, and a struct
+# member is a constructor argument only while it is writable. A field the generators ignore is not
+# compared, which is also why documentation is not.
 #
 # Assets are compared only when both documents have a catalog, which only a schema narrowed against
 # a packaged build does; comparing one against none would report every asset as removed.
@@ -33,6 +39,10 @@ def _members(cls):
 
 def _functions(cls):
     return {function["name"]: function for function in cls.get("functions", [])}
+
+
+def _components(cls):
+    return {component["name"]: component for component in cls.get("components", [])}
 
 
 def _named(items):
@@ -90,6 +100,24 @@ def compare(old, new):
             if was.get("callable") and not now.get("callable"):
                 breaking.append((path, "function {} is no longer callable: {}".format(
                     name, now.get("unsupported_reason") or "no reason given")))
+            # So is one whose inputs can no longer all travel as one value: the generators
+            # withhold it, since there is no way to pass the argument it now needs.
+            if was.get("positional") and not now.get("positional"):
+                breaking.append((path, "function {} is no longer offered: an input can no longer "
+                                       "be passed as one value".format(name)))
+
+        # A component is a typed accessor of its own, typed as the component's class, so a changed
+        # class is a different member under the same name.
+        old_components, new_components = _components(old_cls), _components(new_cls)
+        for name in sorted(set(old_components) - set(new_components)):
+            breaking.append((path, "component {} removed".format(name)))
+        for name in sorted(set(new_components) - set(old_components)):
+            additions.append((path, "component {} added".format(name)))
+        for name in sorted(set(old_components) & set(new_components)):
+            was, now = old_components[name], new_components[name]
+            if was.get("class") != now.get("class"):
+                breaking.append((path, "component {}: {} -> {}".format(
+                    name, was.get("class"), now.get("class"))))
 
     old_structs, new_structs = _named(old.get("structs", [])), _named(new.get("structs", []))
     for name in sorted(set(old_structs) - set(new_structs)):
@@ -106,6 +134,10 @@ def compare(old, new):
             if was[member].get("type") != now[member].get("type"):
                 breaking.append((name, "struct member {}: {} -> {}".format(
                     member, was[member].get("type"), now[member].get("type"))))
+            # A writable member is a constructor argument; a read-only one is not, so a struct
+            # value built with it stops type-checking.
+            if was[member].get("writable") and not now[member].get("writable"):
+                breaking.append((name, "struct member {} became read-only".format(member)))
 
     old_enums, new_enums = _named(old.get("enums", [])), _named(new.get("enums", []))
     for name in sorted(set(old_enums) - set(new_enums)):

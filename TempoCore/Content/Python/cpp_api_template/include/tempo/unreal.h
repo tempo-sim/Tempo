@@ -220,7 +220,12 @@ public:
 	/// the simulation, answered from the registered hierarchies, so it costs no call.
 	bool is_a(std::string_view ancestor) const;
 
-	bool operator==(const ObjectRef&) const = default;
+	/// Two handles are equal when they address the same thing. The class is left out: the same actor
+	/// found through a query for a base class and read from a reference-valued property records two
+	/// different classes, and is one actor.
+	bool operator==(const ObjectRef& other) const {
+		return actor_ == other.actor_ && component_ == other.component_ && subsystem_ == other.subsystem_;
+	}
 
 	// The string-keyed surface the generated methods call. Usable directly, as the escape hatch:
 	// nothing about a name passed here is checked until the server looks it up.
@@ -534,14 +539,17 @@ struct ValueTraits<std::vector<E>> {
 	}
 };
 
-/// A reference-valued property read back as a typed handle.
+/// A reference-valued property read back as a typed handle. The wire carries a name and nothing
+/// else, so the handle records the property's declared class, as a component accessor does: it is
+/// what the type system already says the pointee is, and without it is_a would deny the handle is
+/// even a T.
 template <Class T>
 struct ValueTraits<T> {
 	static Result<T> from(const TempoWorld::Value& value) {
 		note_origin<T>();
 		auto object = detail::object_reference(value);
 		if (!object) return std::move(object).error();
-		return T(std::move(object).value());
+		return T(object.value().with_class(std::string(T::kPath)));
 	}
 };
 
@@ -552,7 +560,7 @@ struct ValueTraits<std::vector<T>> {
 		auto objects = detail::object_references(value);
 		if (!objects) return std::move(objects).error();
 		std::vector<T> handles;
-		for (auto& object : objects.value()) handles.emplace_back(std::move(object));
+		for (const auto& object : objects.value()) handles.emplace_back(object.with_class(std::string(T::kPath)));
 		return handles;
 	}
 };

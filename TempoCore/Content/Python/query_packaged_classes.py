@@ -8,16 +8,21 @@
 #
 #   python3 query_packaged_classes.py <packaged-binary> <out.json> [--port N] [--timeout S]
 #
-# Prefers a Unix domain socket where one is supported, so that a package running on a developer's
-# machine cannot collide with an editor or another build already holding the default TCP port.
+# The sim is given an endpoint of its own -- a uniquely named Unix domain socket where the platform
+# has them, else a free ephemeral TCP port -- and the endpoint is probed before the launch. Both
+# because the poll below accepts the first server that answers there, and on the default port that
+# would be a developer's running editor, whose class list would then be written down as the build's.
 
+import argparse
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
 import time
+import uuid
 
 STARTUP_GRACE_SECONDS = 300
 QUIT_GRACE_SECONDS = 30
@@ -100,6 +105,50 @@ def _point_client_at(socket_name, port):
     return ["-ServerPort={}".format(port)], lambda: tempo_sim.set_server(port=port)
 
 
+def _free_port():
+    """A TCP port nothing is listening on, from the kernel's ephemeral range.
+
+    The port is free at the moment the kernel hands it out and the sim binds it moments later; the
+    probe before the launch covers the interval. A fixed port could not give that guarantee, and the
+    default one is the one a running editor holds.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def _describe(socket_name, port):
+    return "socket {}".format(socket_name) if socket_name else "port {}".format(port)
+
+
+def _endpoint_answers(socket_name, port):
+    """Whether something already accepts connections where the sim is about to be told to listen.
+
+    The server itself refuses to displace a live one (TempoServerEndpoint's liveness probe), so a
+    taken endpoint makes the sim exit -- but not before the poll could have connected to whatever
+    holds it and taken its answer for the build's. So the question is asked here, first.
+    """
+    if socket_name:
+        # The same resolution the client applies when it is pointed at the name, less the scheme
+        # gRPC wants in front of the path.
+        from tempo_sim._tempo_context import socket_target
+        address = socket_target(socket_name)[len("unix:"):]
+        if not os.path.exists(address):
+            return False
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    else:
+        address = ("127.0.0.1", port)
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.settimeout(1.0)
+        probe.connect(address)
+        return True
+    except OSError:
+        return False
+    finally:
+        probe.close()
+
+
 def _surface(response):
     """What the build declares, as `filter_schema.py` needs to narrow the editor's document to it.
 
@@ -157,8 +206,14 @@ def query(binary, port, timeout, socket_name):
     endpoint_args, point_client = _point_client_at(socket_name, port)
     arguments = [binary, "-nullrhi", "-unattended", "-nopause", "-nosound", "-nosplash"] + endpoint_args
 
+    if _endpoint_answers(socket_name, port):
+        raise RuntimeError(
+            "something is already accepting connections on {}; whatever it is would answer in the "
+            "sim's place, so the sim is not launched there".format(_describe(socket_name, port)))
+
     log = tempfile.NamedTemporaryFile(prefix="tempo-class-query-", suffix=".log", delete=False)
-    print("  launching {} (log: {})".format(os.path.basename(binary), log.name))
+    print("  launching {} on {} (log: {})".format(os.path.basename(binary),
+                                                  _describe(socket_name, port), log.name))
     process = _launch(arguments, log)
 
     try:
@@ -207,22 +262,28 @@ def query(binary, port, timeout, socket_name):
 
 
 def main(argv):
-    if len(argv) < 3:
-        print("usage: query_packaged_classes.py <packaged-binary> <out.json> [--port N] [--timeout S]",
-              file=sys.stderr)
-        return 2
+    parser = argparse.ArgumentParser(
+        description="Launch a packaged sim headless, ask it which classes it has, and write them.")
+    parser.add_argument("binary", help="the packaged sim's binary, or its launcher script")
+    parser.add_argument("out", help="where to write the JSON")
+    parser.add_argument("--port", type=int, default=None,
+                        help="TCP port to run the sim on when a Unix domain socket is not used; by "
+                             "default a free ephemeral one, which nothing else can be answering on")
+    parser.add_argument("--timeout", type=float, default=STARTUP_GRACE_SECONDS,
+                        help="seconds to wait for the sim to answer (default: %(default)s)")
+    args = parser.parse_args(argv[1:])
 
-    binary, out_path = argv[1], argv[2]
-    port = int(argv[argv.index("--port") + 1]) if "--port" in argv else 10001
-    timeout = float(argv[argv.index("--timeout") + 1]) if "--timeout" in argv else STARTUP_GRACE_SECONDS
+    binary, out_path, timeout = args.binary, args.out, args.timeout
+    port = args.port if args.port is not None else _free_port()
 
-    # A Unix domain socket first, where the platform has them: a package started here must not
-    # collide with an editor or another build already holding the default TCP port. It can still
-    # fail for reasons that have nothing to do with Tempo -- the per-user socket directory may not
-    # be creatable in a restricted environment -- so a port is the fallback rather than the end.
+    # A Unix domain socket first, where the platform has them, under a name no other process uses:
+    # a package started here must not collide with an editor or another build, and must not be
+    # answered for by one. The socket can still fail for reasons that have nothing to do with Tempo
+    # -- the per-user socket directory may not be creatable in a restricted environment -- so the
+    # port is the fallback rather than the end.
     attempts = []
     if os.name != "nt":
-        attempts.append(("socket", "tempo-class-query-{}.sock".format(os.getpid())))
+        attempts.append(("socket", "tempo-class-query-{}-{}.sock".format(os.getpid(), uuid.uuid4().hex[:8])))
     attempts.append(("port", ""))
 
     reported, failures = None, []

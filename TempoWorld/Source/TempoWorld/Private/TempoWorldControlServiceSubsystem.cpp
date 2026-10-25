@@ -8,6 +8,7 @@
 #include "TempoCoreUtils.h"
 #include "TempoWorldUtils.h"
 #include "TempoWorldReflection.h"
+#include "TempoWorldPropertyValues.h"
 
 #include "AssetRegistry/ARFilter.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -1791,7 +1792,7 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 			{
 				uint8 ValueIndex;
 				ByteProperty->GetValue_InContainer(Container, &ValueIndex);
-				*Value = ByteProperty->Enum->GetAuthoredNameStringByIndex(ValueIndex);
+				*Value = ByteProperty->Enum->GetAuthoredNameStringByValue(ValueIndex);
 			}
 		}
 		else
@@ -2129,7 +2130,7 @@ namespace
 	void WriteMemberDescriptor(const TempoWorldSchemaWalk::FMember& Member, TempoWorld::ClassPropertyDescriptor& Out)
 	{
 		Out.set_name(TCHAR_TO_UTF8(*Member.Name));
-		WriteTypeDescriptor(Member.Type, *Out.mutable_type());
+		WriteTypeDescriptor(Member.Type, *Out.mutable_value_type());
 		Out.set_readable(Member.Type.bBlueprintVisible);
 		Out.set_writable(Member.Type.IsWritable());
 		Out.set_value_expressible(Member.Type.IsValueExpressible());
@@ -2209,7 +2210,7 @@ void UTempoWorldControlServiceSubsystem::DescribeClasses(const DescribeClassesRe
 			{
 				TempoWorld::ClassParameterDescriptor* OutParm = Out->add_parameters();
 				OutParm->set_name(TCHAR_TO_UTF8(*Parameter.Name));
-				WriteTypeDescriptor(Parameter.Type, *OutParm->mutable_type());
+				WriteTypeDescriptor(Parameter.Type, *OutParm->mutable_value_type());
 				OutParm->set_kind(Parameter.Kind == EParameterKind::Return ? TempoWorld::PK_RETURN
 					: Parameter.Kind == EParameterKind::Output ? TempoWorld::PK_OUTPUT
 					: TempoWorld::PK_INPUT);
@@ -2303,9 +2304,6 @@ FString NameReferencedObject(const UObject* Object, TempoWorldReflection::EValue
 	}
 	return Object->GetPathName();
 }
-
-grpc::Status WritePropertyToValue(const void* Container, const FProperty* Property, bool bNativeUnits,
-	PropertyValue& OutValue);
 
 // Read one element of a container into a scalar Value, reusing the scalar paths below rather than
 // repeating them per element type.
@@ -2434,7 +2432,7 @@ grpc::Status WritePropertyToValue(const void* Container, const FProperty* Proper
 		{
 			uint8 Index;
 			PB->GetValue_InContainer(Container, &Index);
-			OutValue.set_enum_value(TCHAR_TO_UTF8(*PB->Enum->GetAuthoredNameStringByIndex(Index)));
+			OutValue.set_enum_value(TCHAR_TO_UTF8(*PB->Enum->GetAuthoredNameStringByValue(Index)));
 		}
 		else { return grpc::Status(grpc::INTERNAL, "enum-kinded property of unexpected type"); }
 		return grpc::Status_OK;
@@ -2957,6 +2955,13 @@ grpc::Status SetSinglePropertyValue<FTextProperty, FString>(void* ValuePtr, FTex
 	return grpc::Status_OK;
 }
 
+template <>
+grpc::Status SetSinglePropertyValue<FNameProperty, FString>(void* ValuePtr, FNameProperty* Property, const FString& ValueStr)
+{
+	Property->SetPropertyValue(ValuePtr, FName(*ValueStr));
+	return grpc::Status_OK;
+}
+
 // Narrowing-int helpers: the smaller numeric property types take an int32 (or int64) on the wire
 // and we validate that the value fits before assigning. This mirrors the existing FByteProperty<int32>
 // specialization above.
@@ -3114,17 +3119,6 @@ grpc::Status SetSinglePropertyInContainer(void* Container, FProperty* Property, 
 	return SetSinglePropertyValue(ValuePtr, TypedProperty, Value);
 }
 
-// A resolved write destination: one property (with any nested inner path) inside a container.
-// Object is the owning UObject when writing to an actor or component, and null when writing into
-// a UFunction's parameter frame, which has no owner to notify or invalidate.
-struct FPropertyTarget
-{
-	UObject* Object = nullptr;
-	void* Container = nullptr;
-	FProperty* Property = nullptr;
-	FString InnerPropertyName;
-};
-
 // Fires PreEditChange/PostEditChangeProperty around an edit, but only for edits to a real UObject
 // in an editor world. Parameter-frame writes have no owner, so they notify nothing.
 struct FScopedPropertyEdit
@@ -3263,12 +3257,6 @@ grpc::Status SetSetOnTarget(const UWorld* World, const FPropertyTarget& Target, 
 		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
-	if (!Target.InnerPropertyName.IsEmpty())
-	{
-		const FString ErrorMsg = FString::Printf(TEXT("Inner property addressing is not supported for set properties (got '%s' on set '%s')"), *Target.InnerPropertyName, *Target.Property->GetName());
-		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-	}
-
 	grpc::Status FinalStatus = grpc::Status_OK;
 	{
 		FScopedPropertyEdit EditScope(World, Target);
@@ -3301,6 +3289,69 @@ grpc::Status SetSetOnTarget(const UWorld* World, const FPropertyTarget& Target, 
 	MarkRenderStateDirty(Target.Object);
 
 	return grpc::Status_OK;
+}
+
+// The container counterparts of TryTypesOnTarget: try each element type in turn, where
+// FAILED_PRECONDITION means "not this one" and anything else is the answer.
+template <typename FirstPropertyType, typename... RestPropertyTypes, typename ValueType>
+grpc::Status TryArrayTypesOnTarget(const UWorld* World, const FPropertyTarget& Target, const TArray<ValueType>& Values)
+{
+	const grpc::Status Status = SetArrayOnTarget<FirstPropertyType>(World, Target, Values);
+	if (Status.ok() || Status.error_code() != grpc::FAILED_PRECONDITION)
+	{
+		return Status;
+	}
+	if constexpr (sizeof...(RestPropertyTypes) == 0)
+	{
+		return Status;
+	}
+	else
+	{
+		return TryArrayTypesOnTarget<RestPropertyTypes...>(World, Target, Values);
+	}
+}
+
+template <typename FirstPropertyType, typename... RestPropertyTypes, typename ValueType>
+grpc::Status TrySetTypesOnTarget(const UWorld* World, const FPropertyTarget& Target, const TArray<ValueType>& Values)
+{
+	const grpc::Status Status = SetSetOnTarget<FirstPropertyType>(World, Target, Values);
+	if (Status.ok() || Status.error_code() != grpc::FAILED_PRECONDITION)
+	{
+		return Status;
+	}
+	if constexpr (sizeof...(RestPropertyTypes) == 0)
+	{
+		return Status;
+	}
+	else
+	{
+		return TrySetTypesOnTarget<RestPropertyTypes...>(World, Target, Values);
+	}
+}
+
+// Where a repeated Value variant lands. The *_array_value and *_set_value of a kind carry the same
+// payload and differ only in name, while the destination knows whether it is an array or a set, so
+// both variants of a kind come here and the target's own container type picks the writer. The
+// element types are the ones the kind's scalar variant accepts, so that a container the classifier
+// reports as writable -- a TArray<uint8>, which reads as int_array_value -- takes its own value back.
+template <typename... PropertyTypes, typename ValueType>
+grpc::Status SetContainerOnTarget(const UWorld* World, const FPropertyTarget& Target, const TArray<ValueType>& Values)
+{
+	if (CastField<FArrayProperty>(Target.Property))
+	{
+		return TryArrayTypesOnTarget<PropertyTypes...>(World, Target, Values);
+	}
+	if (CastField<FSetProperty>(Target.Property))
+	{
+		if (!Target.InnerPropertyName.IsEmpty())
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("Inner property addressing is not supported for set properties (got '%s' on set '%s')"), *Target.InnerPropertyName, *Target.Property->GetName());
+			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+		return TrySetTypesOnTarget<PropertyTypes...>(World, Target, Values);
+	}
+	const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' but an array or set property was expected"), *Target.Property->GetName(), *Target.Property->GetCPPType());
+	return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 }
 
 template <typename ValueType>
@@ -3343,37 +3394,10 @@ grpc::Status SetObjectOnTarget(const UWorld* World, const FPropertyTarget& Targe
 	return TryTypesOnTarget<FObjectProperty, FSoftObjectProperty, FWeakObjectProperty>(World, Target, Object);
 }
 
-grpc::Status SetObjectArrayOnTarget(const UWorld* World, const FPropertyTarget& Target, const TArray<UObject*>& Objects)
+grpc::Status SetObjectContainerOnTarget(const UWorld* World, const FPropertyTarget& Target, const TArray<UObject*>& Objects)
 {
-	// Hard, then soft, then weak. An error other than FAILED_PRECONDITION means the type was right
-	// and something else was wrong, so it is the answer.
-	const grpc::Status ObjectStatus = SetArrayOnTarget<FObjectProperty>(World, Target, Objects);
-	if (ObjectStatus.ok() || ObjectStatus.error_code() != grpc::FAILED_PRECONDITION)
-	{
-		return ObjectStatus;
-	}
-	const grpc::Status SoftStatus = SetArrayOnTarget<FSoftObjectProperty>(World, Target, Objects);
-	if (SoftStatus.ok() || SoftStatus.error_code() != grpc::FAILED_PRECONDITION)
-	{
-		return SoftStatus;
-	}
-	return SetArrayOnTarget<FWeakObjectProperty>(World, Target, Objects);
-}
-
-grpc::Status SetObjectSetOnTarget(const UWorld* World, const FPropertyTarget& Target, const TArray<UObject*>& Objects)
-{
-	// As for arrays: hard, then soft, then weak.
-	const grpc::Status ObjectStatus = SetSetOnTarget<FObjectProperty>(World, Target, Objects);
-	if (ObjectStatus.ok() || ObjectStatus.error_code() != grpc::FAILED_PRECONDITION)
-	{
-		return ObjectStatus;
-	}
-	const grpc::Status SoftStatus = SetSetOnTarget<FSoftObjectProperty>(World, Target, Objects);
-	if (SoftStatus.ok() || SoftStatus.error_code() != grpc::FAILED_PRECONDITION)
-	{
-		return SoftStatus;
-	}
-	return SetSetOnTarget<FWeakObjectProperty>(World, Target, Objects);
+	// Hard, then soft, then weak, as for a single reference.
+	return SetContainerOnTarget<FObjectProperty, FSoftObjectProperty, FWeakObjectProperty>(World, Target, Objects);
 }
 
 template <typename RepeatedStringType>
@@ -3479,9 +3503,6 @@ grpc::Status ResolveComponents(const UWorld* World, const RepeatedStringType& Va
 	}
 	return grpc::Status_OK;
 }
-
-grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target, const PropertyValue& Value,
-	bool bNativeUnits);
 
 grpc::Status AddressErrorStatus(TempoWorldReflection::EAddressError Error, const FString& Message)
 {
@@ -3655,20 +3676,9 @@ grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target
 	}
 	case PropertyValue::kStringValue:
 	{
-		// Try FString, then FName, then FText.
+		// FString, then FName, then FText: the list the string containers probe too.
 		const FString ValueStr(UTF8_TO_TCHAR(Value.string_value().c_str()));
-		const grpc::Status StrStatus = SetSingleOnTarget<FStrProperty>(World, Target, ValueStr);
-		if (StrStatus.ok() || StrStatus.error_code() != grpc::FAILED_PRECONDITION)
-		{
-			return StrStatus;
-		}
-		const FName ValueName(*ValueStr);
-		const grpc::Status NameStatus = SetSingleOnTarget<FNameProperty>(World, Target, ValueName);
-		if (NameStatus.ok() || NameStatus.error_code() != grpc::FAILED_PRECONDITION)
-		{
-			return NameStatus;
-		}
-		return SetSingleOnTarget<FTextProperty>(World, Target, ValueStr);
+		return TryTypesOnTarget<FStrProperty, FNameProperty, FTextProperty>(World, Target, ValueStr);
 	}
 	case PropertyValue::kEnumValue:
 	{
@@ -3817,209 +3827,103 @@ grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target
 		return SetObjectOnTarget(World, Target, Component);
 	}
 	case PropertyValue::kBoolArrayValue:
+	case PropertyValue::kBoolSetValue:
 	{
+		const TempoWorld::BoolArray& Given = Value.has_bool_array_value() ? Value.bool_array_value() : Value.bool_set_value();
 		TArray<bool> Array;
-		Array.Append(Value.bool_array_value().values().data(), Value.bool_array_value().values_size());
-		return SetArrayOnTarget<FBoolProperty>(World, Target, Array);
+		Array.Append(Given.values().data(), Given.values_size());
+		return SetContainerOnTarget<FBoolProperty>(World, Target, Array);
 	}
 	case PropertyValue::kStringArrayValue:
+	case PropertyValue::kStringSetValue:
 	{
-		// First try to set it as an FString array, then fall back on FName array
-		const TArray<FString> StrArray = ToStringArray(Value.string_array_value().values());
-		const grpc::Status StatusStr = SetArrayOnTarget<FStrProperty>(World, Target, StrArray);
-		// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
-		if (StatusStr.ok() || StatusStr.error_code() != grpc::FAILED_PRECONDITION)
-		{
-			return StatusStr;
-		}
-		TArray<FName> NameArray;
-		NameArray.Reserve(StrArray.Num());
-		for (const FString& String : StrArray)
-		{
-			NameArray.Add(FName(*String));
-		}
-		return SetArrayOnTarget<FNameProperty>(World, Target, NameArray);
+		const TempoWorld::StringArray& Given = Value.has_string_array_value() ? Value.string_array_value() : Value.string_set_value();
+		return SetContainerOnTarget<FStrProperty, FNameProperty, FTextProperty>(World, Target, ToStringArray(Given.values()));
 	}
 	case PropertyValue::kEnumArrayValue:
+	case PropertyValue::kEnumSetValue:
 	{
-		// First try to set it as an FEnumProperty array, then fall back on FByteProperty array
-		const TArray<FString> StrArray = ToStringArray(Value.enum_array_value().values());
-		const grpc::Status EnumStatus = SetArrayOnTarget<FEnumProperty>(World, Target, StrArray);
-		if (EnumStatus.ok() || EnumStatus.error_code() != grpc::FAILED_PRECONDITION)
-		{
-			return EnumStatus;
-		}
-		return SetArrayOnTarget<FByteProperty>(World, Target, StrArray);
+		const TempoWorld::StringArray& Given = Value.has_enum_array_value() ? Value.enum_array_value() : Value.enum_set_value();
+		return SetContainerOnTarget<FEnumProperty, FByteProperty>(World, Target, ToStringArray(Given.values()));
 	}
 	case PropertyValue::kIntArrayValue:
+	case PropertyValue::kIntSetValue:
 	{
+		const TempoWorld::IntArray& Given = Value.has_int_array_value() ? Value.int_array_value() : Value.int_set_value();
 		TArray<int32> Array;
-		Array.Append(Value.int_array_value().values().data(), Value.int_array_value().values_size());
-		return SetArrayOnTarget<FIntProperty>(World, Target, Array);
+		Array.Append(Given.values().data(), Given.values_size());
+		return SetContainerOnTarget<FIntProperty, FByteProperty, FInt16Property, FInt8Property, FUInt16Property>(World, Target, Array);
 	}
 	case PropertyValue::kInt64ArrayValue:
+	case PropertyValue::kInt64SetValue:
 	{
 		// Protobuf's int64 is `long` on Linux but Unreal's int64 is `long long`; same width, different
 		// C++ types, so the pointer overload of TArray::Append can't match. Copy element-by-element instead.
+		const TempoWorld::Int64Array& Given = Value.has_int64_array_value() ? Value.int64_array_value() : Value.int64_set_value();
 		TArray<int64> Array;
-		Array.Reserve(Value.int64_array_value().values_size());
-		for (const int64 V : Value.int64_array_value().values())
+		Array.Reserve(Given.values_size());
+		for (const int64 V : Given.values())
 		{
 			Array.Add(V);
 		}
-		return SetArrayOnTarget<FInt64Property>(World, Target, Array);
+		return SetContainerOnTarget<FInt64Property, FUInt32Property, FUInt64Property>(World, Target, Array);
 	}
 	case PropertyValue::kFloatArrayValue:
-	{
-		// First try to set it as a double array, then fall back on float array
-		TArray<float> FloatArray;
-		FloatArray.Append(Value.float_array_value().values().data(), Value.float_array_value().values_size());
-		const grpc::Status StatusFloat = SetArrayOnTarget<FDoubleProperty>(World, Target, FloatArray);
-		if (StatusFloat.ok() || StatusFloat.error_code() != grpc::FAILED_PRECONDITION)
-		{
-			return StatusFloat;
-		}
-		return SetArrayOnTarget<FFloatProperty>(World, Target, FloatArray);
-	}
-	case PropertyValue::kClassArrayValue:
-	{
-		TArray<UObject*> ClassArray;
-		const grpc::Status Status = ResolveClasses(Value.class_array_value().values(), ClassArray);
-		if (!Status.ok())
-		{
-			return Status;
-		}
-		return SetObjectArrayOnTarget(World, Target, ClassArray);
-	}
-	case PropertyValue::kAssetArrayValue:
-	{
-		TArray<UObject*> AssetArray;
-		const grpc::Status Status = ResolveAssets(Value.asset_array_value().values(), AssetArray);
-		if (!Status.ok())
-		{
-			return Status;
-		}
-		return SetObjectArrayOnTarget(World, Target, AssetArray);
-	}
-	case PropertyValue::kActorArrayValue:
-	{
-		TArray<UObject*> ActorArray;
-		const grpc::Status Status = ResolveActors(World, Value.actor_array_value().values(), ActorArray);
-		if (!Status.ok())
-		{
-			return Status;
-		}
-		return SetObjectArrayOnTarget(World, Target, ActorArray);
-	}
-	case PropertyValue::kComponentArrayValue:
-	{
-		TArray<UObject*> ComponentArray;
-		const grpc::Status Status = ResolveComponents(World, Value.component_array_value().values(), TEXT("Component array property value"), ComponentArray);
-		if (!Status.ok())
-		{
-			return Status;
-		}
-		return SetObjectArrayOnTarget(World, Target, ComponentArray);
-	}
-	case PropertyValue::kBoolSetValue:
-	{
-		TArray<bool> Array;
-		Array.Append(Value.bool_set_value().values().data(), Value.bool_set_value().values_size());
-		return SetSetOnTarget<FBoolProperty>(World, Target, Array);
-	}
-	case PropertyValue::kStringSetValue:
-	{
-		const TArray<FString> StrArray = ToStringArray(Value.string_set_value().values());
-		const grpc::Status StatusStr = SetSetOnTarget<FStrProperty>(World, Target, StrArray);
-		if (StatusStr.ok() || StatusStr.error_code() != grpc::FAILED_PRECONDITION)
-		{
-			return StatusStr;
-		}
-		TArray<FName> NameArray;
-		NameArray.Reserve(StrArray.Num());
-		for (const FString& String : StrArray)
-		{
-			NameArray.Add(FName(*String));
-		}
-		return SetSetOnTarget<FNameProperty>(World, Target, NameArray);
-	}
-	case PropertyValue::kEnumSetValue:
-	{
-		const TArray<FString> StrArray = ToStringArray(Value.enum_set_value().values());
-		const grpc::Status EnumStatus = SetSetOnTarget<FEnumProperty>(World, Target, StrArray);
-		if (EnumStatus.ok() || EnumStatus.error_code() != grpc::FAILED_PRECONDITION)
-		{
-			return EnumStatus;
-		}
-		return SetSetOnTarget<FByteProperty>(World, Target, StrArray);
-	}
-	case PropertyValue::kIntSetValue:
-	{
-		TArray<int32> Array;
-		Array.Append(Value.int_set_value().values().data(), Value.int_set_value().values_size());
-		return SetSetOnTarget<FIntProperty>(World, Target, Array);
-	}
-	case PropertyValue::kInt64SetValue:
-	{
-		// See the int64 array case: protobuf's int64 and Unreal's int64 are distinct C++ types on Linux.
-		TArray<int64> Array;
-		Array.Reserve(Value.int64_set_value().values_size());
-		for (const int64 V : Value.int64_set_value().values())
-		{
-			Array.Add(V);
-		}
-		return SetSetOnTarget<FInt64Property>(World, Target, Array);
-	}
 	case PropertyValue::kFloatSetValue:
 	{
-		TArray<float> FloatArray;
-		FloatArray.Append(Value.float_set_value().values().data(), Value.float_set_value().values_size());
-		const grpc::Status StatusFloat = SetSetOnTarget<FDoubleProperty>(World, Target, FloatArray);
-		if (StatusFloat.ok() || StatusFloat.error_code() != grpc::FAILED_PRECONDITION)
-		{
-			return StatusFloat;
-		}
-		return SetSetOnTarget<FFloatProperty>(World, Target, FloatArray);
+		const TempoWorld::FloatArray& Given = Value.has_float_array_value() ? Value.float_array_value() : Value.float_set_value();
+		TArray<float> Array;
+		Array.Append(Given.values().data(), Given.values_size());
+		return SetContainerOnTarget<FDoubleProperty, FFloatProperty>(World, Target, Array);
 	}
+	case PropertyValue::kClassArrayValue:
 	case PropertyValue::kClassSetValue:
 	{
-		TArray<UObject*> ClassArray;
-		const grpc::Status Status = ResolveClasses(Value.class_set_value().values(), ClassArray);
+		TArray<UObject*> Classes;
+		const grpc::Status Status = ResolveClasses(
+			Value.has_class_array_value() ? Value.class_array_value().values() : Value.class_set_value().values(), Classes);
 		if (!Status.ok())
 		{
 			return Status;
 		}
-		return SetObjectSetOnTarget(World, Target, ClassArray);
+		return SetObjectContainerOnTarget(World, Target, Classes);
 	}
+	case PropertyValue::kAssetArrayValue:
 	case PropertyValue::kAssetSetValue:
 	{
-		TArray<UObject*> AssetArray;
-		const grpc::Status Status = ResolveAssets(Value.asset_set_value().values(), AssetArray);
+		TArray<UObject*> Assets;
+		const grpc::Status Status = ResolveAssets(
+			Value.has_asset_array_value() ? Value.asset_array_value().values() : Value.asset_set_value().values(), Assets);
 		if (!Status.ok())
 		{
 			return Status;
 		}
-		return SetObjectSetOnTarget(World, Target, AssetArray);
+		return SetObjectContainerOnTarget(World, Target, Assets);
 	}
+	case PropertyValue::kActorArrayValue:
 	case PropertyValue::kActorSetValue:
 	{
-		TArray<UObject*> ActorArray;
-		const grpc::Status Status = ResolveActors(World, Value.actor_set_value().values(), ActorArray);
+		TArray<UObject*> Actors;
+		const grpc::Status Status = ResolveActors(World,
+			Value.has_actor_array_value() ? Value.actor_array_value().values() : Value.actor_set_value().values(), Actors);
 		if (!Status.ok())
 		{
 			return Status;
 		}
-		return SetObjectSetOnTarget(World, Target, ActorArray);
+		return SetObjectContainerOnTarget(World, Target, Actors);
 	}
+	case PropertyValue::kComponentArrayValue:
 	case PropertyValue::kComponentSetValue:
 	{
-		TArray<UObject*> ComponentArray;
-		const grpc::Status Status = ResolveComponents(World, Value.component_set_value().values(), TEXT("Component set property value"), ComponentArray);
+		TArray<UObject*> Components;
+		const grpc::Status Status = Value.has_component_array_value()
+			? ResolveComponents(World, Value.component_array_value().values(), TEXT("Component array property value"), Components)
+			: ResolveComponents(World, Value.component_set_value().values(), TEXT("Component set property value"), Components);
 		if (!Status.ok())
 		{
 			return Status;
 		}
-		return SetObjectSetOnTarget(World, Target, ComponentArray);
+		return SetObjectContainerOnTarget(World, Target, Components);
 	}
 	case PropertyValue::kStructValue:
 	{

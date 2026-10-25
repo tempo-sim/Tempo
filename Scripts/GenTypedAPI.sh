@@ -45,6 +45,17 @@ if [ -z "$PYTHON_BIN" ]; then
 fi
 
 PYTHON_DIR="$SCRIPT_DIR/../TempoCore/Content/Python"
+CPP_API_DIR="$SCRIPT_DIR/../TempoCore/Content/Cpp/API"
+
+# Whatever an earlier run generated goes first, before anything here can fail. The types describe
+# one build, and every step below can stop short -- a packaged build that will not answer, a schema
+# that cannot be narrowed -- so the previous run's must be gone by then, or they ship in this
+# build's wheel and crate as if they were its own. Absent beats stale, and Package.sh promises
+# exactly that. gen_project_package.py clear knows the four Python and Rust trees (the project's
+# own and the published ones inside tempo-sim); the C++ ones are installed beside the C++ client.
+"$PYTHON_BIN" "$PYTHON_DIR/gen_project_package.py" clear "$PROJECT_ROOT"
+rm -rf "$CPP_API_DIR/include/tempo/reflected"
+rm -f "$CPP_API_DIR"/lib/*/libtempo_reflected.a "$CPP_API_DIR"/lib/*/tempo_reflected.lib
 
 # The project package's import name, from gen_naming.py -- the function that names it for the
 # proto wrappers too, so TempoSample's is tempo_sample. Derived rather than spelled here, because a
@@ -162,13 +173,11 @@ if [ "$GENERATE_FROM" != "$SCHEMA" ]; then
   if "$PYTHON_BIN" "$PYTHON_DIR/subset_schema.py" "$GENERATE_FROM" "$SUBSET"; then
     PUBLISHED="$SUBSET"
     PUBLISHED_PYTHON="$PYTHON_DIR/API/tempo_sim/reflected"
-    rm -rf "$PUBLISHED_PYTHON"
     echo "Generating tempo_sim.reflected"
     "$PYTHON_BIN" "$PYTHON_DIR/gen_py_classes.py" \
       "$SUBSET" "$PUBLISHED_PYTHON" "--package=tempo_sim.reflected"
     if [ -n "$RUST" ]; then
       PUBLISHED_RUST="$SCRIPT_DIR/../TempoCore/Content/Rust/API/src/reflected"
-      rm -rf "$PUBLISHED_RUST"
       echo "Generating tempo_sim::reflected"
       "$PYTHON_BIN" "$PYTHON_DIR/gen_rust_classes.py" \
         "$SUBSET" "$PUBLISHED_RUST" "--root=crate::reflected"
@@ -191,7 +200,6 @@ fi
 # the proto module of the same name.
 "$PYTHON_BIN" "$PYTHON_DIR/gen_project_package.py" python "$PROJECT_ROOT"
 CLASSES_DIR="$PROJECT_ROOT/Content/Python/API/$IMPORT_NAME/reflected"
-rm -rf "$CLASSES_DIR"
 
 echo "Generating $IMPORT_NAME.reflected"
 "$PYTHON_BIN" "$PYTHON_DIR/gen_py_classes.py" \
@@ -203,7 +211,6 @@ echo "Typed Python classes generated at $CLASSES_DIR"
 # crate's manifest and lib.rs are written after them, because lib.rs declares what src/ holds.
 if [ -n "$RUST" ]; then
   RUST_CLASSES_DIR="$PROJECT_ROOT/Content/Rust/API/src/reflected"
-  rm -rf "$RUST_CLASSES_DIR"
   echo "Generating $IMPORT_NAME::reflected"
   "$PYTHON_BIN" "$PYTHON_DIR/gen_rust_classes.py" \
     "$GENERATE_FROM" "$RUST_CLASSES_DIR" "--root=crate::reflected" \
@@ -219,7 +226,6 @@ fi
 # build: the C++ client is built per project, so there is no published subset to share
 # (TYPED_WORLD_API_PLAN.md section 23.2).
 if [ -n "${TEMPO_GEN_CPP_API:-}" ] && [ "${TEMPO_GEN_CPP_API}" != "0" ]; then
-  CPP_API_DIR="$SCRIPT_DIR/../TempoCore/Content/Cpp/API"
   if [ ! -d "$CPP_API_DIR/include/proto" ]; then
     echo "The C++ client has not been built (TEMPO_GEN_CPP_API=1 Scripts/Build.sh makes it)" >&2
     exit 1

@@ -3,6 +3,12 @@
 // The typed group: the C++ typed classes against the build they were generated from. The cases
 // are the Rust typed group's (Tests/Rust/typed/tests/typed.rs), on engine and Tempo classes every
 // build has, so the suite runs against any project.
+//
+// Two things here are not in every build. TempoAgents' world subsystem stands in for "a Tempo
+// subsystem", and its half of that case is compiled only when the generated header is there. The
+// catalog case needs the engine's /Engine/BasicShapes/Cube cooked, which any project that places a
+// basic shape does; there is no compile-time way to ask the catalog for one entry, so a host whose
+// cook dropped it has to drop that case.
 
 #include <cmath>
 
@@ -18,8 +24,12 @@
 #include "tempo/reflected/classes/engine/ReplaySubsystem.h"
 #include "tempo/reflected/classes/engine/StaticMeshActor.h"
 #include "tempo/reflected/classes/engine/StaticMeshComponent.h"
-#include "tempo/reflected/classes/tempo_agents/TempoAgentsWorldSubsystem.h"
 #include "tempo/reflected/structs.h"
+
+#if __has_include("tempo/reflected/classes/tempo_agents/TempoAgentsWorldSubsystem.h")
+#include "tempo/reflected/classes/tempo_agents/TempoAgentsWorldSubsystem.h"
+#define TEMPO_TESTS_HAS_TEMPO_AGENTS
+#endif
 
 using namespace tempo::unreal;
 using tempo::reflected::classes::engine::Actor;
@@ -236,6 +246,7 @@ TEMPO_TEST(a_catalog_asset_goes_through_a_typed_setter) {
 
 TEMPO_TEST(a_subsystem_is_reached_by_its_class) {
 	REQUIRE(tempo_test::connect());
+#ifdef TEMPO_TESTS_HAS_TEMPO_AGENTS
 	auto agents = world::get_subsystem<tempo::reflected::classes::tempo_agents::TempoAgentsWorldSubsystem>();
 	REQUIRE_OK(agents);
 	auto before = agents.value().brightness_meter_lateral_offset();
@@ -245,6 +256,7 @@ TEMPO_TEST(a_subsystem_is_reached_by_its_class) {
 	REQUIRE_OK(agents.value().set_brightness_meter_lateral_offset(before.value()));
 	REQUIRE_OK(after);
 	CHECK(after.value() == 456.0);
+#endif
 
 	auto replay = world::get_subsystem<tempo::reflected::classes::engine::ReplaySubsystem>();
 	REQUIRE_OK(replay);

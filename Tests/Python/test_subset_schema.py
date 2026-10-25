@@ -93,6 +93,27 @@ def test_an_opt_in_plugin_and_its_editor_modules_are_excluded(tmp_path):
     assert subset_schema.tempo_packages(str(tmp_path)) == ["/Script/Shipped"]
 
 
+def test_the_plugin_root_option_takes_both_spellings(tmp_path):
+    """`--plugin-root <dir>` and `--plugin-root=<dir>`, as the usage line promises.
+
+    Only the `=` form used to parse; the other took `--plugin-root` as a flag and the directory as
+    a third positional, and crashed listing a directory named `--plugin-root`.
+    """
+    plugins = tmp_path / "plugins"
+    (plugins / "Shipped").mkdir(parents=True)
+    (plugins / "Shipped" / "Shipped.uplugin").write_text(json.dumps(
+        {"Modules": [{"Name": "Shipped", "Type": "Runtime"}]}))
+
+    for spelling in (["--plugin-root", str(plugins)], ["--plugin-root={}".format(plugins)]):
+        out = tmp_path / "subset.json"
+        result = subprocess.run(
+            [sys.executable, os.path.join(PYTHON_DIR, "subset_schema.py"), FIXTURE, str(out)]
+            + spelling, capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        assert "/Script/Shipped" in json.loads(out.read_text())["header"]["published_packages"]
+        out.unlink()
+
+
 def test_a_descriptor_with_a_trailing_comma_is_read():
     """Unreal's JSON parser tolerates a trailing comma, and several Tempo descriptors have one.
 

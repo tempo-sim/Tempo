@@ -19,12 +19,13 @@
 #
 # See TYPED_WORLD_API_PLAN.md section 16.
 
+import argparse
 import json
 import os
 import re
 import sys
 
-from filter_schema import filter_schema
+from filter_schema import filter_schema, reroot
 
 # Engine modules that are compiled into every build and loaded unconditionally -- not plugins, so
 # no project can turn one off. Hand-listed rather than derived, because "is this module always
@@ -95,52 +96,14 @@ def published_packages(plugin_root):
     return sorted(set(ENGINE_PACKAGES) | set(tempo_packages(plugin_root)))
 
 
-def reroot(schema, all_classes):
-    """Point each class at its nearest *kept* ancestor, and report what that skipped.
-
-    A subset is the first thing in this pipeline that can break the schema's one structural
-    invariant: that every class's superclass is also in the document. Both the editor's full walk
-    and the packaged filter are closed over superclasses by construction -- a packaged build is a
-    subset of its own editor -- so nothing before now had to think about it. A subset chosen by
-    module is not: 32 classes in the published set derive from something outside it, and ten of
-    those are in `/Script/Engine` itself. `UEngineReplicationBridge` derives from IrisCore;
-    `UTempoChaosWheeledVehicleMovementComponent` from ChaosVehicles; `UWidgetAnimation` from
-    MovieScene.
-
-    Leaving the dangling path in place is the one outcome to avoid, because both generators read an
-    unresolvable superclass as "this class is a root". A rooted `TempoWheeledVehiclePawn` would
-    carry its own two properties and nothing else -- no `Actor`, no `Pawn` -- and in Rust it would
-    get no `Deref`, so it could not even be passed where an actor is wanted. Silently, with the
-    stubs still type-checking.
-
-    Rerooting instead says the true thing less completely. `TempoWheeledVehiclePawn` *is* a `Pawn`,
-    so deriving it from `Pawn` is sound; what it gives up is the members `WheeledVehiclePawn`
-    declared in between. Nothing a rerooted class declares itself is lost, and nothing it claims is
-    wrong -- there is only less of it, which is what a published subset is.
-
-    `all_classes` maps every class path in the *unnarrowed* schema to its entry, because walking
-    past a dropped ancestor means reading that ancestor's own superclass -- which is no longer in
-    the document being rerooted.
-
-    Returns the list of (class path, new super, skipped paths), for the caller to report.
-    """
-    kept = {cls["path"] for cls in schema["classes"]}
-    rerooted = []
-    for cls in schema["classes"]:
-        super_path = cls.get("super") or ""
-        if not super_path or super_path in kept:
-            continue
-        skipped = []
-        while super_path and super_path not in kept:
-            skipped.append(super_path)
-            super_path = (all_classes.get(super_path) or {}).get("super") or ""
-        cls["super"] = super_path
-        rerooted.append((cls["path"], super_path, skipped))
-    return rerooted
-
-
 def subset(schema, packages):
-    """The schema narrowed to `packages`, rerooted, and stamped as a subset."""
+    """The schema narrowed to `packages`, rerooted, and stamped as a subset.
+
+    A subset chosen by module leaves classes whose superclass is outside it -- 32 in the published
+    set, ten of them in `/Script/Engine` itself -- so it is rerooted with `filter_schema.reroot`,
+    which says what that costs. What a rerooted class gives up here is exactly what a published
+    subset is: less, not wrong.
+    """
     keep = {cls["path"] for cls in schema["classes"] if cls["package"] in packages}
     narrowed = filter_schema(schema, keep)
     rerooted = reroot(narrowed, {cls["path"]: cls for cls in schema["classes"]})
@@ -167,20 +130,23 @@ def subset(schema, packages):
 
 
 def main(argv):
-    args = [a for a in argv[1:] if not a.startswith("--")]
-    options = {a.split("=", 1)[0]: a.split("=", 1)[-1] for a in argv[1:] if a.startswith("--")}
-    if len(args) < 2:
-        print("usage: subset_schema.py <schema.json> <subset.json> [--plugin-root=<dir>]",
-              file=sys.stderr)
-        return 2
+    parser = argparse.ArgumentParser(
+        prog="subset_schema.py",
+        description="Narrow tempo_schema.json to the classes a published package can describe: "
+                    "those in the engine's always-loaded modules and Tempo's own.")
+    parser.add_argument("schema", help="the schema to narrow, as filter_schema.py wrote it")
+    parser.add_argument("subset", help="where to write the narrowed schema")
+    parser.add_argument("--plugin-root", metavar="DIR",
+                        default=os.path.normpath(os.path.join(
+                            os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")),
+                        help="the directory holding Tempo's plugin directories, whose descriptors "
+                             "say which modules are published (default: this checkout)")
+    options = parser.parse_args(argv[1:])
 
-    plugin_root = options.get("--plugin-root") or os.path.normpath(
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
-
-    with open(args[0]) as f:
+    with open(options.schema) as f:
         schema = json.load(f)
 
-    packages = published_packages(plugin_root)
+    packages = published_packages(options.plugin_root)
     before = len(schema.get("classes", []))
     narrowed, rerooted = subset(schema, packages)
     after = len(narrowed["classes"])
@@ -207,7 +173,7 @@ def main(argv):
             print("   {} -> {} (skipping {})".format(
                 class_path, new_super or "(root)", ", ".join(skipped)))
 
-    with open(args[1], "w") as f:
+    with open(options.subset, "w") as f:
         json.dump(narrowed, f, indent=1, sort_keys=False)
         f.write("\n")
     return 0

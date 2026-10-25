@@ -72,10 +72,13 @@ namespace
 	}
 
 	// Whether a Value has a repeated variant for this element. Mirrors the array and set cases of
-	// SetValueOnTarget: the scalar kinds, the object references, and -- in an array, not a set -- a
-	// struct that is itself value-expressible. There is no repeated variant for a vector, a
-	// transform or a nested container, and none for a set of structs, which needs a hash function
-	// reflection cannot see.
+	// SetValueOnTarget, which accept every property type the element kind's scalar variant does --
+	// an int_array_value writes a TArray<uint8> or a TArray<int16> as readily as a TArray<int32>, and
+	// a string_array_value a TArray<FText> as readily as a TArray<FString> -- so this is decided by
+	// kind, never by width or spelling. The repeated variants exist for the scalar kinds, the object
+	// references, and -- in an array, not a set -- a struct that is itself value-expressible. There is
+	// none for a vector, a transform or a nested container, and none for a set of structs, which
+	// needs a hash function reflection cannot see.
 	bool HasRepeatedValueVariant(const FTypeInfo& Element, bool bIsArray)
 	{
 		switch (Element.Kind)

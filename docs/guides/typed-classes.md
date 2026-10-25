@@ -160,6 +160,10 @@ Body is a StaticMeshComponent
 Body.RelativeLocation = FVector(X=0.0, Y=0.0, Z=500.0)
 steering factor 1.0
 
+--- Configuring a Tempo sensor ---
+was 200x64 beams over 120.0 deg
+now 1024x64 beams over 90.0 deg, out to 20000.0 cm
+
 --- Functions ---
 moved to FVector(X=300.0, Y=0.0, Z=500.0)
 
@@ -179,7 +183,9 @@ RotationRate 45.0 (read from the snapshot)
 destroyed
 ```
 
-The file is about 140 lines and each section stands alone. Worth knowing as you read it:
+The file is about 160 lines and each section stands alone. The actor's number, the lidar's `was`
+line and the pawn count are whatever your build has; the rest is fixed by the example. Worth
+knowing as you read it:
 
 - **The class is the argument.** `world.spawn_actor(BP_StreetSweeper_C)` hands back a
   `BP_StreetSweeper_C`, and `world.get_actors(Pawn)` hands back handles typed `Pawn`. Discovery by
@@ -200,7 +206,8 @@ The file is about 140 lines and each section stands alone. Worth knowing as you 
 ## 7. Configure a Tempo sensor
 
 Tempo's own components are in the generated classes alongside the engine's, so a sensor is
-configured the same way as anything else:
+configured the same way as anything else. This is what the example's *Configuring a Tempo sensor*
+section does:
 
 ```python
 from tempo_sample.reflected.TempoSensors import TempoLidar
@@ -249,14 +256,16 @@ This is the part worth doing by hand. Near the end of the example are four comme
 #   sweeper.Body.NoSuchThing                  # not a member of StaticMeshComponent
 ```
 
-Uncomment one, run `pyright`, and read what comes back:
+Uncomment one, run `pyright`, and read what comes back. The exact wording varies between Pyright
+versions — a message like `Cannot assign to attribute "RotatoinRate" for class
+"BP_StreetSweeper_C"` — but each names the class and the member, and says one of these:
 
-| Uncommented | Pyright |
+| Uncommented | Pyright reports |
 |---|---|
-| `sweeper.RotatoinRate = 45.0` | `Cannot assign to attribute "RotatoinRate" for class "BP_StreetSweeper_C"` |
-| `sweeper.Body.RelativeLocation = target` | `Cannot assign to attribute "RelativeLocation" for class "StaticMeshComponent" — "FVector" is not assignable to "property"` |
-| `sweeper.RotationRate = "fast"` | `Cannot assign to attribute "RotationRate" for class "BP_StreetSweeper_C"` |
-| `sweeper.Body.NoSuchThing` | `Cannot access attribute "NoSuchThing" for class "StaticMeshComponent"` |
+| `sweeper.RotatoinRate = 45.0` | `BP_StreetSweeper_C` has no attribute `RotatoinRate` |
+| `sweeper.Body.RelativeLocation = target` | `RelativeLocation` on `StaticMeshComponent` is a property with no setter |
+| `sweeper.RotationRate = "fast"` | a `str` is not assignable to `RotationRate`, which is a `float` |
+| `sweeper.Body.NoSuchThing` | `StaticMeshComponent` has no attribute `NoSuchThing` |
 
 Each of those is a thing that would otherwise have been a `NOT_FOUND` from the server, at whatever
 point in the run reached that line. The read-only one is the interesting case: it never failed
@@ -357,8 +366,9 @@ fn main() -> Result<(), TempoError> {
 }
 ```
 
-`cargo build` is the whole check. The four cases from [step 8](#8-watch-a-rename-get-caught) fail
-like this:
+`cargo build` is the whole check. The same four kinds of mistake as in
+[step 8](#8-watch-a-rename-get-caught) — a misspelling, a write to a read-only property, a wrong
+type, a member that does not exist — fail like this:
 
 ```text
 error[E0599]: no method named `horizontal_beems` found for struct `TempoLidar`

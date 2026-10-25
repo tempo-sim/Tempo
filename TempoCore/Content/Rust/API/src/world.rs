@@ -7,6 +7,7 @@
 //! ```no_run
 //! use tempo_sim::world;
 //! # mod my_project_classes { pub mod game { pub mod vehicles {
+//! #     #[repr(transparent)]
 //! #     pub struct BP_Cat745_C(pub tempo_sim::unreal::ObjectRef);
 //! #     unsafe impl tempo_sim::unreal::Class for BP_Cat745_C {
 //! #         const PATH: &'static str = "/Game/Vehicles/BP_Cat745.BP_Cat745_C";
@@ -193,6 +194,17 @@ pub fn find_actor(name: &str) -> Result<ObjectRef, TempoError> {
     }
 }
 
+/// [`find_actor`], without blocking.
+pub async fn find_actor_async(name: &str) -> Result<ObjectRef, TempoError> {
+    let all = crate::tempo_world::get_all_actors_async().await?;
+    match all.actors.iter().find(|d| d.name == name) {
+        Some(descriptor) => {
+            Ok(ObjectRef::actor(name).with_class(descriptor.class_path.clone()))
+        }
+        None => Err(TempoError::Protocol(format!("no actor named {:?}", name))),
+    }
+}
+
 /// Spawn one actor of a class and return a handle to it: `tempo_world::spawn_actor`, typed.
 ///
 /// Typed for free: the RPC already takes the class, so there is nothing to infer.
@@ -234,6 +246,7 @@ pub async fn spawn_actor_async<T: Class>(
 ///
 /// ```no_run
 /// # use tempo_sim::world;
+/// # #[repr(transparent)]
 /// # struct BP_Cat745_C(tempo_sim::unreal::ObjectRef);
 /// # unsafe impl tempo_sim::unreal::Class for BP_Cat745_C {
 /// #     const PATH: &'static str = "/Game/Vehicles/BP_Cat745.BP_Cat745_C";
@@ -292,6 +305,78 @@ where
     configured?;
     finished?;
     Ok(handle)
+}
+
+/// [`spawn_actor_deferred`], without blocking.
+///
+/// `configure` is given a handle of its own to the actor, because the future it returns has to own
+/// what it uses across an await; what comes back is a handle to the same actor. Inside it, write
+/// through the `_async` setters, or queue several in one [`batch_async`]:
+///
+/// ```no_run
+/// # use tempo_sim::world;
+/// # #[repr(transparent)]
+/// # struct BP_Cat745_C(tempo_sim::unreal::ObjectRef);
+/// # unsafe impl tempo_sim::unreal::Class for BP_Cat745_C {
+/// #     const PATH: &'static str = "/Game/Vehicles/BP_Cat745.BP_Cat745_C";
+/// #     fn from_object(o: tempo_sim::unreal::ObjectRef) -> Self { Self(o) }
+/// #     fn as_object(&self) -> &tempo_sim::unreal::ObjectRef { &self.0 }
+/// #     fn hierarchy() -> &'static (dyn tempo_sim::unreal::Hierarchy + 'static) { &T }
+/// # }
+/// # struct Table;
+/// # impl tempo_sim::unreal::Hierarchy for Table {
+/// #     fn superclass(&self, _: &str) -> Option<&'static str> { None }
+/// #     fn header(&self) -> tempo_sim::unreal::SchemaIdentity { Default::default() }
+/// #     fn hashes(&self, _: tempo_sim::unreal::EntryKind)
+/// #         -> &'static [(&'static str, &'static str)] { &[] }
+/// #     fn content_hash(&self, _: tempo_sim::unreal::EntryKind, _: &str)
+/// #         -> Option<&'static str> { None }
+/// # }
+/// # static T: Table = Table;
+/// # impl BP_Cat745_C {
+/// #     fn set_initial_terrain_height(&self, v: f64) -> Result<(), tempo_sim::TempoError> {
+/// #         self.0.set("InitialTerrainHeight", v)
+/// #     }
+/// # }
+/// # async fn spawn() -> Result<(), tempo_sim::TempoError> {
+/// let truck = world::spawn_actor_deferred_async::<BP_Cat745_C, _, _>(None, None, |truck| async move {
+///     world::batch_async(|| truck.set_initial_terrain_height(1.0)).await
+/// })
+/// .await?;
+/// # let _ = truck;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// As in the blocking form, spawning is finished even if `configure` fails, and its error is what
+/// comes back. Dropped before it completes, this leaves the actor unfinished, as the blocking form
+/// does if `configure` panics.
+pub async fn spawn_actor_deferred_async<T, F, Fut>(
+    transform: Option<Transform>,
+    relative_to_actor: Option<&ObjectRef>,
+    configure: F,
+) -> Result<T, TempoError>
+where
+    T: Class,
+    F: FnOnce(T) -> Fut,
+    Fut: std::future::Future<Output = Result<(), TempoError>>,
+{
+    note_origin::<T>();
+    let response = crate::tempo_world::spawn_actor_async(
+        T::PATH.to_string(),
+        true,
+        transform,
+        optional_actor(relative_to_actor, "relative_to_actor")?,
+    )
+    .await?;
+    let object = ObjectRef::actor(&response.name).with_class(T::PATH);
+
+    let configured = configure(T::from_object(object.clone())).await;
+    let finished = crate::tempo_world::finish_spawning_actor_async(response.name).await;
+
+    configured?;
+    finished?;
+    Ok(T::from_object(object))
 }
 
 // -- the rest of tempo_world, given handles ----------------------------------------------------
@@ -726,6 +811,19 @@ pub fn stream_actor_state(
     )
 }
 
+/// `tempo_world::stream_actor_state`, given a handle, without blocking: a `tonic::Streaming` of
+/// `ActorState`s, one per tick, read with `.message().await`.
+pub async fn stream_actor_state_async(
+    actor: &impl Class,
+    include_hidden_components: bool,
+) -> Result<tonic::Streaming<crate::proto::tempo_world::ActorState>, TempoError> {
+    crate::tempo_world::stream_actor_state_async(
+        actor_name(actor.as_object(), "actor")?,
+        include_hidden_components,
+    )
+    .await
+}
+
 /// `tempo_world::get_current_actor_states_near`, given a handle.
 pub fn get_current_actor_states_near(
     near_actor: &impl Class,
@@ -781,6 +879,25 @@ pub fn stream_actor_states_near(
     )
 }
 
+/// `tempo_world::stream_actor_states_near`, given a handle, without blocking: a `tonic::Streaming`
+/// of `ActorStates`, one per tick.
+pub async fn stream_actor_states_near_async(
+    near_actor: &impl Class,
+    search_radius_m: f32,
+    include_static: bool,
+    include_hidden_actors: bool,
+    include_hidden_components: bool,
+) -> Result<tonic::Streaming<crate::proto::tempo_world::ActorStates>, TempoError> {
+    crate::tempo_world::stream_actor_states_near_async(
+        actor_name(near_actor.as_object(), "near_actor")?,
+        search_radius_m,
+        include_static,
+        include_hidden_actors,
+        include_hidden_components,
+    )
+    .await
+}
+
 /// `tempo_world::stream_overlap_events`, given a handle: `OverlapEventResponse`s as they happen.
 pub fn stream_overlap_events(
     actor: &impl Class,
@@ -789,6 +906,14 @@ pub fn stream_overlap_events(
     TempoError,
 > {
     crate::tempo_world::stream_overlap_events(actor_name(actor.as_object(), "actor")?)
+}
+
+/// `tempo_world::stream_overlap_events`, given a handle, without blocking: a `tonic::Streaming` of
+/// `OverlapEventResponse`s as they happen.
+pub async fn stream_overlap_events_async(
+    actor: &impl Class,
+) -> Result<tonic::Streaming<crate::proto::tempo_world::OverlapEventResponse>, TempoError> {
+    crate::tempo_world::stream_overlap_events_async(actor_name(actor.as_object(), "actor")?).await
 }
 
 /// `tempo_world::raycast`, ignoring actors given as handles.
@@ -1028,7 +1153,7 @@ mod tests {
     const WIDGET: &str = "/Script/Engine.Widget";
 
     // Not zero-sized, as a registered table must not be.
-    struct Fake(u8);
+    struct Fake(#[allow(dead_code)] u8);
 
     static CLASSES: &[(&str, &str)] = &[(WIDGET, "WIDGET-HASH")];
     static STRUCTS: &[(&str, &str)] = &[("FWidgetSettings", "SETTINGS-HASH")];

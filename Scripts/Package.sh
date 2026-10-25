@@ -211,9 +211,12 @@ PACKAGE_PYTHON_PACKAGE() {
 # project's own package and crate. This walks the editor's reflection and loads every Blueprint,
 # which costs about a minute; TEMPO_SKIP_TYPED_API=1 skips it.
 #
-# Deliberately non-fatal: it runs the editor, so it can fail for reasons that have nothing to do
-# with whether the package itself is good, and a staged build without the typed classes is still a
+# Non-fatal by default: it runs the editor, so it can fail for reasons that have nothing to do with
+# whether the package itself is good, and a staged build without the typed classes is still a
 # working build. The failure is loud, and the classes are simply absent rather than stale.
+# TEMPO_REQUIRE_TYPED_API=1 makes it fatal instead, for a pipeline whose downstream jobs test the
+# typed classes: a package that went green without them fails those jobs with errors that say
+# nothing about the cause.
 #
 # Either way, classes an earlier package left in the source tree are removed rather than shipped:
 # they describe a different build.
@@ -231,6 +234,10 @@ if [[ -n "$TEMPO_SKIP_TYPED_API" && "$TEMPO_SKIP_TYPED_API" != "0" ]]; then
   echo "Skipping typed classes (TEMPO_SKIP_TYPED_API is set)"
   CLEAR_TYPED_API
 elif ! "$SCRIPT_DIR"/GenTypedAPI.sh; then
+  if [[ -n "$TEMPO_REQUIRE_TYPED_API" && "$TEMPO_REQUIRE_TYPED_API" != "0" ]]; then
+    echo "Failed to generate the typed classes, which TEMPO_REQUIRE_TYPED_API requires" >&2
+    exit 1
+  fi
   echo "Warning: failed to generate the typed classes; the packaged build will not include them" >&2
   CLEAR_TYPED_API
 fi

@@ -2,10 +2,10 @@
 
 //! Integration tests for the generated `tempo-sim` Rust client against a packaged sim.
 //!
-//! Scripts/TestRust.sh launches the packaged sim (headless) before running these and tears it down
-//! after. They mirror the Python `core`/`world` groups. Run via Scripts/TestRust.sh integration.
-//! Run single-threaded (the script passes --test-threads=1) since they share the client's global
-//! connection context and drive the same sim.
+//! Scripts/TestRustAPI.sh launches the packaged sim (headless) before running these and tears it
+//! down after. They mirror the Python `core`/`world` groups. Run via
+//! Scripts/TestRustAPI.sh integration. Run single-threaded (the script passes --test-threads=1)
+//! since they share the client's global connection context and drive the same sim.
 
 use std::time::{Duration, Instant};
 

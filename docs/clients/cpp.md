@@ -20,8 +20,8 @@ Packaged/API/Cpp/
 │   │   └── reflected/              # the typed classes: one header per class, one per module
 │   └── proto/                      # protoc-generated message types
 ├── lib/<Platform>/
-│   ├── libtempo.{a,lib}            # the RPC client and the typed runtime
-│   ├── libtempo_reflected.{a,lib}  # the typed classes
+│   ├── libtempo.a                  # the RPC client and the typed runtime (tempo.lib on Windows)
+│   ├── libtempo_reflected.a        # the typed classes (tempo_reflected.lib on Windows)
 │   └── libtempogrpc.{dylib,so} / tempogrpc.{dll,lib}
 └── third_party/grpc/include/       # the vendored gRPC, protobuf and abseil headers
 ```
@@ -31,8 +31,11 @@ zlib inside it, as it does for Tempo's own modules. Linking it rather than the s
 beside it is the same rule they follow, for the same reason — one copy of gRPC's global state — and
 it is a seventh of their size.
 
-The build also leaves the same client, less the typed classes, in this checkout at
-`Plugins/Tempo/TempoCore/Content/Cpp/API/`, where it finds the vendored gRPC next door.
+The build also leaves the same client in this checkout at `Plugins/Tempo/TempoCore/Content/Cpp/API/`,
+where it finds the vendored gRPC next door. `Build.sh` alone leaves it without the typed classes,
+which need the packaged build; `Package.sh` generates them (`Scripts/GenTypedAPI.sh`) and installs
+`libtempo_reflected` and `include/tempo/reflected/` there as well as into `Packaged/API/Cpp`, so after
+a package both copies carry them.
 
 ## Integration
 
@@ -84,19 +87,29 @@ from every call, and Unreal's single inheritance as C++ inheritance.
 using tempo::reflected::classes::engine::StaticMeshActor;
 
 auto actors = tempo::world::get_actors<StaticMeshActor>();   // Result<std::vector<StaticMeshActor>>
+if (!actors) return 1;
 for (const StaticMeshActor& actor : actors.value()) {
-    actor.set_b_can_be_damaged(false);                        // declared on Actor, inherited
-    auto [moved, hit] = actor.k2_set_actor_location({0, 0, 500}, false, true).value();
+    if (auto set = actor.set_b_can_be_damaged(false); !set) return 1;   // declared on Actor, inherited
+    auto moved = actor.k2_set_actor_location({0, 0, 500}, false, true);
+    if (!moved) return 1;
+    auto [returned, hit] = moved.value();                     // the return value, then the out parameter
 }
 ```
+
+`Result` is `[[nodiscard]]`, so a setter called as a statement is a compiler warning; cast one whose
+outcome really does not matter to `void`.
 
 Include the header of each class you use (`tempo/reflected/classes/<module>/<Class>.h`), or a
 module's (`tempo/reflected/engine.h`). A header declares and forward-declares only, so calling a
 method that returns a class you have not included is an incomplete-type error naming it. Struct
 values need `tempo/reflected/structs.h`.
 
-`tempo::world` mirrors `tempo::tempo_world` with handles; `tempo::conversion` converts Unreal's
-values to and from SI (`ue_to_si`, `si_to_ue`). Async twins are the one thing the Rust surface has
+`tempo::world` mirrors `tempo::tempo_world` with handles. Looking an actor up by name is
+`world::get_actor<T>(name)`, which checks that it really is a `T`; `world::find_actor(name)` is the
+untyped counterpart of Python's `get_actor(name)` without a class -- an `ObjectRef` whose every
+property is addressed by string and checked only by the server, kept as a separate function so that
+taking the escape hatch is visible where it is taken. `tempo::conversion` converts Unreal's values to
+and from SI (`ue_to_si`, `si_to_ue`). Async twins are the one thing the Rust surface has
 that this does not: the C++ client is synchronous throughout.
 
 ## Requirements

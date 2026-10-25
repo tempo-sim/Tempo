@@ -1678,15 +1678,15 @@ at all until the classes need one. So everything in the package that is not gene
 manifest, `__init__.py`/`py.typed`, `lib.rs`, `.gitignore`) moved out of `gen_api.py` and
 `gen_rust_api.py` into `gen_project_package.py`, which both prebuild generators and
 `GenTypedAPI.sh` call. It derives each file from what is on disk — `lib.rs` declares `proto` if
-`proto.rs` is there, each wrapper present, and `ue` if `ue/mod.rs` is — so either side can run
-first and neither writes the other's half out. It is standard library only, because
-`GenTypedAPI.sh` runs on any interpreter it finds.
+`proto.rs` is there, each wrapper present, and `reflected` if `reflected/mod.rs` is — so either
+side can run first and neither writes the other's half out. It is standard library only,
+because `GenTypedAPI.sh` runs on any interpreter it finds.
 
-**`ue` is a default-on cargo feature.** The classes are 6,068 types and ~30 s of compiling; a crate
-that only calls the project's services can opt out, and the prebuild's sanity build of the
-wrappers does (`--no-default-features`) rather than adding that to every build touching a proto.
-The prebuild cache also stops hashing `src/ue`, which it does not read. Python needs no
-equivalent, being lazy.
+**`reflected` is a default-on cargo feature.** The classes are 6,068 types and ~30 s of compiling;
+a crate that only calls the project's services can opt out, and the prebuild's sanity build of
+the wrappers does (`--no-default-features`) rather than adding that to every build touching a
+proto. The prebuild cache also stops hashing `src/reflected`, which it does not read. Python
+needs no equivalent, being lazy.
 
 **Found doing it.**
 

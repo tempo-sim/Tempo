@@ -42,6 +42,16 @@ TEMPO_TEST(the_value_types_have_unreals_shapes) {
 	CHECK(wire.rotator_value().p() == 10 && wire.rotator_value().y() == 20 && wire.rotator_value().r() == 30);
 }
 
+TEMPO_TEST(a_handle_compares_by_identity_not_class) {
+	// The same actor, found through a base-class query and read from a reference-valued property,
+	// records two classes and is one actor.
+	CHECK(ObjectRef::actor("A") == ObjectRef::actor("A").with_class("/Script/Engine.Pawn"));
+	CHECK(ObjectRef::actor("A") != ObjectRef::actor("B"));
+	CHECK(ObjectRef::actor("A") != ObjectRef::component("A", "Mesh"));
+	CHECK(ObjectRef::component("A", "Mesh") == ObjectRef::from_reference_name("A:Mesh"));
+	CHECK(ObjectRef::subsystem("/Script/Engine.ReplaySubsystem") != ObjectRef::actor("A"));
+}
+
 TEMPO_TEST(an_unreachable_sim_is_an_error_not_a_crash) {
 	// The RPC client linked and ran: nothing listens on this port, so the call fails cleanly.
 	tempo::set_server("localhost", 1);
@@ -58,6 +68,30 @@ TEMPO_TEST(the_typed_classes_link_and_know_their_hierarchy) {
 	CHECK(actor.is_a<Actor>());
 	CHECK(!actor.is_a("/Script/Engine.Pawn"));
 	CHECK(!tempo::reflected::hierarchy().hashes(EntryKind::Class).empty());
+}
+
+TEMPO_TEST(a_reference_read_as_a_class_is_that_class) {
+	using tempo::reflected::classes::engine::Actor;
+	using tempo::reflected::classes::engine::StaticMeshActor;
+	// What a property typed StaticMeshActor hands back: the wire carries a name alone, so the handle
+	// records the declared class, and is_a agrees with the type system.
+	TempoWorld::Value one;
+	one.set_actor_value("Somewhere");
+	auto actor = ValueTraits<StaticMeshActor>::from(one);
+	REQUIRE_OK(actor);
+	CHECK(actor.value().is_a<StaticMeshActor>());
+	CHECK(actor.value().is_a<Actor>());
+	CHECK(!actor.value().is_a("/Script/Engine.Pawn"));
+	CHECK(actor.value().object() == ObjectRef::actor("Somewhere"));
+
+	TempoWorld::Value several;
+	several.mutable_actor_array_value()->add_values("One");
+	several.mutable_actor_array_value()->add_values("Two");
+	auto actors = ValueTraits<std::vector<StaticMeshActor>>::from(several);
+	REQUIRE_OK(actors);
+	REQUIRE(actors.value().size() == 2);
+	CHECK(actors.value()[0].is_a<Actor>() && actors.value()[1].is_a<Actor>());
+	CHECK(actors.value()[1].object().actor_name() == "Two");
 }
 #endif
 

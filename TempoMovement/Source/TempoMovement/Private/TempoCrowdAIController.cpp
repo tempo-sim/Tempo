@@ -16,14 +16,7 @@ void ATempoCrowdAIController::BeginPlay()
 {
 	Super::BeginPlay();
 
-	UCrowdFollowingComponent* CrowdFollowingComponent = FindComponentByClass<UCrowdFollowingComponent>();
-	if (CrowdFollowingComponent)
-	{
-		CrowdFollowingComponent->SetCrowdSeparation(bEnableCrowdSeparation);
-		CrowdFollowingComponent->SetCrowdSeparationWeight(CrowdSeparationWeight);
-		CrowdFollowingComponent->SetCrowdAvoidanceRangeMultiplier(AvoidanceRangeMultiplier);
-		CrowdFollowingComponent->SetCrowdAvoidanceQuality(static_cast<ECrowdAvoidanceQuality::Type>(AvoidanceQuality));
-	}
+	ApplyCrowdSettings();
 }
 
 void ATempoCrowdAIController::OnPossess(APawn* InPawn)
@@ -37,4 +30,42 @@ void ATempoCrowdAIController::OnPossess(APawn* InPawn)
 
 		RunBehaviorTree(BehaviorTreeAsset);
 	}
+}
+
+void ATempoCrowdAIController::SetEnableCrowdSeparation(bool bInEnableCrowdSeparation)
+{
+	bEnableCrowdSeparation = bInEnableCrowdSeparation;
+	ApplyCrowdSettings();
+}
+
+void ATempoCrowdAIController::SetCrowdSeparationWeight(float InCrowdSeparationWeight)
+{
+	CrowdSeparationWeight = InCrowdSeparationWeight;
+	ApplyCrowdSettings();
+}
+
+void ATempoCrowdAIController::SetAvoidanceRangeMultiplier(float InAvoidanceRangeMultiplier)
+{
+	AvoidanceRangeMultiplier = InAvoidanceRangeMultiplier;
+	ApplyCrowdSettings();
+}
+
+void ATempoCrowdAIController::SetAvoidanceQuality(ETempoAvoidanceQuality InAvoidanceQuality)
+{
+	AvoidanceQuality = InAvoidanceQuality;
+	ApplyCrowdSettings();
+}
+
+void ATempoCrowdAIController::ApplyCrowdSettings()
+{
+	UCrowdFollowingComponent* CrowdFollowingComponent = FindComponentByClass<UCrowdFollowingComponent>();
+	if (!CrowdFollowingComponent)
+	{
+		return;
+	}
+
+	CrowdFollowingComponent->SetCrowdSeparation(bEnableCrowdSeparation);
+	CrowdFollowingComponent->SetCrowdSeparationWeight(CrowdSeparationWeight);
+	CrowdFollowingComponent->SetCrowdAvoidanceRangeMultiplier(AvoidanceRangeMultiplier);
+	CrowdFollowingComponent->SetCrowdAvoidanceQuality(static_cast<ECrowdAvoidanceQuality::Type>(AvoidanceQuality));
 }

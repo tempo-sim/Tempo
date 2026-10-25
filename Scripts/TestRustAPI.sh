@@ -103,11 +103,19 @@ fi
 
 # Launch the sim for groups that need it (everything except the compile-only "contract" group).
 SIM_PID=""
+# The sim is launched under job control (set -m), which makes it the leader of a process group of
+# its own, so this signals the group: what a package calls its binary is a launcher script on
+# Linux, and signalling the launcher alone stops the script and orphans the game, which keeps the
+# port. Terminated first, killed if the group is still there after a grace period.
 cleanup() {
-  if [ -n "$SIM_PID" ] && kill -0 "$SIM_PID" 2>/dev/null; then
-    kill "$SIM_PID" 2>/dev/null || true
-    wait "$SIM_PID" 2>/dev/null || true
-  fi
+  [ -n "$SIM_PID" ] || return 0
+  kill -TERM -- -"$SIM_PID" 2>/dev/null || kill -TERM "$SIM_PID" 2>/dev/null || true
+  for _ in $(seq 1 30); do
+    kill -0 -- -"$SIM_PID" 2>/dev/null || break
+    sleep 1
+  done
+  kill -KILL -- -"$SIM_PID" 2>/dev/null || true
+  wait "$SIM_PID" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -128,9 +136,12 @@ if [ "$GROUP" != "contract" ]; then
     ENDPOINT_ARG=(-ServerPort="$PORT")
     echo "Launching sim: $BINARY $RHI_ARG (port $PORT)"
   fi
+  # Under job control, so the sim leads a process group cleanup can signal as a whole.
+  set -m
   "$BINARY" "$RHI_ARG" -unattended -nopause -nosound -nosplash \
     "${ENDPOINT_ARG[@]}" -stdout -fullstdoutlogoutput > "$REPORT_DIR/sim.log" 2>&1 &
   SIM_PID=$!
+  set +m
 
   # Wait for the endpoint to show up (the tests then retry the gRPC handshake). A socket has no
   # /dev/tcp equivalent, so wait for the server to create the file.
@@ -156,9 +167,16 @@ if [ -n "$GROUP" ] && [ "$GROUP" != "all" ]; then
   CARGO_ARGS+=(--test "$GROUP")
 fi
 
+# The sim-backed tests share the client's global connection context and drive the one sim, so they
+# run on a single thread. The contract group compiles and inspects, and may use them all.
+HARNESS_ARGS=(--nocapture)
+if [ "$GROUP" != "contract" ]; then
+  HARNESS_ARGS+=(--test-threads=1)
+fi
+
 echo "Running Rust API tests (group='${GROUP:-all}') against the packaged crate ..."
 set +e
-cargo "${CARGO_ARGS[@]}" -- --nocapture 2>&1 | tee "$REPORT_DIR/cargo-${GROUP:-all}.log"
+cargo "${CARGO_ARGS[@]}" -- "${HARNESS_ARGS[@]}" 2>&1 | tee "$REPORT_DIR/cargo-${GROUP:-all}.log"
 STATUS=${PIPESTATUS[0]}
 set -e
 exit "$STATUS"

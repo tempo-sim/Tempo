@@ -16,6 +16,7 @@ from pathlib import Path
 from gen_project_package import (
     RUST_CLASSES,
     RUST_METADATA_FILE,
+    ensure_published_module,
     read_version,
     write_project_lib_rs,
     write_rust_crate,
@@ -843,7 +844,9 @@ pub mod world;
 
 // The published types: the engine's always-loaded modules and Tempo's own, generated from the
 // latest supported engine by Scripts/GenTypedAPI.sh. Off by default, because generating them is a
-// packaging step and compiling them is a cost an RPC-only client should not pay.
+// packaging step and compiling them is a cost an RPC-only client should not pay. The module is
+// there whether or not that step has run -- empty until it has -- so turning the feature on
+// compiles against any tempo-sim.
 #[cfg(feature = "reflected")]
 pub mod reflected;
 
@@ -994,6 +997,11 @@ if __name__ == "__main__":
 
     if not os.path.exists(tempo_src_dir):
         os.makedirs(tempo_src_dir)
+    # lib.rs declares `reflected` behind a feature, so the module has to exist whether or not
+    # GenTypedAPI.sh has generated anything into it. Ahead of the cache check, which does not
+    # look at that directory, so a deleted one is put back by the next build rather than the next
+    # proto change.
+    ensure_published_module(tempo_crate_dir / "src")
 
     cargo_toml = tempo_crate_dir / "Cargo.toml"
     crate_version = read_version(cargo_toml)

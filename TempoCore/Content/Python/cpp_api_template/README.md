@@ -15,8 +15,8 @@ include/
   proto/
     <Package>/<File>.pb.h     # protoc-generated message types
 lib/
-  <Platform>/libtempo.{a,lib}             # wrappers, runtime and protoc outputs
-  <Platform>/libtempo_reflected.{a,lib}   # the typed classes, when they were built
+  <Platform>/libtempo.a                   # wrappers, runtime and protoc outputs (tempo.lib on Windows)
+  <Platform>/libtempo_reflected.a         # the typed classes, when they were built (tempo_reflected.lib)
 third_party/grpc/include/     # in Packaged/API/Cpp only: the vendored gRPC headers
 ```
 

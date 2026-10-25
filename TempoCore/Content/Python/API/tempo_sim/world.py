@@ -108,11 +108,11 @@ get_actors = _blocking(get_actors_async)
 
 
 async def _class_path_of(name: str) -> str:
-    """The class of one actor by name, or "" when there is no such actor."""
+    """The class of one actor by name. LookupError when there is no such actor."""
     for descriptor in (await _world().get_all_actors()).actors:
         if descriptor.name == name:
             return descriptor.class_path
-    return ""
+    raise LookupError("no actor named {!r}".format(name))
 
 
 @overload
@@ -122,19 +122,19 @@ async def get_actor_async(name: str, cls: type[T]) -> T: ...
 
 
 async def get_actor_async(name: str, cls: Optional[type] = None) -> Any:
-    """One actor by name.
+    """One actor by name. LookupError when there is none -- a name is a runtime string, so without
+    the check a typo or a renamed actor would surface later as a confusing failure on first
+    attribute access rather than here.
 
-    With a class, the handle is that class and the actor is checked to really be one -- a name is a
-    runtime string, so without the check a typo or a renamed actor would surface later as a
-    confusing failure on first attribute access rather than here.
+    With a class, the handle is that class and the actor is checked to really be one; TypeError
+    when it is not.
 
     Without a class, the result is a DynamicObject: every attribute is permitted and checked only by
     the server. That is a deliberate trade, and a separate type so that taking it is visible.
     """
     if cls is None:
-        # One call to learn what it is. Nothing here needs the class, but a handle that does not
-        # know what it points at cannot answer is_a, and this is the place where finding out costs
-        # a call that was coming anyway rather than one hidden inside a predicate.
+        # One call to learn what it is. The handle needs the class to answer is_a, and the lookup
+        # that finds it is the same one that says whether the actor exists at all.
         return DynamicObject(name, class_path=await _class_path_of(name))
 
     # Ask for the class, then look for the name in the answer: one filtered call rather than a
@@ -147,11 +147,8 @@ async def get_actor_async(name: str, cls: Optional[type] = None) -> Any:
 
     # Not of that class, or not there at all -- worth distinguishing, because the two mean very
     # different things to whoever wrote the name.
-    for descriptor in (await _world().get_all_actors()).actors:
-        if descriptor.name == name:
-            raise TypeError("actor {!r} is {}, which is not {}".format(
-                name, descriptor.class_path, wanted))
-    raise LookupError("no actor named {!r}".format(name))
+    raise TypeError("actor {!r} is {}, which is not {}".format(
+        name, await _class_path_of(name), wanted))
 
 
 @overload

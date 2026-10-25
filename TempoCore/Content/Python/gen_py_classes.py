@@ -273,6 +273,23 @@ class Generator:
             return element.get("struct", "")
         return ""
 
+    def type_record(self, type_desc):
+        """What the runtime needs to carry one typed slot: a property, a struct member, a parameter.
+
+        The variant says how a value travels; the rest says what it reads back as. A reference
+        travels as a name and an enum as its authored spelling, so without the declared class or
+        enum the runtime could only hand back the string -- while the stub, typed from the same
+        schema, promises a handle of that class or a member of that enum.
+        """
+        kind = type_desc.get("kind")
+        pointee = (type_desc.get("element") or {}) if kind in ("array", "set") else type_desc
+        record = {"variant": self.variant_for(type_desc), "struct": self.struct_of(type_desc)}
+        if pointee.get("kind") in ("actor", "component"):
+            record["class"] = pointee.get("class", "")
+        if pointee.get("kind") == "enum":
+            record["enum"] = pointee.get("enum", "")
+        return record
+
     # -- emission -------------------------------------------------------------------------------
 
     def docstring(self, member, indent):
@@ -543,55 +560,62 @@ class Generator:
             stub_bodies.extend(body if body else ["    ..."])
             stub_bodies.append("")
 
-            # Metadata: what the runtime needs to build a request. Only members the stubs actually
-            # expose, so the two cannot disagree about what exists.
+            # Metadata: what the runtime needs to build a request. It keeps every member the runtime
+            # can carry, which is more than the stub declares -- a member whose name Python cannot
+            # spell, or whose type the stub has no annotation for, is still here -- and that is
+            # harmless, since a name the stub does not declare fails the type check anyway. Where the
+            # two must agree is on which declaration a component-shadowed name resolves to, and on
+            # how each member travels, and both are decided here from the same answers the stub was.
             properties = {}
             for member in cls.get("properties", []):
                 if member["name"] in component_names:
                     # Stood down above; the runtime must agree with the stubs about which one it is.
                     continue
-                variant = self.variant_for(member)
-                struct = self.struct_of(member)
-                if variant is None and member.get("kind") != "struct":
+                record = self.type_record(member)
+                if record["variant"] is None and member.get("kind") != "struct":
                     # Neither carryable as one value nor addressable through members.
                     continue
-                properties[member["name"]] = {
-                    "variant": variant,
+                record.update({
                     "writable": bool(member.get("writable")),
                     "getter": member.get("getter", ""),
                     "setter": member.get("setter", ""),
                     # What the setter calls its argument. CallFunction rejects an unnamed one, so
                     # the runtime cannot write through an accessor without this.
                     "setter_argument": member.get("setter_argument", ""),
-                    "struct": struct,
-                }
+                })
+                properties[member["name"]] = record
             # Functions the stubs expose, so the runtime can invoke exactly what they declare --
             # the parameter order is the calling convention, and the variants are how each argument
-            # is carried.
+            # is carried. The results are recorded by name, return value and out parameters alike,
+            # so what comes back can be read as the type the signature declares.
             functions = {}
             for function in cls.get("functions", []):
                 if not function.get("callable") or not function.get("positional"):
                     continue
-                inputs, returns = [], None
+                inputs, returns, outputs = [], None, {}
                 expressible = True
                 for parameter in function.get("parameters", []):
-                    variant = self.variant_for(parameter)
+                    record = self.type_record(parameter)
                     direction = parameter.get("direction")
                     if direction == "return":
-                        if variant is None:
+                        if record["variant"] is None:
                             expressible = False
                             break
-                        returns = variant
+                        returns = record
                     elif direction == "in":
-                        if variant is None:
+                        if record["variant"] is None:
                             expressible = False
                             break
-                        inputs.append({"name": parameter["name"], "variant": variant,
-                                       "struct": self.struct_of(parameter)})
-                    # An out parameter is not supplied, and comes back in the results.
+                        record["name"] = parameter["name"]
+                        inputs.append(record)
+                    elif direction == "out" and record["variant"] is not None:
+                        # Not supplied; comes back in the results when it can travel, and is simply
+                        # absent from them when it cannot.
+                        outputs[parameter["name"]] = record
                 if not expressible:
                     continue
-                functions[function["name"]] = {"inputs": inputs, "returns": returns}
+                functions[function["name"]] = {"inputs": inputs, "returns": returns,
+                                               "outputs": outputs}
 
             components = {}
             for component in cls.get("components", []):
@@ -683,12 +707,9 @@ class Generator:
                 continue
             members = {}
             for member in struct.get("members", []):
-                variant = self.variant_for(member)
-                members[member["name"]] = {
-                    "variant": variant,
-                    "writable": bool(member.get("writable")),
-                    "struct": self.struct_of(member),
-                }
+                record = self.type_record(member)
+                record["writable"] = bool(member.get("writable"))
+                members[member["name"]] = record
             metadata[struct["name"]] = members
         return metadata
 

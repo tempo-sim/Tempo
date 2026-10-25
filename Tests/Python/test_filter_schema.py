@@ -96,6 +96,7 @@ def test_nothing_changes_when_the_build_agrees(schema, surface):
     assert stats["functions_dropped"] == 0
     assert stats["components_dropped"] == 0
     assert stats["signatures_corrected"] == 0
+    assert stats["super_disagreements"] == []
     assert names(widget(schema)["properties"]) == names(widget(before)["properties"])
 
 
@@ -203,6 +204,44 @@ def test_struct_and_function_expressibility_come_from_the_build(schema, surface)
     assert configure["positional"] is False
 
 
+def test_callability_comes_from_the_build(schema, surface):
+    """`callable` and `positional` together decide whether a function is offered, so both are the
+    build's call -- a function the build cannot call is withheld however the editor saw it."""
+    surface["classes"]["/Script/Engine.Widget"]["functions"]["Refresh"]["callable"] = False
+    stats = filter_schema.narrow_to_surface(schema, surface)
+
+    assert stats["flags_corrected"] == 1
+    refresh = next(f for f in widget(schema)["functions"] if f["name"] == "Refresh")
+    assert refresh["callable"] is False
+
+
+def test_the_superclass_comes_from_the_build(schema, surface, tmp_path, capsys):
+    """A superclass is the one field whose drift strips every inherited member at once.
+
+    The two should agree, since a packaged build is compiled from the same headers, so a
+    disagreement means the schema and the report are not of one build -- which is worth saying
+    by name rather than counting, and which does not stop the build's view from being taken.
+    """
+    bridged = next(cls for cls in schema["classes"] if cls["path"] == "/Script/Engine.Bridged")
+    surface["classes"]["/Script/Engine.Bridged"]["super"] = "/Script/Engine.Widget"
+    stats = filter_schema.narrow_to_surface(copy.deepcopy(schema), surface)
+    assert stats["super_disagreements"] == [
+        ("/Script/Engine.Bridged", "/Script/SomePlugin.PluginBase", "/Script/Engine.Widget")]
+
+    schema_path, report_path, out_path = (tmp_path / name for name in ("s.json", "r.json", "o.json"))
+    schema_path.write_text(json.dumps(schema))
+    report_path.write_text(json.dumps({
+        "classes": [cls["path"] for cls in schema["classes"]], "surface": surface,
+        "header": {"schema_version": "3", "engine_version": "5.8", "content_hash": "BUILD"}}))
+    assert filter_schema.main(["filter_schema.py", str(schema_path), str(report_path),
+                               str(out_path)]) == 0
+    assert "/Script/Engine.Bridged: /Script/SomePlugin.PluginBase -> /Script/Engine.Widget" in \
+        capsys.readouterr().err
+    filtered = json.loads(out_path.read_text())
+    assert next(cls for cls in filtered["classes"]
+                if cls["path"] == bridged["path"])["super"] == "/Script/Engine.Widget"
+
+
 def test_a_member_only_the_build_has_is_counted_and_left_out(schema, surface):
     """Carrying one over would mean no metadata for it, and so no BlueprintSetter.
 
@@ -265,6 +304,42 @@ def test_the_package_declares_nothing_the_build_lacks(schema, surface):
             assert declared["components"].get(component["name"]) == component["class"]
 
 
+def test_a_class_whose_superclass_the_build_lacks_is_rerooted(tmp_path, schema, surface):
+    """The other half of the same invariant: nothing the package declares may dangle either.
+
+    A schema and a report taken from the same build keep every superclass by construction; a stale
+    schema beside a fresh report need not. Both generators read a superclass they cannot resolve as
+    "this class is a root", so a dangling one strips every inherited member without a type error --
+    the same failure the published subset reroots to avoid, so the same remedy, recorded the same
+    way in the header.
+    """
+    gone = "/Script/SomePlugin.PluginBase"
+    del surface["classes"][gone]
+    schema_path, report_path, out_path = (tmp_path / name for name in ("s.json", "r.json", "o.json"))
+    schema_path.write_text(json.dumps(schema))
+    report_path.write_text(json.dumps({
+        "classes": [cls["path"] for cls in schema["classes"] if cls["path"] != gone],
+        "surface": surface,
+        "header": {"schema_version": "3", "engine_version": "5.8", "content_hash": "BUILD"}}))
+
+    assert filter_schema.main(["filter_schema.py", str(schema_path), str(report_path),
+                               str(out_path)]) == 0
+    filtered = json.loads(out_path.read_text())
+    by_path = {cls["path"]: cls for cls in filtered["classes"]}
+
+    assert gone not in by_path
+    # Bridged derived from the dropped class directly; PluginMiddle did too, and DeepBridged, which
+    # derives from PluginMiddle, is left alone because its own superclass is still there.
+    assert by_path["/Script/Engine.Bridged"]["super"] == "/Script/Engine.Widget"
+    assert by_path["/Script/SomePlugin.PluginMiddle"]["super"] == "/Script/Engine.Widget"
+    assert by_path["/Script/Engine.DeepBridged"]["super"] == "/Script/SomePlugin.PluginMiddle"
+    assert filtered["header"]["rerooted"] == {
+        "/Script/Engine.Bridged": gone, "/Script/SomePlugin.PluginMiddle": gone}
+    # The invariant itself, over the whole document.
+    assert [(cls["path"], cls["super"]) for cls in filtered["classes"]
+            if cls.get("super") and cls["super"] not in by_path] == []
+
+
 def test_a_class_the_build_does_not_report_is_left_alone(schema, surface):
     """Narrowing runs after the class filter, so this is the 26 classes the build has and the
     editor's walk does not -- the reverse case. Nothing to narrow against means nothing to do.
@@ -294,6 +369,25 @@ def test_a_report_without_a_surface_narrows_only_the_class_list(tmp_path):
 
     filtered = json.loads(out.read_text())
     assert sorted(cls["path"] for cls in filtered["classes"]) == sorted(reported["classes"])
+
+
+def test_a_report_sharing_no_class_with_the_schema_is_refused(tmp_path):
+    """A schema and a report of different builds intersect in nothing, and the shape of that
+    mistake -- a stale Saved/TempoSchema beside a fresh packaged_class_paths.json -- is a package
+    that imports and declares nothing, which no later step would complain about."""
+    reported = {"classes": ["/Script/Engine.NotInThisSchema"],
+                "header": {"schema_version": "3", "engine_version": "5.8", "content_hash": "BUILD"}}
+    report = tmp_path / "reported.json"
+    report.write_text(json.dumps(reported))
+    out = tmp_path / "filtered.json"
+
+    result = subprocess.run(
+        [sys.executable, os.path.join(PYTHON_DIR, "filter_schema.py"), FIXTURE,
+         str(report), str(out)],
+        capture_output=True, text=True)
+    assert result.returncode == 1, result.stdout
+    assert "refusing to write an empty schema" in result.stderr
+    assert not out.exists()
 
 
 def test_a_type_reachable_only_from_a_dropped_member_is_dropped(tmp_path):

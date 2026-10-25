@@ -40,6 +40,9 @@ jobs:
       allow_unsafe_pr_checkout: true
       gen_rust_api: true
       gen_cpp_api: true
+      # The typed-class test jobs below need the classes in the package; a package without them is
+      # a failure here, not four misleading ones there.
+      require_typed_api: true
       automation_test_filter: Tempo.
       # Upload the packaged build so the Python API test jobs below can fan out against it.
       upload_artifact: true
@@ -62,11 +65,12 @@ jobs:
       matrix:
         unreal_version: [ "5.7", "5.8" ]
         group: [ "contract", "core", "world", "movement" ]
-        # The codegen group tests this repository's own tooling -- the typed class generator, the
-        # runtime that serves it, and the schema diff -- against a fixture schema. It needs no sim
-        # and no packaged build, so one entry rather than one per engine version: nothing it checks
-        # depends on the engine. It rides this job to inherit the fork-PR gating and checkout
-        # handling below, and simply ignores the artifact it is handed.
+        # The codegen group tests this repository's own tooling -- the typed class generators for
+        # all three clients, the runtime that serves the Python one, and the schema tools -- against
+        # a fixture schema. It needs no sim, so one entry rather than one per engine version:
+        # nothing it checks depends on the engine. It rides this job to inherit the fork-PR gating
+        # and checkout handling below; from the artifact it takes only the tempo-sim wheel, for the
+        # generated proto modules a checkout lacks until it has been built.
         include:
           - unreal_version: "5.8"
             group: "codegen"
@@ -79,6 +83,9 @@ jobs:
       test_command: Scripts/TestPythonAPI.sh ${{ matrix.group }}
       unreal_version: ${{ matrix.unreal_version }}
       runner: ubuntu-24.04
+      # The Rust half of the codegen group compiles what the Rust generator emits, and skips
+      # without cargo; the other groups have no use for it.
+      setup_rust: ${{ matrix.group == 'codegen' }}
       checkout_path: TempoSample/Plugins/Tempo
       allow_unsafe_pr_checkout: true
       # Gate fork PRs behind manual approval, same as the build job (this job runs PR code).

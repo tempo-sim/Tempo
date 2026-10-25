@@ -89,6 +89,32 @@ def test_generates_the_expected_files(generated):
     assert widget["properties"]["Offset"]["writable"] is False
 
 
+def test_metadata_says_what_a_reference_or_enum_reads_back_as(generated):
+    """A reference travels as a name and an enum as its spelling. The stub types them as a handle of
+    the declared class and as the generated member; the runtime can only build those if the
+    metadata says which class and which enum -- for a property, a return value and an out parameter
+    alike. A stub saying `MeshThing` over a runtime handing back `str` is the drift check voided."""
+    metadata = json.loads((generated / DIST / "Engine.meta.json").read_text())
+    widget = metadata["/Script/Engine.Widget"]
+    assert widget["properties"]["Target"]["class"] == "/Script/Engine.MeshThing"
+    assert widget["properties"]["Mode"]["enum"] == "EWidgetMode"
+    assert "class" not in widget["properties"]["bEnabled"] and "enum" not in widget["properties"]["Tags"]
+    outsider = metadata["/Script/Engine.DeepBridged"]["properties"]["Outsider"]
+    assert outsider["class"] == "/Script/SomePlugin.PluginBase", "a class outside the module too"
+
+    assert widget["functions"]["Resize"]["returns"]["variant"] == "bool_value"
+    assert widget["functions"]["Refresh"]["returns"] is None
+    assert widget["functions"]["Configure"]["inputs"] == [
+        {"name": "NewSettings", "variant": "struct_value", "struct": "FWidgetSettings"}]
+    measure = widget["functions"]["Measure"]
+    assert measure["outputs"] == {"Measured": {"variant": "struct_value", "struct": "FWidgetSettings"}}, \
+        "an out parameter that cannot travel is not a result"
+
+    structs = json.loads((generated / DIST / "structs.meta.json").read_text())
+    assert structs["FWidgetSettings"]["Inner"] == {"variant": "struct_value", "struct": "FWidgetTrim",
+                                                   "writable": True}
+
+
 def test_identity_file_has_no_annotations(generated):
     """The .py carries class identity only. Annotations there would cost a dict per class."""
     identity = (generated / DIST / "Engine.py").read_text()

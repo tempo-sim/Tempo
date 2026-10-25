@@ -12,7 +12,9 @@
 
 use std::time::{Duration, Instant};
 
-use project::reflected::classes::engine::{Actor, StaticMeshActor, StaticMeshComponent};
+use project::reflected::classes::engine::{
+    Actor, SceneComponent, StaticMeshActor, StaticMeshComponent,
+};
 use project::reflected::enums::EWalkableSlopeBehavior;
 use project::reflected::structs::FWalkableSlopeOverride;
 use tempo_sim::conversion::{quat_of, rotator_of};
@@ -183,6 +185,22 @@ fn discovery_by_type_finds_the_spawned_actor() {
 }
 
 #[test]
+fn a_reference_read_from_a_property_knows_its_class() {
+    connect();
+    let actor = spawn();
+
+    // RootComponent carries a BlueprintGetter, K2_GetRootComponent, so this is a call rather than a
+    // read of the property's memory. The wire names the component and nothing else, and the handle
+    // is typed by the declared class -- so is_a agrees with the type system about what came back.
+    let root = actor.actor().root_component().expect("read RootComponent");
+    assert_eq!(root.as_object().actor_name(), actor.name());
+    assert_eq!(root.as_object().component_name(), "StaticMeshComponent0");
+    assert!(root.as_object().is_a(SceneComponent::PATH), "a handle typed SceneComponent is one");
+    // And the same handle reaches the component's own properties.
+    let _: FVector = root.relative_location().expect("read RelativeLocation through the reference");
+}
+
+#[test]
 fn a_handle_knows_what_it_points_at() {
     connect();
     let actor = spawn();
@@ -224,6 +242,39 @@ fn the_async_twin_reaches_the_same_property() {
         actor.actor().set_b_can_be_damaged_async(false).await.expect("set bCanBeDamaged");
         assert!(!actor.actor().b_can_be_damaged_async().await.expect("read bCanBeDamaged"));
     });
+}
+
+#[test]
+fn an_actor_spawned_deferred_without_blocking_is_configured_before_it_begins() {
+    connect();
+    // The handle is kept past block_on, where Spawned's blocking destroy can run.
+    let actor = tempo_sim::context::RUNTIME.block_on(async {
+        let actor = world::spawn_actor_deferred_async::<StaticMeshActor, _, _>(
+            None,
+            None,
+            |actor| async move {
+                // Owned by the future, as the async form hands it over; a batch queues the writes
+                // and sends them as one, before FinishSpawning lets the actor begin.
+                world::batch_async(|| {
+                    actor.set_b_can_be_damaged(false)?;
+                    actor.set_b_always_relevant(true)
+                })
+                .await
+            },
+        )
+        .await
+        .expect("spawn_actor_deferred_async");
+        Spawned(actor)
+    });
+    assert!(!actor.actor().b_can_be_damaged().expect("read bCanBeDamaged"));
+    assert!(actor.actor().b_always_relevant().expect("read bAlwaysRelevant"));
+    assert!(
+        world::get_actors::<StaticMeshActor>()
+            .expect("get_actors")
+            .iter()
+            .any(|candidate| candidate.as_object().actor_name() == actor.name()),
+        "the actor finished spawning"
+    );
 }
 
 #[test]
@@ -320,6 +371,39 @@ fn the_world_mirror_works_on_handles() {
     let after =
         names(world::get_components::<StaticMeshComponent>(actor.actor()).expect("get_components"));
     assert!(!after.contains(&added.as_object().component_name().to_string()), "{after:?}");
+}
+
+#[test]
+fn the_async_world_mirror_finds_and_streams() {
+    connect();
+    let actor = spawn();
+    let name = actor.name();
+
+    tempo_sim::context::RUNTIME.block_on(async {
+        // find_actor's async twin: the escape hatch, typed by nothing but carrying the real class.
+        let found = world::find_actor_async(&name).await.expect("find_actor_async");
+        assert_eq!(found.actor_name(), name);
+        assert!(found.is_a(StaticMeshActor::PATH));
+        assert!(world::find_actor_async("NoSuchActorExistsHere").await.is_err());
+
+        // The stream mirrors hand back tonic's stream for `.message().await`; the sim ticks on its
+        // own clock under -nopause, so the first state arrives with the next tick.
+        let mut states = world::stream_actor_state_async(actor.actor(), false)
+            .await
+            .expect("stream_actor_state_async");
+        let state = states.message().await.expect("the stream stays open").expect("a state");
+        assert_eq!(state.name, name);
+
+        let mut nearby = world::stream_actor_states_near_async(actor.actor(), 10.0, true, false, false)
+            .await
+            .expect("stream_actor_states_near_async");
+        let states = nearby.message().await.expect("the stream stays open").expect("some states");
+        assert!(
+            states.actor_states.iter().any(|state| state.name == name),
+            "an actor is near itself: {:?}",
+            states.actor_states.iter().map(|state| &state.name).collect::<Vec<_>>()
+        );
+    });
 }
 
 #[test]

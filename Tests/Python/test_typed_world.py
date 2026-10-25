@@ -231,7 +231,7 @@ def test_describe_classes_reports_a_known_class(sim_server):
     # BlueprintReadOnly, which is what makes the generated stub a setter-less property.
     assert members["RelativeLocation"].readable
     assert not members["RelativeLocation"].writable
-    assert members["RelativeLocation"].type.property_type == "vector"
+    assert members["RelativeLocation"].value_type.property_type == "vector"
 
     # Declared-only: Tags is AActor's, and must not be repeated here.
     assert "Tags" not in members

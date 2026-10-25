@@ -52,8 +52,12 @@ if(NOT TARGET tempo::grpc)
             IMPORTED_LOCATION "${_TEMPO_GRPC_LIB}/libtempogrpc.dylib"
             IMPORTED_SONAME "@rpath/libtempogrpc.dylib")
     else()
+        # TempoThirdParty links it with a plain add_library(SHARED) and no version
+        # (Utils/tempogrpc/CMakeLists.txt), for which CMake's soname is the file name -- as the Mac
+        # library's @rpath install name above is CMake's default for the same target.
         set_target_properties(tempo::grpc PROPERTIES
-            IMPORTED_LOCATION "${_TEMPO_GRPC_LIB}/libtempogrpc.so")
+            IMPORTED_LOCATION "${_TEMPO_GRPC_LIB}/libtempogrpc.so"
+            IMPORTED_SONAME "libtempogrpc.so")
     endif()
     set_target_properties(tempo::grpc PROPERTIES
         INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_TEMPO_GRPC_INCLUDE}"

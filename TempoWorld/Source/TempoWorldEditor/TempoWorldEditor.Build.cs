@@ -19,12 +19,12 @@ public class TempoWorldEditor : TempoModuleRules
 		PrivateDependencyModuleNames.AddRange(
 			new string[]
 			{
-				"AssetRegistry",
 				"CoreUObject",
 				"Engine",
 				"Json",
-				// Used directly, for GetSubClassWithName/GetSubClassWithPath: a client-supplied
-				// class name must always resolve through those (AGENTS.md section 6).
+				// Not used directly. TempoWorld's public headers include TempoCore's, so compiling
+				// against them needs its include paths; naming it here keeps that explicit rather
+				// than inherited through TempoWorld.
 				"TempoCore",
 			}
 		);
