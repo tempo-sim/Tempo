@@ -82,16 +82,41 @@ echo "Walking reflection to $SCHEMA (this loads every Blueprint, so it takes a m
 # The editor's own exit status is not usable here: on macOS it is non-zero after a commandlet that
 # succeeded, because of trace-server shutdown. The commandlet's result is what matters, and it says
 # so in the log.
+CRASH_DIR="$PROJECT_ROOT/Saved/Crashes"
+CRASH_MARKER="$SCHEMA_DIR/.commandlet_started"
+: > "$CRASH_MARKER"
 set +e
 "$EDITOR_CMD" "$PROJECT_ROOT/$PROJECT_NAME.uproject" \
   -run=TempoWorldSchema \
   -Out="$SCHEMA" \
   -nullrhi -unattended -nopause -nosplash -nosound -stdout -fullstdoutlogoutput > "$LOG" 2>&1
+EDITOR_STATUS=$?
 set -e
 
+# Everything about a failed walk goes to stderr, because in CI this log is the only place the cause
+# is ever seen. A crash ends the log with the crash reporter's own output, so its tail says nothing;
+# the signal and callstack come earlier, and the engine also writes a report under Saved/Crashes.
+report_commandlet_failure() {
+  echo "Schema commandlet failed (editor exit status $EDITOR_STATUS)." >&2
+
+  echo "---- Crash lines from $LOG ----" >&2
+  grep -n -E "Caught signal|Unhandled Exception|Assertion failed|Fatal error|\[Callstack\]|Error: |appError" "$LOG" >&2 \
+    || echo "(none found)" >&2
+
+  find "$CRASH_DIR" -newer "$CRASH_MARKER" -type f \
+       \( -name "Diagnostics.txt" -o -name "CrashContext.runtime-xml" \) 2>/dev/null |
+    while IFS= read -r report; do
+      echo "---- $report ----" >&2
+      cat "$report" >&2
+    done || true
+
+  echo "---- Full log: $LOG ----" >&2
+  cat "$LOG" >&2
+  echo "---- End of $LOG ----" >&2
+}
+
 if ! grep -q "finished execution (result 0)" "$LOG"; then
-  echo "Schema commandlet failed. Last lines of $LOG:" >&2
-  tail -30 "$LOG" >&2
+  report_commandlet_failure
   exit 1
 fi
 if [ ! -s "$SCHEMA" ]; then
