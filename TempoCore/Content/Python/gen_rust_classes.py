@@ -32,7 +32,7 @@ import sys
 
 from collections import defaultdict
 
-from gen_classes_common import enumerator_members, resolve_setters, shared_with
+from gen_classes_common import enumerator_members, resolve_setters, shared_with, snake_case
 
 RUNTIME = "::tempo_sim::unreal"
 ERROR = "::tempo_sim::TempoError"
@@ -115,21 +115,8 @@ def ident(text):
 
 
 def snake(name):
-    """An Unreal member name as idiomatic Rust.
-
-    Two passes, which is what reads acronyms correctly: `FOVAngle` -> `fov_angle`, not
-    `f_o_v_angle`. The second pattern excludes digits deliberately -- with `[a-z0-9]` there,
-    `Use2DMode` becomes `use2_d_mode` and `Vector2D` becomes `vector2_d`, which is wrong 147 times
-    in TempoSample's schema. See TYPED_WORLD_API_PLAN.md §15.3.
-    """
-    spaced = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", name)
-    spaced = re.sub(r"([a-z])([A-Z])", r"\1_\2", spaced).lower()
-    cleaned = re.sub(r"__+", "_", ident(spaced)).strip("_")
-    if not cleaned:
-        return "unnamed"
-    if cleaned[0].isdigit():
-        cleaned = "n" + cleaned
-    return cleaned + "_" if cleaned in RESERVED else cleaned
+    """An Unreal member name as idiomatic Rust. See gen_classes_common.snake_case."""
+    return snake_case(name, RESERVED)
 
 
 def module_for(package):

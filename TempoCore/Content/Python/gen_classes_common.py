@@ -1,8 +1,31 @@
 """Schema reading shared by the typed class generators.
 
-`gen_py_classes.py` and `gen_rust_classes.py` need the same answers out of `tempo_schema.json`, and
-a second implementation of one of them is a second thing that can be wrong.
+`gen_py_classes.py`, `gen_rust_classes.py` and `gen_cpp_classes.py` need the same answers out of
+`tempo_schema.json`, and a second implementation of one of them is a second thing that can be wrong.
 """
+
+import re
+
+
+def snake_case(name, reserved):
+    """An Unreal member name as snake_case, legal in a language with these reserved words.
+
+    Rust and C++ spell members the same way, so a member is called the same thing in both; only
+    what each language reserves differs, and a reserved result takes a trailing underscore.
+
+    Two passes, which is what reads acronyms correctly: `FOVAngle` -> `fov_angle`, not
+    `f_o_v_angle`. The second pattern excludes digits deliberately -- with `[a-z0-9]` there,
+    `Use2DMode` becomes `use2_d_mode` and `Vector2D` becomes `vector2_d`, which is wrong 147 times
+    in TempoSample's schema. See TYPED_WORLD_API_PLAN.md §15.3.
+    """
+    spaced = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", name)
+    spaced = re.sub(r"([a-z])([A-Z])", r"\1_\2", spaced).lower()
+    cleaned = re.sub(r"__+", "_", re.sub(r"\W", "_", spaced)).strip("_")
+    if not cleaned:
+        return "unnamed"
+    if cleaned[0].isdigit():
+        cleaned = "n" + cleaned
+    return cleaned + "_" if cleaned in reserved else cleaned
 
 
 def setter_argument(classes_by_path, class_path, setter):

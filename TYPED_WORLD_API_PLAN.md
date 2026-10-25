@@ -1866,7 +1866,7 @@ the defines a DLL consumer needs (`PROTOBUF_USE_DLLS`, `ABSL_CONSUME_DLL`), as T
 | Phase | What | |
 |---|---|---|
 | **6a** | the runtime: `tempo/unreal.h`, `world.h`, `conversion.h`, `Result<void>`, the new error kinds | |
-| **6b** | `gen_cpp_classes.py`, and the `codegen` tests | |
+| **6b** | `gen_cpp_classes.py`, `build_cpp_classes.py`, and the `codegen` tests | **Done.** TempoSample's 6,068 classes compile into a 186 MB archive in 5½ minutes at 16 jobs (14 GB peak). |
 | **6c** | `libtempo_reflected` from `GenTypedAPI.sh`; `Packaged/API/Cpp`, self-contained, with a CMake config; the examples built against it | |
 | **6d** | `Tests/Cpp`, `TestCppAPI.sh`, CI | |
 | **6e** | docs | |

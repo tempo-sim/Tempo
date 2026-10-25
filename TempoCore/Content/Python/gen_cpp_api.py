@@ -21,6 +21,7 @@ from pathlib import Path
 import google.protobuf.descriptor as gpd
 import jinja2
 
+from gen_naming import build_jobs, host_platform_name
 from gen_common import (
     INFRA_PACKAGE,
     gather_enums,
@@ -49,18 +50,6 @@ SCALAR_TYPES = {
     gpd.FieldDescriptor.TYPE_SINT32,
     gpd.FieldDescriptor.TYPE_SINT64,
 }
-
-
-def host_platform_name() -> str:
-    """Folder name under lib/ for the current build host."""
-    system = platform.system()
-    if system == "Darwin":
-        return "Mac"
-    if system == "Windows":
-        return "Win64"
-    if system == "Linux":
-        return "Linux"
-    raise RuntimeError(f"Unsupported host platform for C++ API build: {system}")
 
 
 def descriptor_pbh_path(descriptor) -> str:
@@ -767,18 +756,26 @@ class CppApiGenerator:
         subprocess.run(configure_cmd, check=True)
 
         build_cmd = ["cmake", "--build", str(self.cmake_build_dir),
-                     "--config", "Release", "--parallel"]
+                     "--config", "Release", "--parallel", str(build_jobs())]
         print(f"[Tempo Prebuild] Building C++ wrapper", flush=True)
         subprocess.run(build_cmd, check=True)
 
     def copy_artifacts(self, generated_modules):
         """Copy headers, library, README, and decorated protos to Content/Cpp/API/."""
-        # Wipe & recreate include/, lib/<platform>/
+        # Wipe & recreate include/, lib/<platform>/ -- all but the typed classes, which are built at
+        # package time rather than here (build_cpp_classes.py) and would otherwise be lost to every
+        # rebuild after a package.
+        reflected = self.include_dir / "tempo" / "reflected"
+        kept = self.build_dir / "kept_reflected"
+        if reflected.exists():
+            shutil.move(str(reflected), str(kept))
         if self.include_dir.exists():
             shutil.rmtree(self.include_dir)
         self.include_dir.mkdir(parents=True)
         (self.include_dir / "tempo").mkdir()
         (self.include_dir / "proto").mkdir()
+        if kept.exists():
+            shutil.move(str(kept), str(reflected))
 
         # Wrapper + hand-written headers from build/source/include/tempo/
         for h in (self.source_dir / "include/tempo").glob("*.h"):
@@ -794,10 +791,14 @@ class CppApiGenerator:
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(pbh, dest)
 
-        # Library archive(s)
-        if self.lib_dir.exists():
-            shutil.rmtree(self.lib_dir)
-        self.lib_dir.mkdir(parents=True)
+        # Library archive(s), again keeping the typed classes'.
+        self.lib_dir.mkdir(parents=True, exist_ok=True)
+        for stale in self.lib_dir.iterdir():
+            if "tempo_reflected" not in stale.name:
+                if stale.is_dir():
+                    shutil.rmtree(stale)
+                else:
+                    stale.unlink()
         # CMake puts archives under <build>/lib/ (we set ARCHIVE_OUTPUT_DIRECTORY).
         # Multi-config generators (MSVC) insert <Config>/, so we glob.
         archive_root = self.cmake_build_dir / "lib"
