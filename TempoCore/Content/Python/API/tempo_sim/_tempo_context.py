@@ -6,6 +6,7 @@ import grpc
 import os
 import sys
 import threading
+import weakref
 
 
 DEFAULT_ADDRESS = "localhost"
@@ -15,7 +16,8 @@ DEFAULT_PORT = 10001
 DEFAULT_SOCKET_NAME = "tempo.sock"
 
 
-# The loop synchronous callers run on: one per thread, for the life of the thread.
+# What each thread keeps: the loop its blocking calls run on, and a connection for each loop it has
+# made calls on -- that one, or any it runs itself.
 #
 # One loop rather than one per call: a gRPC channel -- and every stream opened on it -- belongs to
 # the loop that created it, so a fresh loop per call closed the previous one underneath them. A sync
@@ -24,17 +26,47 @@ DEFAULT_SOCKET_NAME = "tempo.sock"
 #
 # Per thread rather than one for the process: a loop runs on one thread at a time, so two threads
 # making blocking calls at once on a shared loop had the second fail with "this event loop is
-# already running". Each thread's loop gets a channel of its own (TempoContext keeps one per loop).
+# already running". Each thread's loop gets a channel of its own.
 #
-# Never closed, deliberately. A loop lives as long as the thread that is using it, and closing it
-# would race whatever still holds a channel on it.
-_sync_loops = threading.local()
+# Kept with the thread, not in TempoContext, so that a thread takes them with it when it exits: a
+# process-wide table kept every exited thread's loop and channel for the life of the process, which
+# a pool that retires its workers grows without bound. The loop is never closed while its thread
+# lives, since that would race whatever still holds a channel on it; _release_thread closes it once
+# the thread is gone, and each channel closes itself as it is collected.
+_thread_state = threading.local()
+
+
+def _resources_of_this_thread():
+    state = getattr(_thread_state, "state", None)
+    if state is None:
+        state = _thread_state.state = _ThreadState()
+    return state.resources
+
+
+class _ThreadState(object):
+    """
+    Holds one thread's resources. threading.local drops it when the thread exits, which is what
+    runs _release_thread; the resources sit in a dict apart from it so the finalizer can reach them
+    without keeping this alive.
+    """
+
+    def __init__(self):
+        self.resources = {"loop": None, "connections": {}}
+        weakref.finalize(self, _release_thread, self.resources)
+
+
+def _release_thread(resources):
+    resources["connections"].clear()
+    loop = resources["loop"]
+    if loop is not None and not loop.is_running() and not loop.is_closed():
+        loop.close()
 
 
 def _loop_for_sync_calls():
-    loop = getattr(_sync_loops, "loop", None)
+    resources = _resources_of_this_thread()
+    loop = resources["loop"]
     if loop is None or loop.is_closed():
-        loop = _sync_loops.loop = asyncio.new_event_loop()
+        loop = resources["loop"] = asyncio.new_event_loop()
     return loop
 
 
@@ -128,9 +160,13 @@ async def set_socket(path=""):
 
 
 class _Connection(object):
-    """One channel and the stubs made from it. Bound to the loop that opened it, as a channel is."""
+    """
+    One channel and the stubs made from it. Bound to the loop that opened it, as a channel is, and
+    to the endpoint it was opened on.
+    """
 
     def __init__(self, target):
+        self.target = target
         self.stubs = {}
         self.channel = grpc.aio.insecure_channel(target,
                                                  options=[
@@ -142,10 +178,6 @@ class _Connection(object):
 class TempoContext(object):
     def __init__(self):
         self._target = _target_from_env()
-        # One connection per event loop. A channel belongs to the loop that created it, and the
-        # loops in play are every thread's own sync loop plus whatever loops run coroutines, so one
-        # channel rebound to whichever loop asked last would be torn out from under the others.
-        self._connections = {}
 
     async def get_stub(self, stub_class):
         connection = await self._ensure_channel()
@@ -166,29 +198,28 @@ class TempoContext(object):
             return
         self._target = target
         # A channel is bound to the endpoint it was opened on, so pointing the client somewhere
-        # else has to drop every one. Otherwise the new endpoint would be ignored for the rest of
-        # the process, since _ensure_channel only builds a channel when its loop has none.
-        await self._close_channels()
-
-    async def _close_channels(self):
-        connections, self._connections = self._connections, {}
-        current_loop = asyncio.get_running_loop()
-        mine = connections.get(current_loop)
+        # else retires every one. Only this loop's can be closed from here -- a channel closes from
+        # its own loop -- so the rest are replaced, and closed, the next time their loop asks.
+        connections = _resources_of_this_thread()["connections"]
+        mine = connections.pop(asyncio.get_running_loop(), None)
         if mine is not None:
             await mine.channel.close()
-        # A channel can only be closed from the loop that created it. The others are released here
-        # and reclaimed along with their loops.
 
     async def _ensure_channel(self):
+        """The running loop's connection to the current endpoint, made if it has none."""
         current_loop = asyncio.get_running_loop()
-        connection = self._connections.get(current_loop)
+        connections = _resources_of_this_thread()["connections"]
+        connection = connections.get(current_loop)
+        if connection is not None and connection.target != self._target:
+            del connections[current_loop]
+            await connection.channel.close()
+            connection = None
         if connection is None:
             # A loop that has finished -- asyncio.run's, say -- leaves its connection behind with no
             # way to close it from here; drop those rather than hold one per run ever made.
-            for loop in list(self._connections):
-                if loop.is_closed():
-                    self._connections.pop(loop, None)
-            connection = self._connections[current_loop] = _Connection(self._target)
+            for loop in [loop for loop in connections if loop.is_closed()]:
+                del connections[loop]
+            connection = connections[current_loop] = _Connection(self._target)
         return connection
 
 

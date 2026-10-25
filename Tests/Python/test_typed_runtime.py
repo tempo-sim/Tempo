@@ -1323,6 +1323,56 @@ def test_each_loop_keeps_its_own_channel(classes):
             loop.close()
 
 
+def test_an_exited_threads_loop_and_connection_are_released(classes):
+    """A thread's sync loop and its connection go with the thread. A process-wide table kept every
+    exited thread's loop and channel for the life of the process."""
+    import asyncio
+    import gc
+    import threading
+    import weakref
+    from tempo_sim._tempo_context import TempoContext, run_async
+
+    context = TempoContext()
+    seen = {}
+
+    async def connect():
+        return await context._ensure_channel(), asyncio.get_running_loop()
+
+    def blocking_call():
+        connection, loop = run_async(connect())
+        seen["channel"] = weakref.ref(connection.channel)
+        seen["loop"] = loop
+
+    thread = threading.Thread(target=blocking_call)
+    thread.start()
+    thread.join()
+    gc.collect()
+
+    assert seen["channel"]() is None, "the exited thread's channel is still held"
+    assert seen["loop"].is_closed(), "the exited thread's loop was left open"
+
+
+def test_a_new_target_retires_every_loops_connection(classes):
+    """Pointing the client elsewhere from one loop retires another loop's connection too, the next
+    time that loop asks, and closes it there."""
+    import asyncio
+    from tempo_sim._tempo_context import TempoContext
+
+    context = TempoContext()
+    first, second = asyncio.new_event_loop(), asyncio.new_event_loop()
+    try:
+        on_first = first.run_until_complete(context._ensure_channel())
+        second.run_until_complete(context._set_target("localhost:1"))
+        replacement = first.run_until_complete(context._ensure_channel())
+        assert replacement is not on_first
+        assert replacement.target == "localhost:1"
+        assert on_first.channel._channel.closed(), "the retired channel was not closed"
+    finally:
+        first.run_until_complete(replacement.channel.close())
+        for loop in (first, second):
+            loop.close()
+
+
 # -- calling functions ----------------------------------------------------------------------------
 
 
