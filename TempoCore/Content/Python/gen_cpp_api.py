@@ -385,9 +385,12 @@ UMBRELLA_TEMPLATE = """// Copyright Tempo Simulation, LLC. All Rights Reserved
 #pragma once
 
 #include "tempo/context.h"
+#include "tempo/conversion.h"
 #include "tempo/error.h"
 #include "tempo/result.h"
 #include "tempo/streaming.h"
+#include "tempo/unreal.h"
+#include "tempo/world.h"
 
 {% for module in modules -%}
 #include "tempo/{{ module }}.h"

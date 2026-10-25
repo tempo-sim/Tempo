@@ -249,8 +249,8 @@ tempo_schema.json          ← language-neutral, versioned, hashed, deterministi
     │                          .py        class identity
     │                          .pyi       the type surface
     │                          .meta.json per-module runtime types (§8.2)
-    ├── gen_rust_classes.py → (later)
-    └── gen_cpp_classes.py  → (later)
+    ├── gen_rust_classes.py → §15
+    └── gen_cpp_classes.py  → §23
 
 packaged sim ──► DescribeClasses ──► verification test (§5.4) + dynamic path (§9.1)
 
@@ -722,7 +722,7 @@ generated `Value` and so cannot live in the deliberately protobuf-free classifie
 tickable and the subscription lives beside the rest of the property code. The tick early-returns on
 an empty subscription map, so a project that never streams pays nothing measurable.
 | **5 — Rust** | `gen_rust_classes.py` + a `tempo_sim::unreal` runtime, off the same `tempo_schema.json` | Designed and measured in §15. |
-| **6 — C++** | generator off the same `tempo_schema.json` | Not started. |
+| **6 — C++** | generator off the same `tempo_schema.json`, runtime, packaging, tests | §23. |
 | **7 — Published classes** | an engine-core + Tempo subset inside the published `tempo-sim` wheel and crate, namespaced by engine version; per-class drift checking | Designed and measured in §16; built as `tempo_sim.reflected`, latest engine only (§16.11). 7g remains. |
 | **8 — Struct values** | a `StructValue` variant; value-expressible structs in the classifier; struct arguments, results and whole-struct writes in both clients | Designed in §17. **Done**; see §17.7. |
 | **9 — One ordered batch** | `RunBatch` carrying sets, gets and calls in order within one tick; deferred and immediate reads in both clients | Designed in §18. **Done**; see §18.3. |
@@ -1785,4 +1785,89 @@ were `Unknown` until now, are real types.
 round trip returns what went in, that an unconvertible value is refused, and — with Pyright and
 `rustc` — that a conversion is typed by what it converts, that the wrong direction or a value with
 no counterpart is an error, and that the old unprefixed names are gone.
+
+---
+
+## 23. The C++ surface
+
+Phase 6. The C++ client is the one generated client the typed classes never reached, and it had
+drifted on its own: nothing had built it since this branch began, and once something did, its
+generator took `reflected` for a proto module defined twice and failed the prebuild, in CI too
+(fixed: `gen_common.is_proto_module`). Its examples did not link either, because their CMake found
+Homebrew's OpenSSL 3 and the vendored gRPC was built against the engine's 1.1.
+
+### 23.1 Shape: C++ mirrors Rust
+
+The C++ client already says it mirrors Rust (`context.h` "mirrors src/context.rs"), and the typed
+surface does the same, with C++'s own means where they are better:
+
+| | Rust | C++ |
+|---|---|---|
+| Names | snake_case | the same names, from the same `snake()` |
+| Errors | `Result<T, TempoError>`, `?` | `tempo::Result<T>`, no exceptions, as the RPC client |
+| Inheritance | a `Deref` chain, `unsafe` upcast | real inheritance: `class Pawn : public Actor` |
+| A class bound | `T: Class` | a `tempo::unreal::Class` concept (C++20, which the client already requires) |
+| Async | `_async` twins | none: the RPC client is synchronous |
+| Out parameters | a tuple | a `std::tuple`, unpacked with a structured binding |
+| Struct values | `Option` fields | `std::optional` fields |
+| Assets | statics, `Deref` widening | `inline const AssetRef<T>`, a converting constructor gated on `std::is_base_of` |
+
+Real inheritance is the one place C++ is simply better: no `unsafe`, no reinterpretation, and a
+derived handle is a base one by the language's own rule.
+
+### 23.2 One tree, not two
+
+Python and Rust split the types between the published subset in tempo-sim and the project's own,
+because tempo-sim is distributed on its own (§16, §20). The C++ client is not: it is built per
+project, with the project's protos compiled into the same library. So it has one tree,
+`tempo::reflected`, describing the project's whole build — no published subset, no re-exports, and
+no latest-engine limitation, since it is always generated from the build it describes.
+
+### 23.3 Files, and what a consumer compiles
+
+Thousands of classes cannot be one header a scenario includes. The layout:
+
+- **One header per class**, `tempo/reflected/classes/<module…>/<Class>.h`. It includes its
+  superclass's header, which is acyclic class by class even where modules are not (a Blueprint
+  folder's class can derive from another folder's and the other way round), and forward-declares
+  everything else it names. A scenario includes what it uses, as anywhere in C++; calling a method
+  that returns a class it has not included is an incomplete-type error naming that class.
+- **A header per module** including all of its classes, for convenience, plus `enums.h`,
+  `structs.h` (value types and proxies, in containment order) and one header per asset mount.
+- **Definitions out of line**, in `.cc` files compiled into `libtempo_reflected` at package time.
+  Declarations are all a scenario parses, so including a module costs what its declarations cost.
+
+### 23.4 Build and packaging
+
+The RPC client is built at prebuild time, the typed classes at package time, because they need the
+packaged build (§16). So the types are a second archive, `libtempo_reflected`, built by
+`GenTypedAPI.sh` under the same gate as the RPC client, `TEMPO_GEN_CPP_API`, and kept by the
+prebuild's regeneration rather than wiped with the rest.
+
+`Package.sh` then ships a self-contained client in `Packaged/API/Cpp`: headers, `libtempo`,
+`libtempo_reflected`, the vendored gRPC headers and **the shared library `tempogrpc`**, and a CMake
+package config (`find_package(Tempo CONFIG)`, targets `tempo::tempo` and `tempo::reflected`).
+Linking the shared library rather than the static archives beside it is the rule Unreal modules
+already follow, and for the same reason; it is also 100 MB rather than 676, and it carries OpenSSL
+and zlib inside it, so a consumer needs no engine and no Tempo checkout. `libtempo` is compiled with
+the defines a DLL consumer needs (`PROTOBUF_USE_DLLS`, `ABSL_CONSUME_DLL`), as Tempo's modules are.
+
+### 23.5 Tests
+
+- **`codegen`**: `test_cpp_codegen.py` generates the fixture schema and asks the host compiler for
+  its verdict on snippets (`-fsyntax-only`), one per drift case, as `test_rust_codegen.py` does with
+  `rustc`.
+- **Live**: `Tests/Cpp`, a CMake project against `Packaged/API/Cpp` with groups `contract` (no sim),
+  `integration` (the RPC client) and `typed` (the typed classes), run by `Scripts/TestCppAPI.sh`
+  (+ `.bat`) and fanned out in CI as Rust's are.
+
+### 23.6 Phases
+
+| Phase | What | |
+|---|---|---|
+| **6a** | the runtime: `tempo/unreal.h`, `world.h`, `conversion.h`, `Result<void>`, the new error kinds | |
+| **6b** | `gen_cpp_classes.py`, and the `codegen` tests | |
+| **6c** | `libtempo_reflected` from `GenTypedAPI.sh`; `Packaged/API/Cpp`, self-contained, with a CMake config; the examples built against it | |
+| **6d** | `Tests/Cpp`, `TestCppAPI.sh`, CI | |
+| **6e** | docs | |
 

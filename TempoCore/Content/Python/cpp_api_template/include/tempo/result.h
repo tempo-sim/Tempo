@@ -7,6 +7,7 @@
 #pragma once
 
 #include <cassert>
+#include <optional>
 #include <utility>
 #include <variant>
 
@@ -33,6 +34,24 @@ public:
 
 private:
 	std::variant<T, TempoError> v_;
+};
+
+/// A call that succeeds with nothing to hand back, or fails.
+template <>
+class Result<void> {
+public:
+	Result() = default;
+	Result(TempoError error) : error_(std::move(error)) {}
+
+	bool ok() const { return !error_.has_value(); }
+	explicit operator bool() const { return ok(); }
+
+	TempoError& error() & { return *error_; }
+	const TempoError& error() const& { return *error_; }
+	TempoError&& error() && { return std::move(*error_); }
+
+private:
+	std::optional<TempoError> error_;
 };
 
 }  // namespace tempo
