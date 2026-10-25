@@ -290,9 +290,11 @@ committed; fetched.
   rule anywhere else in the clients.
 - **Blueprint exposure is how a Tempo class declares its public scenario API.** The typed class
   surface is walked with `bBlueprintAccessibleOnly`, so a property reaches it only when it is
-  declared `BlueprintReadWrite` (writable) or `BlueprintReadOnly`/`VisibleAnywhere` (read-only). Add
-  the specifier when a property is meant to be configured or observed from a scenario; leave a
-  `UPROPERTY(Transient)` that exists for the garbage collector alone. The string-keyed API still
+  declared `BlueprintReadWrite` (writable) or `BlueprintReadOnly` (read-only); `VisibleAnywhere` or
+  `EditAnywhere` alone leaves it absent (neither sets `CPF_BlueprintVisible`), and a function needs
+  `BlueprintCallable`/`BlueprintPure`. Add the specifier when a property is meant to be configured
+  or observed from a scenario; leave a `UPROPERTY(Transient)` that exists for the garbage collector
+  alone. The string-keyed API still
   reaches everything either way -- the specifier buys the drift guarantee, not the access. Note the
   asymmetry this implies: `FTypeInfo::IsWritable()` means "writable *through the typed API*", and
   `SetProperty` accepts more than that.

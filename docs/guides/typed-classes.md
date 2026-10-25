@@ -27,8 +27,8 @@ Two distributions, and you want both:
 
 | Distribution | What it is |
 |---|---|
-| `tempo-sim` | The client: the generated gRPC wrappers, the runtime behind attribute access, `tempo_sim.world`, and the published types for what every build has, as `tempo_sim.reflected` — generated from the latest engine Tempo supports. |
-| `tempo-sample` | The host project's own package, named after the project: the typed classes for this build, as `tempo_sample.reflected`, and the project's own services, if it defines any. |
+| `tempo-sim` | The client: the generated gRPC wrappers, the runtime behind attribute access, `tempo_sim.world`, `tempo_sim.conversion`, and the published types for what every build has, as `tempo_sim.reflected`. Those are generated from the latest engine Tempo supports, and only that one ([Latest engine only](../clients/typed-classes.md#latest-engine-only)). |
+| `tempo-sample` | The host project's own package, named after the project: the typed classes for this build, as `tempo_sample.reflected`, exact for its engine and including its Blueprints and asset catalog, and the project's own services, if it defines any. |
 
 !!! note "`Package.sh` only"
 
@@ -224,11 +224,14 @@ the lidar would see up to four of them on separate frames and rebuild its tiles 
 
 !!! note "What a Tempo class offers is what it declares"
 
-    A property reaches the typed classes when it is declared `BlueprintReadWrite` (writable) or
-    `BlueprintReadOnly` / `VisibleAnywhere` (read-only). That is deliberate: the specifier is how a
+    A property reaches the typed classes only when it is declared `BlueprintReadWrite` (writable) or
+    `BlueprintReadOnly` (read-only), and a function only when it is `BlueprintCallable` or
+    `BlueprintPure`. `VisibleAnywhere` or `EditAnywhere` alone is not enough: those are for the
+    editor, and a property with only them is absent. That is deliberate: the specifier is how a
     Tempo class says which of its properties are public scenario API, as against the internals that
     are `UPROPERTY` only so the garbage collector can see them. The string-keyed API still reaches
-    everything, with no guarantee attached.
+    everything, with no guarantee attached. See
+    [What a class offers](../clients/typed-classes.md#what-a-class-offers).
 
 ## 8. Watch a rename get caught
 
@@ -374,7 +377,8 @@ Three things read differently from Python, and the
 
 ## Next
 
-- [Typed classes](../clients/typed-classes.md) — the reference: what is deliberately absent, how
-  batching and snapshots behave, and how to hold a scenario repository to the guarantee.
+- [Typed classes](../clients/typed-classes.md) — the reference: units and conversion, what is
+  deliberately absent, how batching and snapshots behave, how to hold a scenario repository to the
+  guarantee, and [when to write an RPC instead](../clients/typed-classes.md#when-to-write-an-rpc-instead).
 - [TempoWorld](../plugins/tempo-world.md) — the string-keyed property API underneath, which stays
   unfiltered on purpose.
