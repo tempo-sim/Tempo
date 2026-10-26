@@ -203,26 +203,26 @@ async fn randomize_camera_post_process(
     owner: &str,
 ) -> Result<(), TempoError> {
     let mut rng = rand::thread_rng();
-    let scalars: [(&str, &str, f32); 4] = [
+    let scalars: [(&str, &str, f64); 4] = [
         (
             "PostProcessSettings.bOverride_WhiteTemp",
             "PostProcessSettings.WhiteTemp",
-            rng.gen_range(700.0_f32..=2000.0_f32),
+            rng.gen_range(700.0..=2000.0),
         ),
         (
             "PostProcessSettings.bOverride_BloomIntensity",
             "PostProcessSettings.BloomIntensity",
-            rng.gen_range(0.0_f32..=1.0_f32),
+            rng.gen_range(0.0..=1.0),
         ),
         (
             "PostProcessSettings.bOverride_AutoExposureSpeedUp",
             "PostProcessSettings.AutoExposureSpeedUp",
-            rng.gen_range(1.0_f32..=20.0_f32),
+            rng.gen_range(1.0..=20.0),
         ),
         (
             "PostProcessSettings.bOverride_AutoExposureSpeedDown",
             "PostProcessSettings.AutoExposureSpeedDown",
-            rng.gen_range(1.0_f32..=20.0_f32),
+            rng.gen_range(1.0..=20.0),
         ),
     ];
     for (override_prop, prop, value) in scalars {
@@ -239,7 +239,7 @@ async fn randomize_camera_post_process(
     .await?;
     for axis in ["X", "Y", "Z", "W"] {
         let prop = format!("PostProcessSettings.ColorSaturation.{}", axis);
-        let v: f32 = rng.gen_range(0.0_f32..=1.0_f32);
+        let v: f64 = rng.gen_range(0.0..=1.0);
         set_camera_property(owner, camera_name, prop, V::FloatValue(v)).await?;
     }
     Ok(())

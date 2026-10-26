@@ -71,7 +71,7 @@ pip install tempo-sim
 
 ```toml
 [dependencies]
-tempo-sim = "0.1"
+tempo-sim = "0.4"
 ```
 
 The published packages cover Tempo's built-in services. If your project defines its own RPCs, or

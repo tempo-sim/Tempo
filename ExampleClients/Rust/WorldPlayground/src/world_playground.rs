@@ -362,7 +362,7 @@ fn array_value(base: &str, value_text: &str) -> Result<V, String> {
             V::Int64ArrayValue(Int64Array { values: values.map_err(|e| e.to_string())? })
         }
         "float" | "double" => {
-            let values: Result<Vec<f32>, _> = parts.iter().map(|v| v.parse::<f32>()).collect();
+            let values: Result<Vec<f64>, _> = parts.iter().map(|v| v.parse::<f64>()).collect();
             V::FloatArrayValue(FloatArray { values: values.map_err(|e| e.to_string())? })
         }
         "class" => V::ClassArrayValue(strings(parts)),
