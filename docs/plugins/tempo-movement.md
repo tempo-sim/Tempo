@@ -11,7 +11,7 @@ unicycle model, and a Chaos wheeled vehicle — plus a controller for them.
 ```python
 import tempo_sim.tempo_movement as tm
 
-tm.get_commandable_vehicles()
+tm.get_commandable_pawns()
 # Acceleration and steering are normalized from -1.0 to 1.0.
 tm.command_vehicle(vehicle="MyVehicle", acceleration=0.5, steering=0.0)
 ```
@@ -28,13 +28,18 @@ import tempo_sim.TempoCore.Geometry_pb2 as Geometry
 
 twist = Geometry.Twist()
 twist.linear.x = 2.0        # m/s forward
-twist.angular.z = 0.3       # rad/s yaw
+twist.angular.z = 0.3       # rad/s, turning left
 tm.command_velocity(pawn="MyPawn", twist=twist)
 
 accel = Geometry.Accel()    # same frame and conventions, in m/s^2 and rad/s^2
 accel.linear.x = 0.5
 tm.command_acceleration(pawn="MyPawn", accel=accel)
 ```
+
+The angular part is the right-handed angular velocity vector, so a positive `angular.z` is a
+counterclockwise, left turn seen from above — the same convention world state reports an actor's
+angular velocity in ([Angular velocity](../concepts/conventions.md#angular-velocity)). Vehicles act
+on `angular.z` alone.
 
 ### Rotation center
 
@@ -219,7 +224,7 @@ first.
 !!! note "Why a dedicated RPC for spline points"
 
     `USplineComponent`'s points are not reachable through TempoWorld's generic property API, so
-    spline geometry gets a first-class RPC rather than a `set_*_property` call.
+    spline geometry gets a first-class RPC rather than a `set_property` call.
 
 ## API reference
 

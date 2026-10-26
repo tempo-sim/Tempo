@@ -51,6 +51,10 @@ pip install Packaged/API/Python/tempo-sim/*.whl \
             Packaged/API/Python/tempo-sample/*.whl
 ```
 
+`tempo-sim` is the same for every project and is also on PyPI. The project's wheel pins the version
+it was generated against, so `pip install Packaged/API/Python/tempo-sample/*.whl` on its own fetches
+the matching `tempo-sim` from there.
+
 Importing the classes is what registers them with the runtime, so the check is an import:
 
 ```bash
@@ -196,10 +200,10 @@ knowing as you read it:
 - **A write sets a property; it does not run what derives from it.** The example moves the sweeper by
   calling `K2_SetActorLocation`, not by assigning to a transform, because assigning never calls
   `UpdateComponentToWorld`.
-- **Units are Unreal's own** — centimetres, degrees, left-handed. This is the one corner of the
-  Tempo API that does not convert, which is why its types are named `FVector` and so on rather
-  than `Vector`, the type the other RPCs use; `tempo_sim.conversion` converts between them. See
-  [Units](../clients/reflected-api.md#units).
+- **Units are Unreal's own** — centimetres, degrees, left-handed. Like the property and function
+  RPCs it is built on, the reflected API does not convert, which is why its types are named
+  `FVector` and so on rather than `Vector`, the type the other RPCs use; `tempo_sim.conversion`
+  converts between them. See [Units](../clients/reflected-api.md#units).
 - **`is_a` asks about the actor**, not about the handle, which is what makes narrowing a broad query
   work.
 

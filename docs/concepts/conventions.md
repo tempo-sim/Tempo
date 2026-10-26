@@ -15,6 +15,15 @@ Velocities follow: linear in m/s, angular in rad/s.
 This applies to actor and component transforms, world state, sensor poses, movement commands,
 lidar azimuths and elevations, and geographic coordinates.
 
+## Angular velocity
+
+An angular velocity or acceleration — the `angular` of a `Twist` or an `Accel` — is the
+right-handed angular velocity *vector*, not a set of Euler-angle rates: the axis it points along is
+the axis of rotation, and the right-hand rule gives the sense. So a positive `angular.z` turns
+counterclockwise seen from above, a left turn, and a positive `angular.x` rolls the left side up.
+World state reports it and movement commands take it in the same convention, so an angular
+velocity read back from one can be handed straight to the other.
+
 ## The exception: property and function access { #the-exception-set_property }
 
 The property and function RPCs in [TempoWorld](../plugins/tempo-world.md#getting-and-setting-properties)
@@ -31,10 +40,19 @@ ratio, a gain, or a color channel, so it converts nothing: every value they take
 | A quaternion | `quat_value`: Unreal's own left-handed `FQuat` |
 | A transform | `native_transform_value`: rotation as a quaternion, translation in centimeters, scale |
 | A linear color | `linear_color_value`, unclamped floats |
+| A float or a double | `float_value`, at double precision either way |
+
+The human-readable `value` strings that `get_*_properties` and `call_function` report follow the
+same rule: a rotator reads in degrees as it is stored, and a color reads with its alpha — an
+`FLinearColor` as linear floats.
 
 !!! warning "The practical consequence"
 
     ```python
+    import tempo_sim.tempo_world as tw
+    import tempo_sim.TempoCore.Geometry_pb2 as Geometry
+    import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
     # Meters -- set_actor_location is a first-class, unit-converted RPC.
     tw.set_actor_location(actor="MyActor", location=Geometry.Vector(x=1.0, y=2.0, z=3.0))
 
@@ -48,7 +66,8 @@ for the same reason. Its value types are Unreal's own — `FVector`, `FRotator`,
 `FTransform` — shaped as Unreal's are. `tempo_sim.conversion` (Python), `tempo_sim::conversion`
 (Rust) and `tempo/conversion.h` (C++) convert them to and from the API's units with the rules above:
 `ue_to_si` and `si_to_ue`. An `FQuat` converts to a `Quat` exactly; for Euler angles, convert the
-rotator Unreal would make of it, `ue_to_si(rotator_of(q))`.
+rotator Unreal would make of it, `ue_to_si(rotator_of(q))`. A bare angle, an angular velocity, a
+`Twist`, an `Accel` and a `Box` have no conversion helper.
 
 ??? note "The deprecated typed setters convert differently"
 

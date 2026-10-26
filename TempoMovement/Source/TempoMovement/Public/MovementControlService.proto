@@ -20,8 +20,8 @@ message NormalizedDrivingCommand {
   float steering = 3;
 }
 
-// Closed-loop velocity command. Twist is in the pawn body frame:
-// linear x forward, linear y to the right, angular z is yaw rate (right-handed, m/s and rad/s).
+// Closed-loop velocity command. Twist is in the pawn body frame, right-handed, in m/s and rad/s:
+// linear x forward, linear y to the left, and angular z the yaw rate, positive turning left.
 message VelocityCommand {
   // Name of the pawn to command.
   string pawn = 1;

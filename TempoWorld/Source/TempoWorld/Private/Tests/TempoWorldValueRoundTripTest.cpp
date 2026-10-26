@@ -58,6 +58,11 @@ namespace
 			Ints = AddSet<FIntProperty>(TEXT("Ints"));
 			Count = NewProperty<FIntProperty>(Struct, TEXT("Count"));
 			Struct->AddCppProperty(Count);
+			Double = NewProperty<FDoubleProperty>(Struct, TEXT("Double"));
+			Struct->AddCppProperty(Double);
+			Float = NewProperty<FFloatProperty>(Struct, TEXT("Float"));
+			Struct->AddCppProperty(Float);
+			Doubles = AddArray<FDoubleProperty>(TEXT("Doubles"));
 			Rotator = AddStruct(TEXT("Rotator"), TBaseStructure<FRotator>::Get());
 			Quat = AddStruct(TEXT("Quat"), TBaseStructure<FQuat>::Get());
 			Transform = AddStruct(TEXT("Transform"), TBaseStructure<FTransform>::Get());
@@ -128,6 +133,9 @@ namespace
 		FArrayProperty* Names = nullptr;
 		FSetProperty* Ints = nullptr;
 		FIntProperty* Count = nullptr;
+		FDoubleProperty* Double = nullptr;
+		FFloatProperty* Float = nullptr;
+		FArrayProperty* Doubles = nullptr;
 		FStructProperty* Rotator = nullptr;
 		FStructProperty* Quat = nullptr;
 		FStructProperty* Transform = nullptr;
@@ -425,6 +433,39 @@ bool FTempoWorldValueRoundTripColorAlphaTest::RunTest(const FString& Parameters)
 
 	TestTrue(TEXT("color_value into FLinearColor with alpha"), SetValueOnTarget(nullptr, Fixture.TargetFor(Fixture.LinearColor), Translucent).ok());
 	TestEqual(TEXT("color_value into FLinearColor keeps the given alpha"), Fixture.ValueOf<FLinearColor>(Fixture.LinearColor), FLinearColor(FColor(10, 20, 30, 40)));
+
+	return true;
+}
+
+// A double property keeps its full precision both ways, scalar and in a container, and a float
+// property takes the nearest float.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoWorldValueRoundTripFloatPrecisionTest,
+	"Tempo.World.ValueRoundTrip.FloatPrecision", TempoWorldValueRoundTripTestFlags)
+bool FTempoWorldValueRoundTripFloatPrecisionTest::RunTest(const FString& Parameters)
+{
+	FValueRoundTripFixture Fixture;
+	// Not representable as a float: it would come back as 0.10000000149011612.
+	constexpr double Precise = 0.1;
+
+	TempoWorld::Value Scalar;
+	Scalar.set_float_value(Precise);
+	TestTrue(TEXT("double write"), SetValueOnTarget(nullptr, Fixture.TargetFor(Fixture.Double), Scalar).ok());
+	TestEqual(TEXT("a double is stored exactly"), *Fixture.Double->ContainerPtrToValuePtr<double>(Fixture.Memory), Precise);
+	TempoWorld::Value ReadScalar;
+	TestTrue(TEXT("double read"), WritePropertyToValue(Fixture.Memory, Fixture.Double, ReadScalar).ok());
+	TestEqual(TEXT("a double reads exactly"), ReadScalar.float_value(), Precise);
+
+	TestTrue(TEXT("float write"), SetValueOnTarget(nullptr, Fixture.TargetFor(Fixture.Float), Scalar).ok());
+	TestEqual(TEXT("a float takes the nearest float"), *Fixture.Float->ContainerPtrToValuePtr<float>(Fixture.Memory), 0.1f);
+
+	TempoWorld::Value Array;
+	Array.mutable_float_array_value()->add_values(Precise);
+	Array.mutable_float_array_value()->add_values(-Precise);
+	TestTrue(TEXT("double array write"), SetValueOnTarget(nullptr, Fixture.TargetFor(Fixture.Doubles), Array).ok());
+	TempoWorld::Value ReadArray;
+	TestTrue(TEXT("double array read"), WritePropertyToValue(Fixture.Memory, Fixture.Doubles, ReadArray).ok());
+	TestTrue(TEXT("double array reads exactly"), ReadArray.float_array_value().values_size() == 2
+		&& ReadArray.float_array_value().values(0) == Precise && ReadArray.float_array_value().values(1) == -Precise);
 
 	return true;
 }

@@ -63,8 +63,9 @@ Each function takes its **request message**, which each module re-exports
 (`tempo_world::ActorStateRequest`). Set the fields you need and fill the rest with
 `..Default::default()`: a field added in a later release then takes its default rather than
 breaking the call. An RPC whose request is `TempoCore.Empty` takes no argument, and a deprecated
-RPC's function is marked `#[deprecated]`. The fluent `call()` builder works the same as in Python —
-see [TempoWorld](../plugins/tempo-world.md#calling-functions).
+RPC's function is marked `#[deprecated]`. The fluent `call()` builder is the exception: it takes
+`call(actor, component, function)` and then one `*_arg` method per argument, as in Python — see
+[TempoWorld](../plugins/tempo-world.md#calling-functions).
 
 Re-exported at the crate root: `set_server`, `set_server_async`, `set_socket`, `set_socket_async`,
 `tempo_context`, `TempoContext`,
@@ -96,7 +97,7 @@ or an Unreal build at all:
 
 ```toml
 [dependencies]
-tempo-sim = "0.1"
+tempo-sim = "0.4"
 ```
 
 Full generated API documentation for the published crate is on
@@ -104,9 +105,11 @@ Full generated API documentation for the published crate is on
 
 !!! warning
 
-    As with Python, the published `tempo-sim` crate contains only Tempo's built-in services, not
-    custom RPCs you define. If your project has its own services, generate and use your project
-    crate — it depends on `tempo-sim` and adds your modules.
+    As with Python, the published `tempo-sim` crate contains only Tempo's built-in services and
+    the reflected API's runtime (`unreal`, `world`, `conversion`), not custom RPCs you define or
+    any project's reflected classes. If your project has its own services, or you use the
+    reflected API, generate and use your project crate — it depends on `tempo-sim` and adds your
+    modules.
 
     By default the generated project crate references `tempo-sim` by **local path**. Set
     `"tempo_sim_source": "registry"` in `crate_info.json` to depend on the published crates.io

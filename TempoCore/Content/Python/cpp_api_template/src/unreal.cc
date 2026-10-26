@@ -276,12 +276,12 @@ TempoWorld::FunctionArg argument_component(std::string_view name, const Handle& 
 
 Result<double> ValueTraits<double>::from(const TempoWorld::Value& value) {
     if (value.value_case() != TempoWorld::Value::kFloatValue) return detail::wrong(value, "a float");
-    return static_cast<double>(value.float_value());
+    return value.float_value();
 }
 
 TempoWorld::Value ValueTraits<double>::to(const double& v) {
     TempoWorld::Value value;
-    value.set_float_value(static_cast<float>(v));
+    value.set_float_value(v);
     return value;
 }
 
@@ -518,7 +518,7 @@ Result<std::vector<double>> ValueTraits<std::vector<double>>::from(const TempoWo
 
 TempoWorld::Value ValueTraits<std::vector<double>>::to(const std::vector<double>& v) {
     TempoWorld::Value value;
-    for (double element : v) value.mutable_float_array_value()->add_values(static_cast<float>(element));
+    for (double element : v) value.mutable_float_array_value()->add_values(element);
     return value;
 }
 

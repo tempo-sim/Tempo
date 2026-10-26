@@ -78,7 +78,9 @@ and a default for every one. Name the members you set with C++20 designated init
 order the struct declares them, and leave the rest out: a field added in a later release then gets
 its default rather than breaking the call. A message-typed member is a `std::optional`, so leaving
 it out leaves the field unset. An RPC whose request is `TempoCore.Empty` takes no argument, and a
-deprecated RPC's function is marked `[[deprecated]]`.
+deprecated RPC's function is marked `[[deprecated]]`. The fluent `call()` builder is the exception,
+as in the other clients: `call(actor, component, function)`, then one `*_arg` method per argument
+(see [TempoWorld](../plugins/tempo-world.md#calling-functions)).
 
 ## The reflected API
 

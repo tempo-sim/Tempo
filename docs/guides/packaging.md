@@ -51,13 +51,17 @@ real GPU.
 Packaging also stages the generated client packages, so you can ship them to your users:
 
 ```text
-Packaged/API/Python/tempo-sim/        # Tempo's own services
-Packaged/API/Python/<your-project>/   # your project's services, if any
+Packaged/API/Python/tempo-sim/        # Tempo's own services and the reflected API's runtime
+Packaged/API/Python/<your-project>/   # your project's services and reflected classes
 Packaged/API/Rust/tempo-sim/          # if built with TEMPO_GEN_RUST_API=1
+Packaged/API/Rust/<your-project>/     # likewise
+Packaged/API/Cpp/                     # if built with TEMPO_GEN_CPP_API=1
 ```
 
 See [Python](../clients/python.md#publishing-your-own-package) and
-[Rust](../clients/rust.md#publishing-your-own-crate) for publishing them.
+[Rust](../clients/rust.md#publishing-your-own-crate) for publishing them, [C++](../clients/cpp.md)
+for linking against the C++ client, and [Reflected API](../clients/reflected-api.md#installing) for
+what the project's package carries.
 
 ## Packaging settings
 

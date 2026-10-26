@@ -483,13 +483,11 @@ scalar_value! {
     String => StringValue, "a string";
 }
 
-// Unreal's float and double properties both travel in `float_value`, which is 32-bit on the wire.
-// The typed surface says `f64` for both, because that is what Unreal stores and what every other
-// value type here uses; the narrowing is the wire's, not this crate's.
+// Unreal's float and double properties both travel in `float_value`, a double on the wire.
 impl FromValue for f64 {
     fn from_value(value: &pb::Value) -> Result<Self, TempoError> {
         match variant(value)? {
-            pb::value::Value::FloatValue(inner) => Ok(*inner as f64),
+            pb::value::Value::FloatValue(inner) => Ok(*inner),
             _ => Err(wrong(value, "a float")),
         }
     }
@@ -497,7 +495,7 @@ impl FromValue for f64 {
 
 impl ToValue for f64 {
     fn to_value(&self) -> pb::Value {
-        pb::Value { value: Some(pb::value::Value::FloatValue(*self as f32)) }
+        pb::Value { value: Some(pb::value::Value::FloatValue(*self)) }
     }
 }
 
@@ -798,7 +796,7 @@ impl FromValue for Vec<f64> {
     fn from_value(value: &pb::Value) -> Result<Self, TempoError> {
         match variant(value)? {
             pb::value::Value::FloatArrayValue(inner) | pb::value::Value::FloatSetValue(inner) => {
-                Ok(inner.values.iter().map(|v| *v as f64).collect())
+                Ok(inner.values.clone())
             }
             _ => Err(wrong(value, "a float array or set")),
         }
@@ -809,7 +807,7 @@ impl ToValue for Vec<f64> {
     fn to_value(&self) -> pb::Value {
         pb::Value {
             value: Some(pb::value::Value::FloatArrayValue(pb::FloatArray {
-                values: self.iter().map(|v| *v as f32).collect(),
+                values: self.clone(),
             })),
         }
     }

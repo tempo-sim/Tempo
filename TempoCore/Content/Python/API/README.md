@@ -44,8 +44,33 @@ The API is organized into per-service modules:
 - `tempo_sensors`
 - `tempo_world`
 
-Common helpers (`set_server`, `run_async`) are re-exported at the package root.
+Each wrapper takes its request's fields as keyword arguments, and works from synchronous and
+asynchronous code alike:
+
+```python
+from tempo_sim import tempo_world
+
+rig = tempo_world.spawn_actor(actor_type="BP_SensorRig")
+tempo_world.destroy_actor(actor=rig.name)
+```
+
+Common helpers (`set_server`, `set_socket`, `run_async`) are re-exported at the package root.
 Prefer brevity? `import tempo_sim as tempo`.
+
+## The reflected API
+
+The package also carries the runtime of Tempo's
+[reflected API](https://tempo-sim.readthedocs.io/en/latest/clients/reflected-api/), which reaches a
+build's properties and functions through generated, type-checked classes:
+
+- `tempo_sim.unreal`: Unreal's value types (`FVector`, `FRotator`, `FTransform`, ...), in
+  centimeters, degrees and left-handed, and the handle every generated class is built on.
+- `tempo_sim.world`: finding, spawning and moving actors through those handles.
+- `tempo_sim.conversion`: `ue_to_si` and `si_to_ue`, between Unreal's values and the API's meters,
+  radians and right-handed frame.
+
+The classes themselves are generated per project, from its packaged build, and ship in that
+project's own package (`Packaged/API/Python/<project>/`), which depends on this one.
 
 ## License
 

@@ -44,9 +44,9 @@ consequences worth internalizing:
 Tempo generates two layers for each language:
 
 - **Protobuf/gRPC stubs** — the message types and service stubs `protoc` produces.
-- **A wrapper library** — one function per RPC, with the request's fields flattened into the
-  argument list, so you write `spawn_actor(actor_type="BP_SensorRig")` rather than building a
-  request message and calling a stub method.
+- **A wrapper library** — one function per RPC that takes the request's fields by name, so you
+  write `spawn_actor(actor_type="BP_SensorRig")` rather than opening a channel and calling a stub
+  method.
 
 Both a **synchronous** and an **asynchronous** form is generated, with the same signature.
 
@@ -91,16 +91,18 @@ restriction it implies.
 
 ## Two packages: `tempo-sim` and yours
 
-Tempo's own services generate the publishable **`tempo-sim`** package/crate. If your project
-defines its own services, those generate a **separate project package** (e.g. `tempo-sample`)
-which depends on `tempo-sim` and re-exports its runtime helpers.
+Tempo's own services generate the publishable **`tempo-sim`** package/crate, which also carries
+the runtime the [reflected API](reflected-api.md) is built on (`unreal`, `world` and `conversion`).
+Your project's own services, and the reflected classes of its packaged build, generate a **separate
+project package** (e.g. `tempo-sample`) which depends on `tempo-sim` and re-exports its runtime
+helpers.
 
 ```mermaid
 graph LR
     PROTOS[Your .proto files] --> BUILD[Tempo prebuild]
     TPROTOS[Tempo's .proto files] --> BUILD
-    BUILD --> TS[tempo-sim<br/>Tempo's services]
-    BUILD --> PS[your-project<br/>your services]
+    BUILD --> TS[tempo-sim<br/>Tempo's services, runtime]
+    BUILD --> PS[your-project<br/>your services, reflected classes]
     PS -->|depends on| TS
 ```
 
@@ -111,9 +113,10 @@ project skip the Unreal build entirely by installing the pre-built `tempo-sim` f
 
 !!! warning "The published `tempo-sim` knows only Tempo's built-in services"
 
-    If your project defines its own RPCs, use your generated project package rather than the stock
-    `tempo-sim` — the stock package has no knowledge of them. Also keep the installed `tempo-sim`
-    version matched to the Tempo version your server runs.
+    If your project defines its own RPCs, or you use the reflected API, install your generated
+    project package beside `tempo-sim` — the stock package has no knowledge of your services and
+    holds none of your build's classes. Also keep the installed `tempo-sim` version matched to the
+    Tempo version your server runs.
 
 ## Where to go next
 

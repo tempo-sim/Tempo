@@ -44,8 +44,7 @@ SIMPLE_TYPES = {
     "bool": "bool",
     "int": "i32",
     "int64": "i64",
-    # Unreal's float and double properties both travel in float_value. The typed surface says f64
-    # for both, because that is what Unreal stores; the narrowing is the wire's.
+    # Unreal's float and double properties both travel in float_value, a double.
     "float": "f64",
     "double": "f64",
     "string": "String",

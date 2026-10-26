@@ -8,9 +8,12 @@ Tempo generates both the Python classes for the messages and services in your Pr
 *and* a wrapper library that makes writing client code easy.
 
 - Tempo's own modules end up in the publishable **`tempo_sim`** package (PyPI dist name
-  `tempo-sim`, import name `tempo_sim`).
+  `tempo-sim`, import name `tempo_sim`), with the runtime of the
+  [reflected API](reflected-api.md): `tempo_sim.unreal`, `tempo_sim.world` and
+  `tempo_sim.conversion`.
 - Your project's own service modules end up in a **separate project package** (e.g.
-  `tempo_sample`) that depends on `tempo_sim` and re-exports its runtime helpers.
+  `tempo_sample`) that depends on `tempo_sim` and re-exports its runtime helpers. When the project
+  is packaged, the same package also carries the reflected classes of its build.
 
 Both are installed automatically into a virtual environment at `<project_root>/TempoEnv`.
 
@@ -123,7 +126,7 @@ To share it, publish to [PyPI](https://pypi.org/). After a build with the API ge
 
 ```text
 Packaged/API/Python/tempo-sim/        # Tempo's own services
-Packaged/API/Python/<your-project>/   # your project's services, if any
+Packaged/API/Python/<your-project>/   # your project's services and reflected classes
 ```
 
 Upload them with [twine](https://twine.readthedocs.io/) — `tempo-sim` first, since your project
@@ -148,10 +151,11 @@ pip install "tempo-sim[examples]"   # adds visualization / example-client depend
 
 !!! warning
 
-    The published `tempo-sim` contains only Tempo's own services — it does **not** include custom
-    RPCs you define in your project. If your project defines its own services, generate and use
-    your project package instead. Keep the installed `tempo-sim` version matched to the Tempo
-    version your server runs.
+    The published `tempo-sim` contains only Tempo's own services and the reflected API's runtime —
+    it does **not** include custom RPCs you define in your project, or any project's reflected
+    classes. For those, install your project package from `Packaged/API/Python/<your-project>/`
+    beside it. Keep the installed `tempo-sim` version matched to the Tempo version your server
+    runs.
 
 ## API reference
 

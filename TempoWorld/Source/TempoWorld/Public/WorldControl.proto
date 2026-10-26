@@ -721,7 +721,7 @@ message SetComponentSetPropertyRequest {
 message BoolArray { repeated bool values = 1; }
 message IntArray { repeated int32 values = 1; }
 message Int64Array { repeated int64 values = 1; }
-message FloatArray { repeated float values = 1; }
+message FloatArray { repeated double values = 1; }
 message StringArray { repeated string values = 1; }
 
 // Value-shaped counterparts of the flattened fields on the Set*PropertyRequest
@@ -821,7 +821,8 @@ message Value {
     bool bool_value = 1;
     int32 int_value = 2;
     int64 int64_value = 3;
-    float float_value = 4;
+    // A float or a double property, carried at full double precision either way.
+    double float_value = 4;
     string string_value = 5;
     // Enum value as its symbolic name.
     string enum_value = 6;

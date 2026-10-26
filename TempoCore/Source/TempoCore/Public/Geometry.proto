@@ -32,13 +32,15 @@ message Box {
   Vector max = 2;
 }
 
-// 6-DoF velocity. Linear is m/s, angular is rad/s. Right-handed.
+// 6-DoF velocity. Linear is m/s, angular is rad/s. Right-handed. Angular is the angular velocity
+// vector, by the right-hand rule: a positive z turns counterclockwise seen from above, a left turn.
 message Twist {
   Vector linear = 1;
   Vector angular = 2;
 }
 
-// 6-DoF acceleration. Linear is m/s^2, angular is rad/s^2. Right-handed.
+// 6-DoF acceleration. Linear is m/s^2, angular is rad/s^2. Right-handed. Angular is the angular
+// acceleration vector, by the right-hand rule, as in Twist.
 message Accel {
   Vector linear = 1;
   Vector angular = 2;

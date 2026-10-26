@@ -78,7 +78,7 @@ Nested addressing lets you reach inside structs, arrays and maps, to arbitrary d
 Array indices must be either already present in the array, or exactly one past its end (which
 extends it by one element). Map keys that don't exist yet are inserted. `TSet` elements cannot be
 addressed individually — a set element is its own identity, so there is nothing to address into;
-use `set_*_set_property` to replace the whole set.
+use `set_property` with a `*_set_value` to replace the whole set.
 
 Don't know the names? Ask:
 

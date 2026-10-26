@@ -1934,7 +1934,7 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 			{
 				FRotator ValueRotator;
 				StructProperty->GetValue_InContainer(Container, &ValueRotator);
-				ValueRotator = QuantityConverter<Deg2Rad,L2R>::Convert(ValueRotator);
+				// In degrees, as stored, matching the typed rotator_value this property reads as.
 				*Value = FString::Printf(TEXT("{R:%f, P:%f, Y:%f}"), ValueRotator.Roll, ValueRotator.Pitch, ValueRotator.Yaw);
 			}
 		}
@@ -1944,7 +1944,7 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 			{
 				FColor ValueColor;
 				StructProperty->GetValue_InContainer(Container, &ValueColor);
-				*Value = FString::Printf(TEXT("{R:%d, G:%d, B:%d}"), ValueColor.R, ValueColor.G, ValueColor.B);
+				*Value = FString::Printf(TEXT("{R:%d, G:%d, B:%d, A:%d}"), ValueColor.R, ValueColor.G, ValueColor.B, ValueColor.A);
 			}
 		}
 		else if (StructProperty->Struct->GetStructCPPName() == TEXT("FLinearColor"))
@@ -1953,8 +1953,8 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 			{
 				FLinearColor ValueLinearColor;
 				StructProperty->GetValue_InContainer(Container, &ValueLinearColor);
-				const FColor ValueColor = ValueLinearColor.ToFColor(true);
-				*Value = FString::Printf(TEXT("{R:%d, G:%d, B:%d}"), ValueColor.R, ValueColor.G, ValueColor.B);
+				// Linear and unclamped, matching the typed linear_color_value this property reads as.
+				*Value = FString::Printf(TEXT("{R:%f, G:%f, B:%f, A:%f}"), ValueLinearColor.R, ValueLinearColor.G, ValueLinearColor.B, ValueLinearColor.A);
 			}
 		}
 		else
@@ -2452,11 +2452,9 @@ grpc::Status WritePropertyToValue(const void* Container, const FProperty* Proper
 	}
 	case EValueKind::Double:
 	{
-		// Value carries one floating-point variant, so a double narrows here exactly as it widens
-		// on the way in.
 		double V;
 		CastFieldChecked<FDoubleProperty>(Property)->GetValue_InContainer(Container, &V);
-		OutValue.set_float_value(static_cast<float>(V));
+		OutValue.set_float_value(V);
 		return grpc::Status_OK;
 	}
 	case EValueKind::String:
@@ -2885,6 +2883,14 @@ template <typename PropertyType, typename ValueType>
 grpc::Status SetSinglePropertyValue(void* ValuePtr, PropertyType* Property, const ValueType& Value)
 {
 	Property->SetPropertyValue(ValuePtr, Value);
+	return grpc::Status_OK;
+}
+
+// A Value carries every floating-point number as a double, so a float property takes the nearest float.
+template <>
+grpc::Status SetSinglePropertyValue(void* ValuePtr, FFloatProperty* Property, const double& Value)
+{
+	Property->SetPropertyValue(ValuePtr, static_cast<float>(Value));
 	return grpc::Status_OK;
 }
 
@@ -3891,7 +3897,7 @@ grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target
 	case PropertyValue::kFloatSetValue:
 	{
 		const TempoWorld::FloatArray& Given = Value.has_float_array_value() ? Value.float_array_value() : Value.float_set_value();
-		TArray<float> Array;
+		TArray<double> Array;
 		Array.Append(Given.values().data(), Given.values_size());
 		return SetContainerOnTarget<FDoubleProperty, FFloatProperty>(World, Target, Array);
 	}
@@ -4219,7 +4225,7 @@ template<>
 grpc::Status SetPropertyImpl<SetFloatArrayPropertyRequest>(const UWorld* World, const SetFloatArrayPropertyRequest& Request)
 {
 	PropertyValue Value;
-	*Value.mutable_float_array_value()->mutable_values() = Request.values();
+	Value.mutable_float_array_value()->mutable_values()->Add(Request.values().begin(), Request.values().end());
 	return SetPropertyOnObject(World, Request, Value);
 }
 
@@ -4299,7 +4305,7 @@ template<>
 grpc::Status SetPropertyImpl<SetFloatSetPropertyRequest>(const UWorld* World, const SetFloatSetPropertyRequest& Request)
 {
 	PropertyValue Value;
-	*Value.mutable_float_set_value()->mutable_values() = Request.values();
+	Value.mutable_float_set_value()->mutable_values()->Add(Request.values().begin(), Request.values().end());
 	return SetPropertyOnObject(World, Request, Value);
 }
 

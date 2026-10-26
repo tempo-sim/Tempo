@@ -41,8 +41,8 @@ before anything runs.
 
 Five things about the reflected API catch people out. Each has a section below.
 
-1. **It speaks Unreal's units, not Tempo's.** Centimetres, degrees and a left-handed frame, unlike
-   every other Tempo RPC. Its value types are Unreal's own — `FVector`, `FRotator`,
+1. **It speaks Unreal's units, not Tempo's.** Centimetres, degrees and a left-handed frame, like
+   the property and function RPCs it is built on and unlike the rest of Tempo's API. Its value types are Unreal's own — `FVector`, `FRotator`,
    `FTransform` — shaped as Unreal's are, and `tempo_sim.conversion` converts to and from SI. See
    [Units](#units).
 2. **It comes from your packaged build.** The classes are generated per project, from the build
@@ -68,6 +68,10 @@ The classes are generated from the build they describe, when it is packaged (`Pa
 pip install Packaged/API/Python/tempo-sim/*.whl \
             Packaged/API/Python/tempo-sample/*.whl
 ```
+
+The project's wheel pins the `tempo-sim` version it was generated against, and that version is on
+PyPI, so installing the project's wheel alone fetches `tempo-sim` from there. Only the project's
+package has to come from `Packaged/API`.
 
 They are the `reflected` subpackage of the project's own package, beside its services:
 `tempo_sample.reflected` for TempoSample, `<your_project>.reflected` for yours, there even when the
@@ -232,11 +236,11 @@ hit = results["SweepHitResult"]          # FHitResult
 
 ### Units
 
-**The reflected API is the one corner of the Tempo API that speaks Unreal's own units**:
-centimetres, degrees, left-handed (X forward, Y right, Z up). Every other Tempo RPC speaks metres,
-radians and a right-handed frame (X forward, Y left, Z up). Raw `UPROPERTY` values carry no semantic
-tagging, so converting them would be guesswork, and the reflected API therefore does not convert at
-all.
+**The reflected API speaks Unreal's own units**: centimetres, degrees, left-handed (X forward, Y
+right, Z up), as the [property and function RPCs](../concepts/conventions.md#the-exception-set_property)
+it is built on do. The rest of the Tempo API speaks metres, radians and a right-handed frame (X
+forward, Y left, Z up). Raw `UPROPERTY` values carry no semantic tagging, so converting them would be
+guesswork, and the reflected API therefore does not convert at all.
 
 That covers everything that goes through a reflected class: property reads and writes, function
 arguments and results, struct members, `watch`, batches and snapshots. A `MaxDistance` of `20000.0`

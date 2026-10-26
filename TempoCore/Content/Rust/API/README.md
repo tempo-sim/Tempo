@@ -10,7 +10,7 @@ exposing both synchronous and asynchronous surfaces backed by [tokio](https://cr
 
 ```toml
 [dependencies]
-tempo-sim = "0.1"
+tempo-sim = "0.4"
 ```
 
 ## Quick start
@@ -55,8 +55,24 @@ fn main() -> Result<(), tempo_sim::TempoError> {
 }
 ```
 
-Common helpers (`set_server`, `set_server_async`, `tempo_context`, `TempoContext`,
-`TempoError`, `SyncStreamIterator`) are re-exported at the crate root.
+Common helpers (`set_server`, `set_server_async`, `set_socket`, `set_socket_async`,
+`tempo_context`, `TempoContext`, `TempoError`, `SyncStreamIterator`) are re-exported at the crate
+root.
+
+## The reflected API
+
+The crate also carries the runtime of Tempo's
+[reflected API](https://tempo-sim.readthedocs.io/en/latest/clients/reflected-api/), which reaches a
+build's properties and functions through generated, compiler-checked types:
+
+- `unreal`: Unreal's value types (`FVector`, `FRotator`, `FTransform`, ...), in centimeters,
+  degrees and left-handed, and the handle every generated class is built on.
+- `world`: finding, spawning and moving actors through those handles, and batching.
+- `conversion`: `ue_to_si` and `si_to_ue`, between Unreal's values and the API's meters, radians
+  and right-handed frame.
+
+The classes themselves are generated per project, from its packaged build, and ship in that
+project's own crate (`Packaged/API/Rust/<project>/`), which depends on this one.
 
 ## Documentation
 

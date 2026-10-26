@@ -19,7 +19,9 @@ or Blueprint class, any `UPROPERTY`, any `UFUNCTION` is reachable over the wire.
 
 TempoWorld can **get** (right now) or **stream** (continuously) the state of actors. State
 includes the name, transform, 6-DoF velocity (linear m/s, angular rad/s), 3D bounds, and the
-timestamp when it was captured.
+timestamp when it was captured. The angular velocity is the right-handed angular velocity vector,
+the same one [TempoMovement](tempo-movement.md#velocity-and-acceleration-commands) commands take;
+see [Angular velocity](../concepts/conventions.md#angular-velocity).
 
 ```python
 import tempo_sim.tempo_world as tw
@@ -65,6 +67,7 @@ breakdown — reach for the transform getters in
 `raycast` performs a single ray query against the physics world:
 
 ```python
+import tempo_sim.TempoCore.Geometry_pb2 as Geometry
 import tempo_sim.TempoWorld.WorldState_pb2 as WorldState
 
 hit = tw.raycast(start=Geometry.Vector(x=0.0, y=0.0, z=2.0),
@@ -85,7 +88,8 @@ from the query by name — usually the actor casting the ray.
 
 To spawn, name the `actor_type` — any C++ or Blueprint class in the project, per
 [Class names](../concepts/naming.md#classes). You may also give a transform and an actor to
-interpret it relative to.
+interpret it relative to. The transform's `scale` is applied as given, never composed through that
+actor ([Scale is unitless](../concepts/conventions.md#scale-is-unitless)).
 
 A **deferred** spawn creates the actor in an invisible, unfinished state so you can set its
 properties before finishing:
@@ -300,6 +304,11 @@ Or, more directly:
 tw.get_actor_properties(name="MyActor", include_components=True)
 ```
 
+Each property's `value` is a human-readable string, Unreal-native like everything below: a vector
+reads as `{X:100.000000, Y:0.000000, Z:0.000000}` in centimeters, a rotator in degrees as stored,
+and a color with its alpha, an `FLinearColor` as linear floats. Read a value you mean to act on with
+`get_property`, which returns it typed.
+
 !!! tip "There is a typed alternative"
 
     Everything below addresses properties by string, which nothing can check until the call runs. If
@@ -327,7 +336,7 @@ speed = tempo_world.get_property(actor="MyActor", property="MaxSpeed").float_val
 | `enum_value` | `TEnumAsByte` or raw enum, by name |
 | `int_value` | `int32` (also `int8`/`int16`/`uint16` with range check, and `TEnumAsByte`) |
 | `int64_value` | `int64` (also `uint32`/`uint64` with range check) |
-| `float_value` | `double` or `float` |
+| `float_value` | `double` or `float`, carried at double precision either way |
 | `vector_value` | `FVector` |
 | `vector2d_value` | `FVector2D` |
 | `int_vector_value` | `FIntVector` |
@@ -335,7 +344,7 @@ speed = tempo_world.get_property(actor="MyActor", property="MaxSpeed").float_val
 | `rotator_value` | `FRotator` |
 | `quat_value` | `FQuat` |
 | `native_transform_value` | `FTransform` |
-| `color_value` | `FColor`, or `FLinearColor` given in 8-bit sRGB |
+| `color_value` | `FColor`, or `FLinearColor` given in 8-bit sRGB; an unset alpha `a` means 255 |
 | `linear_color_value` | `FLinearColor` |
 | `class_value` | `UClass*`, `TSubclassOf`, or `TSoftClassPtr` (by name) |
 | `asset_value` | asset, `TSoftObjectPtr` (by path/name); also `TWeakObjectPtr` |
@@ -477,7 +486,7 @@ with one `*_arg` method per supported type:
     #include <tempo.h>
 
     auto result = tempo::tempo_world::call("MyActor", "", "ApplyDamage")
-        .float_arg("Amount", 42.5f)
+        .float_arg("Amount", 42.5)
         .vector_arg("Location", 0.0, 0.0, 150.0)
         .enum_arg("DamageType", "Explosive")
         .actor_arg("Instigator", "BP_Player_C_0")

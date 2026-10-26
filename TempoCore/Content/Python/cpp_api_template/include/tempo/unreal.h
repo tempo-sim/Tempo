@@ -424,9 +424,7 @@ TEMPO_SCALAR_VALUE(std::string, kStringValue, string_value, "a string")
 
 #undef TEMPO_SCALAR_VALUE
 
-// Unreal's float and double properties both travel in float_value, which is 32-bit on the wire. The
-// typed surface says double for both, because that is what Unreal stores; the narrowing is the
-// wire's.
+// Unreal's float and double properties both travel in float_value, a double on the wire.
 template <>
 struct ValueTraits<double> {
 	static Result<double> from(const TempoWorld::Value& value);
