@@ -276,9 +276,10 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "{% endif %}" \
         '    """\n' \
         "\n" \
-        "    def __init__(self):\n" \
+        "    def __init__(self{% if deprecated %}, *, _warn=True{% endif %}):\n" \
         "{% if deprecated %}" \
-        "        warnings.warn(\"{{ deprecated }}\", DeprecationWarning, stacklevel=2)\n" \
+        "        if _warn:\n" \
+        "            warnings.warn(\"{{ deprecated }}\", DeprecationWarning, stacklevel=2)\n" \
         "{% endif %}" \
         "        self._ops = []\n" \
         "\n" \
@@ -313,11 +314,9 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "def batch() -> Batch:\n" \
         '    """Create a new property-set batch builder."""\n' \
         "{% if deprecated %}" \
-        "    # Warns on its caller's behalf, rather than Batch's __init__ warning about this line.\n" \
+        "    # Warns here, so the warning names the caller's line rather than this one.\n" \
         "    warnings.warn(\"{{ deprecated }}\", DeprecationWarning, stacklevel=2)\n" \
-        "    staged = Batch.__new__(Batch)\n" \
-        "    staged._ops = []\n" \
-        "    return staged\n" \
+        "    return Batch(_warn=False)\n" \
         "{% else %}" \
         "    return Batch()\n" \
         "{% endif %}" \
