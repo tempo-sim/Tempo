@@ -96,7 +96,10 @@ Reference implementations: `UTempoTimeServiceSubsystem`, `UTempoCoreServiceSubsy
   ergonomic per-module wrappers with sync + async variants (`tempo_sim.tempo_core`, etc.).
 - Rust (`gen_rust_api.py`, opt-in `TEMPO_GEN_RUST_API=1`) and C++ (`gen_cpp_api.py`) generators.
 - `TempoCore/Scripts/GenAPI.sh` builds/refreshes the `TempoEnv` venv and installs the Python pkg.
-- A `.tempo_prebuild_cache.json` skips unnecessary regeneration.
+- A `.tempo_prebuild_cache.json` skips unnecessary regeneration. Its key does not include the target, so
+  `gen_protos.py` always generates for the project's **editor** target's modules, whatever is being built:
+  a game-target pass that ran uncached would otherwise prune the editor modules' clients as stale,
+  and what a package ships would depend on cache state.
 
 The Python API ships as **two distributions**: the canonical `tempo-sim` (this plugin's
 `TempoCore/Content/Python/API`) and one named after the host project (`tempo-sample`, from the

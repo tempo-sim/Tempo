@@ -21,6 +21,7 @@ from prebuild_cache import PrebuildCache, find_files_filtered
 from gen_naming import (
     INFRA_PACKAGE,
     classify_modules,
+    host_platform_name,
     package_import_name,
     project_package_name,
 )
@@ -217,6 +218,21 @@ class ProtoGenerator:
                 print(f"Warning: Could not parse engine version: {e}", file=sys.stderr)
         return None
 
+    def module_export_target(self):
+        """The target whose modules the protos are generated for: (name, platform, configuration).
+
+        Always the project's editor target, whatever is being built. Its modules include every
+        game-target module, and the clients generated from these protos describe the whole API, the
+        editor's services among them. Generating from the target being built would make what a
+        client holds depend on which target last ran this step uncached: a game build drops the
+        editor modules' outputs as stale. The editor target builds only for the host, and never as
+        Shipping, so it is exported for the host in Development.
+        """
+        for target_file in sorted((self.project_root / "Source").glob("*.Target.cs")):
+            if re.search(r"Type\s*=\s*TargetType\.Editor\b", target_file.read_text(errors="replace")):
+                return target_file.name[:-len(".Target.cs")], host_platform_name(), "Development"
+        return self.target_name, self.target_platform, self.target_config
+
     def export_module_dependencies(self):
         """Run UnrealBuildTool to export module dependency information"""
         dotnet = self.find_dotnet()
@@ -226,14 +242,15 @@ class ProtoGenerator:
             raise RuntimeError(f"UnrealBuildTool not found: {ubt_dll}")
         
         output_file = self.temp_dir / "TempoModules.json"
+        target_name, target_platform, target_config = self.module_export_target()
         
         cmd = [
             str(dotnet),
             str(ubt_dll),
             "-Mode=JsonExport",
-            self.target_name,
-            self.target_platform,
-            self.target_config,
+            target_name,
+            target_platform,
+            target_config,
             f"-Project={self.project_file}",
             f"-OutputFile={output_file}",
             "-NoMutex",
