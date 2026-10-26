@@ -46,7 +46,7 @@ Set it when the owner's origin is not where the vehicle should pivot — a mesh 
 the rear bumper, for instance. `RotationCenter` is also the point whose velocity the motion model
 describes, so it is the point that tracks a commanded speed exactly. It is an *unscaled*
 owner-local offset (the owner's scale applies on top of it), and can be set at runtime with
-`set_vector2d_property`.
+`set_property` and a `vector2d_value`, in centimeters.
 
 For the bicycle model this is independent of `AxleRatio`. `AxleRatio` places the model's reference
 point along the wheelbase (`0` = rear axle, `1` = front axle), which sets the slip angle;

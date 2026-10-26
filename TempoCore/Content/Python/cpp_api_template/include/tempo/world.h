@@ -155,7 +155,7 @@ Result<T> spawn_actor_deferred(const std::optional<Transform>& transform,
 // Each is the tempo_world function of the same name, taking a handle where it takes a name and
 // returning what it returns -- except that what creates a thing hands back a typed handle to it. An
 // optional handle is a pointer, null for none. SI throughout, as tempo_world is: meters, radians,
-// right-handed. A scale is a ratio, and rides beside a transform rather than in it, as it does there.
+// right-handed. A transform's scale is a ratio, and is carried in it as given, as it is there.
 
 Result<void> destroy_actor(const unreal::Handle& actor);
 
@@ -188,8 +188,7 @@ Result<void> activate_component(const unreal::Handle& component);
 Result<void> deactivate_component(const unreal::Handle& component);
 
 Result<void> set_actor_transform(const unreal::Handle& actor, const Transform& transform,
-								 const unreal::Handle* relative_to_actor = nullptr,
-								 const std::optional<Vector>& scale = std::nullopt);
+								 const unreal::Handle* relative_to_actor = nullptr);
 Result<void> set_actor_location(const unreal::Handle& actor, const Vector& location,
 								const unreal::Handle* relative_to_actor = nullptr);
 Result<void> set_actor_rotation(const unreal::Handle& actor, const Rotation& rotation,
@@ -197,8 +196,7 @@ Result<void> set_actor_rotation(const unreal::Handle& actor, const Rotation& rot
 Result<void> set_actor_scale3d(const unreal::Handle& actor, const Vector& scale);
 
 Result<void> set_component_transform(const unreal::Handle& component, const Transform& transform,
-									 bool relative_to_world = false,
-									 const std::optional<Vector>& scale = std::nullopt);
+									 bool relative_to_world = false);
 Result<void> set_component_location(const unreal::Handle& component, const Vector& location,
 									bool relative_to_world = false);
 Result<void> set_component_rotation(const unreal::Handle& component, const Rotation& rotation,

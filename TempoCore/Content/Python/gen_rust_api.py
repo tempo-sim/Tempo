@@ -37,6 +37,26 @@ from gen_common import (
 
 TEMPO_INFRA_CRATE = "tempo_sim"  # Rust ident form of the tempo-sim crate name.
 
+# The request type of an RPC whose wrapper takes no argument.
+EMPTY_MESSAGE = "TempoCore.Empty"
+
+# Where a deprecated RPC's wrapper points its caller.
+MIGRATION_URL = "https://tempo-sim.readthedocs.io/en/latest/migration/v0.4.0/"
+
+# Names a generated module defines or imports itself, which a re-exported request type must not take.
+RESERVED_MODULE_NAMES = {"Batch", "Call", "SyncStreamIterator"}
+
+
+def is_proto3_optional(field):
+    """Whether a field is a proto3 `optional` scalar, which prost makes an `Option<T>`.
+
+    Such a field sits alone in a synthetic oneof named after it. The descriptor's own
+    `is_synthetic` is missing from some protobuf runtimes, so recognize the oneof by its shape.
+    """
+    return (field.label != "repeated"
+            and field.proto_type != gpd.FieldDescriptor.TYPE_MESSAGE
+            and field.containing_oneof == f"_{field.name}")
+
 
 def _crate_prefix_for(target_module_pascal, current_owner, module_owners):
     """Pick the path root for referencing a proto module from inside `current_owner`'s crate.
@@ -155,6 +175,8 @@ def generate_rust_api(module_dirs, tempo_root_dir, project_root_dir, module_owne
     all_enums = {}
     all_messages = {}
     all_services = {}
+    # (module, service, rpc) of every RPC with the `deprecated` method option.
+    deprecated_rpcs = set()
 
     # Track which modules have services (and thus need wrapper generation)
     modules_with_services = set()
@@ -185,6 +207,10 @@ def generate_rust_api(module_dirs, tempo_root_dir, project_root_dir, module_owne
                         if len(services) > 0:
                             modules_with_services.add(tempo_module_name)
                         all_services = all_services | services
+                        for service in module_descriptor.services_by_name.values():
+                            for method in service.methods:
+                                if method.GetOptions().deprecated:
+                                    deprecated_rpcs.add((tempo_module_name, service.name, method.name))
 
     # Resolve type names
     for tempo_message_descriptor in all_messages.values():
@@ -192,89 +218,53 @@ def generate_rust_api(module_dirs, tempo_root_dir, project_root_dir, module_owne
 
     # Jinja2 templates for Rust code generation
 
-    # Shared signature/body fragments. `sig_fields` are the function parameters (one
-    # per proto field, oneof members typed Option<T>); `plain_fields` become direct
-    # prost struct fields; each `oneof_groups` entry collapses its members into the
-    # single Option<Enum> field prost emits for the oneof.
-    sig_params_fragment = '''
-{%- for field in sig_fields %}
-    {{ field.name }}: {{ field.rust_type }},
-{%- endfor %}'''
-
-    oneof_build_fragment = '''
-{%- for oneof in oneof_groups %}
-    let {{ oneof.name }} = {% for variant in oneof.variants %}if let Some(value) = {{ variant.param }} {
-        Some({{ oneof.enum_path }}::{{ variant.variant }}(value))
-    } else {% endfor %}{
-        None
-    };
-{%- endfor %}'''
-
-    struct_init_fragment = '''
-{%- for field in plain_fields %}
-{%- if field.needs_option_wrap %}
-        {{ field.name }}: {{ field.name }}.into(),
-{%- else %}
-        {{ field.name }},
-{%- endif %}
-{%- endfor %}
-{%- for oneof in oneof_groups %}
-        {{ oneof.name }},
-{%- endfor %}'''
-
-    call_args_fragment = '''
-{%- for field in sig_fields %}
-        {{ field.name }},
-{%- endfor %}'''
+    # Each wrapper takes its request message whole, so a field added to a request does not change
+    # the wrapper's signature. One whose request is TempoCore.Empty takes nothing.
+    request_param_fragment = '''{% if takes_request %}request: {{ request_short_type }}{% endif %}'''
+    request_build_fragment = '''{% if not takes_request %}
+    let request = {{ request_rust_type }}::default();{% endif %}'''
+    call_arg_fragment = '''{% if takes_request %}request{% endif %}'''
+    deprecated_fragment = '''{% if deprecated %}
+#[deprecated(note = "{{ rpc.name }} is deprecated; see {{ migration_url }}")]{% endif %}'''
+    allow_deprecated_fragment = '''{% if deprecated %}#[allow(deprecated)]
+    {% endif %}'''
 
     # Template for unary RPC (non-streaming)
     unary_rpc_template = '''
-/// {{ rpc.name }}
-pub async fn {{ name }}_async(''' + sig_params_fragment + '''
-) -> Result<{{ response_rust_type }}, {{ infra }}::TempoError> {
+/// {{ rpc.name }}''' + deprecated_fragment + '''
+pub async fn {{ name }}_async(''' + request_param_fragment + ''') -> Result<{{ response_rust_type }}, {{ infra }}::TempoError> {
     let channel = {{ infra }}::context::connected_channel().await?;
     let mut client = {{ client_type }}::new(channel)
         .max_decoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE)
-        .max_encoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE);
-''' + oneof_build_fragment + '''
-    let request = {{ request_rust_type }} {''' + struct_init_fragment + '''
-    };
+        .max_encoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE);''' + request_build_fragment + '''
 
-    let response = client.{{ method_name }}(request).await?;
+    ''' + allow_deprecated_fragment + '''let response = client.{{ method_name }}(request).await?;
     Ok(response.into_inner())
 }
 
-/// Synchronous version of {{ name }}
-pub fn {{ name }}(''' + sig_params_fragment + '''
-) -> Result<{{ response_rust_type }}, {{ infra }}::TempoError> {
-    {{ infra }}::context::RUNTIME.block_on({{ name }}_async(''' + call_args_fragment + '''
-    ))
+/// Synchronous version of {{ name }}''' + deprecated_fragment + '''
+pub fn {{ name }}(''' + request_param_fragment + ''') -> Result<{{ response_rust_type }}, {{ infra }}::TempoError> {
+    ''' + allow_deprecated_fragment + '''{{ infra }}::context::RUNTIME.block_on({{ name }}_async(''' + call_arg_fragment + '''))
 }
 
 '''
 
     # Template for server-streaming RPC
     streaming_rpc_template = '''
-/// {{ rpc.name }} (server streaming)
-pub async fn {{ name }}_async(''' + sig_params_fragment + '''
-) -> Result<tonic::Streaming<{{ response_rust_type }}>, {{ infra }}::TempoError> {
+/// {{ rpc.name }} (server streaming)''' + deprecated_fragment + '''
+pub async fn {{ name }}_async(''' + request_param_fragment + ''') -> Result<tonic::Streaming<{{ response_rust_type }}>, {{ infra }}::TempoError> {
     let channel = {{ infra }}::context::connected_channel().await?;
     let mut client = {{ client_type }}::new(channel)
         .max_decoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE)
-        .max_encoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE);
-''' + oneof_build_fragment + '''
-    let request = {{ request_rust_type }} {''' + struct_init_fragment + '''
-    };
+        .max_encoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE);''' + request_build_fragment + '''
 
-    let response = client.{{ method_name }}(request).await?;
+    ''' + allow_deprecated_fragment + '''let response = client.{{ method_name }}(request).await?;
     Ok(response.into_inner())
 }
 
-/// Synchronous iterator version of {{ name }}
-pub fn {{ name }}(''' + sig_params_fragment + '''
-) -> Result<impl Iterator<Item = Result<{{ response_rust_type }}, tonic::Status>>, {{ infra }}::TempoError> {
-    let stream = {{ infra }}::context::RUNTIME.block_on({{ name }}_async(''' + call_args_fragment + '''
-    ))?;
+/// Synchronous iterator version of {{ name }}''' + deprecated_fragment + '''
+pub fn {{ name }}(''' + request_param_fragment + ''') -> Result<impl Iterator<Item = Result<{{ response_rust_type }}, tonic::Status>>, {{ infra }}::TempoError> {
+    ''' + allow_deprecated_fragment + '''let stream = {{ infra }}::context::RUNTIME.block_on({{ name }}_async(''' + call_arg_fragment + '''))?;
 
     Ok(SyncStreamIterator::new(stream))
 }
@@ -290,14 +280,18 @@ pub fn {{ name }}(''' + sig_params_fragment + '''
 /// Stages property-set operations and submits them in one SetProperties RPC.
 /// Each method appends an op and returns `self` for fluent chaining; call
 /// [`Batch::execute`] (sync) or [`Batch::execute_async`] (async) to send.
+#[deprecated(note = "SetProperties is deprecated; see {{ migration_url }}")]
 pub struct Batch {
     ops: Vec<{{ op_type }}>,
 }
 
+#[deprecated(note = "SetProperties is deprecated; see {{ migration_url }}")]
+#[allow(deprecated)]
 pub fn batch() -> Batch {
     Batch { ops: Vec::new() }
 }
 
+#[allow(deprecated)]
 impl Batch {
 {%- for method in methods %}
     pub fn {{ method.name }}(
@@ -352,11 +346,12 @@ impl Batch {
 // Auto-generated by gen_rust_api.py. Do not edit.
 
 //! High-level API wrappers for {{ module_name }}.
-
 {% if has_streaming %}
 use {{ infra }}::streaming::SyncStreamIterator;
 {% endif %}
-
+{% for path in reexports -%}
+pub use {{ path }};
+{% endfor %}
 '''
 
     # Template for a Call struct that stages typed CallFunction arguments. One method per
@@ -373,23 +368,14 @@ pub struct Call {
     component: String,
     function: String,
     args: Vec<{{ arg_type }}>,
-    native_units: bool,
     subsystem: String,
 }
 
 pub fn call(actor: String, component: String, function: String) -> Call {
-    Call { actor, component, function, args: Vec::new(), native_units: false, subsystem: String::new() }
+    Call { actor, component, function, args: Vec::new(), subsystem: String::new() }
 }
 
 impl Call {
-    /// Pass arguments in Unreal's own units (centimeters, degrees, left-handed) instead of the
-    /// API's meters/radians/right-handed convention. Affects rotator, quaternion and transform
-    /// arguments; the rest are never converted either way.
-    pub fn native_units(mut self, native_units: bool) -> Self {
-        self.native_units = native_units;
-        self
-    }
-
     /// Call the function on a subsystem rather than an actor: its class, by path or name. The
     /// actor and component given to [`call`] must then be empty.
     pub fn subsystem(mut self, subsystem: String) -> Self {
@@ -412,7 +398,11 @@ impl Call {
 {%- if method.wrapper_rust_type %}
                     {{ method.wrapper_rust_type }} {
 {%- for field in method.fields %}
+{%- if field.optional %}
+                        {{ field.name }}: {{ field.name }}.into(),
+{%- else %}
                         {{ field.name }},
+{%- endif %}
 {%- endfor %}
                     }
 {%- else %}
@@ -439,7 +429,6 @@ impl Call {
             component: self.component,
             function: self.function,
             args: self.args,
-            native_units: self.native_units,
             subsystem: self.subsystem,
         };
         let response = client.call_function(request).await?;
@@ -485,6 +474,20 @@ impl Call {
 
             has_streaming = False
             rpc_code = []
+            # Short name -> path of each request type this module's wrappers take, re-exported so a
+            # caller can build one without reaching into `proto`.
+            reexports = {}
+
+            def reexport(short_name, path):
+                if short_name in RESERVED_MODULE_NAMES:
+                    raise RuntimeError(
+                        f"{rust_module_name}: request type {short_name} would shadow the module's own "
+                        f"{short_name}")
+                existing = reexports.setdefault(short_name, path)
+                if existing != path:
+                    raise RuntimeError(
+                        f"{rust_module_name}: two request types are both named {short_name} "
+                        f"({existing} and {path}), so both cannot be re-exported. Rename one.")
 
             for tempo_service_descriptor in service_descriptors:
                 for rpc_descriptor in tempo_service_descriptor.rpcs:
@@ -508,49 +511,11 @@ impl Call {
                         f"{tempo_service_descriptor.object_name}Client",
                     )
 
-                    # Build the function signature, the plain prost struct fields,
-                    # and one collapsed Option<Enum> assignment per oneof. prost emits
-                    # a oneof as a single field named after the oneof; members become
-                    # enum variants, so they're function params (Option<T>) but not
-                    # direct struct fields.
-                    sig_fields = []
-                    plain_fields = []
-                    oneof_groups = {}
-                    request_module_pascal = tempo_request_descriptor.module_name.split(".")[0]
-                    request_msg_snake = prost_to_snake(tempo_request_descriptor.object_name)
-                    for field in tempo_request_descriptor.fields:
-                        field.rust_type = get_rust_type(field, owner, module_owners)
-                        field.needs_option_wrap = needs_option_wrap(field)
-                        if field.label == "repeated":
-                            field.rust_type = f"Vec<{field.rust_type}>"
-                        if field.containing_oneof is not None:
-                            sig_fields.append({
-                                "name": field.name,
-                                "rust_type": f"Option<{field.rust_type}>",
-                            })
-                            group = oneof_groups.setdefault(field.containing_oneof, {
-                                "name": field.containing_oneof,
-                                "enum_path": _crate_path(
-                                    owner, request_module_pascal,
-                                    f"{request_msg_snake}::"
-                                    f"{snake_to_upper_camel(field.containing_oneof)}",
-                                ),
-                                "variants": [],
-                            })
-                            group["variants"].append({
-                                "param": field.name,
-                                "variant": snake_to_upper_camel(field.name),
-                            })
-                        else:
-                            # Message fields are Option<T> in prost, so accept
-                            # `impl Into<Option<T>>`: callers can pass a bare `T`,
-                            # `Some(T)`, or `None` (e.g. a component with no transform).
-                            if field.needs_option_wrap:
-                                param_type = f"impl Into<Option<{field.rust_type}>>"
-                            else:
-                                param_type = field.rust_type
-                            sig_fields.append({"name": field.name, "rust_type": param_type})
-                            plain_fields.append(field)
+                    takes_request = rpc_descriptor.request_type != EMPTY_MESSAGE
+                    if takes_request:
+                        reexport(tempo_request_descriptor.object_name, request_rust_type)
+                    deprecated = (service_module_pascal, tempo_service_descriptor.object_name,
+                                  rpc_descriptor.name) in deprecated_rpcs
 
                     if rpc_descriptor.server_streaming:
                         has_streaming = True
@@ -562,11 +527,10 @@ impl Call {
                         infra=infra,
                         name=pascal_to_snake(rpc_descriptor.name),
                         rpc=rpc_descriptor,
-                        request=tempo_request_descriptor,
-                        sig_fields=sig_fields,
-                        plain_fields=plain_fields,
-                        oneof_groups=list(oneof_groups.values()),
-                        response=tempo_response_descriptor,
+                        takes_request=takes_request,
+                        deprecated=deprecated,
+                        migration_url=MIGRATION_URL,
+                        request_short_type=tempo_request_descriptor.object_name,
                         request_rust_type=request_rust_type,
                         response_rust_type=response_rust_type,
                         client_type=client_type,
@@ -630,6 +594,7 @@ impl Call {
                 batch_tpl = j2_environment.from_string(batch_template)
                 rpc_code.append(batch_tpl.render(
                     infra=infra,
+                    migration_url=MIGRATION_URL,
                     methods=methods,
                     op_type=op_type,
                     op_enum_path=op_enum_path,
@@ -666,7 +631,7 @@ impl Call {
                 # check for one here: the alternative is an E0063 in generated Rust that points at
                 # the output instead of at this template.
                 call_request_desc = all_messages[call_rpc.request_type]
-                modelled_fields = {"actor", "component", "function", "args", "native_units", "subsystem"}
+                modelled_fields = {"actor", "component", "function", "args", "subsystem"}
                 actual_fields = {field.name for field in call_request_desc.fields}
                 if actual_fields != modelled_fields:
                     raise Exception(
@@ -696,9 +661,14 @@ impl Call {
                             f.proto_type != gpd.FieldDescriptor.TYPE_MESSAGE for f in wrapper_desc.fields):
                         method_fields = []
                         for field in wrapper_desc.fields:
+                            field = copy.copy(field)
                             field.rust_type = get_rust_type(field, owner, module_owners)
+                            field.optional = is_proto3_optional(field)
                             if field.label == "repeated":
                                 field.rust_type = f"Vec<{field.rust_type}>"
+                            elif field.optional:
+                                # prost makes a proto3 `optional` an Option; accept a bare value too.
+                                field.rust_type = f"impl Into<Option<{field.rust_type}>>"
                             method_fields.append(field)
                         wrapper_rust_type = _crate_path(
                             owner, wrapper_desc.module_name.split(".")[0], wrapper_desc.object_name)
@@ -739,6 +709,7 @@ impl Call {
                         infra=infra,
                         module_name=tempo_module_name,
                         has_streaming=has_streaming,
+                        reexports=[reexports[name] for name in sorted(reexports)],
                     ))
                     for code in rpc_code:
                         f.write(code)

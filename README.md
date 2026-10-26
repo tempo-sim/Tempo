@@ -102,11 +102,12 @@ With your project open in Unreal Editor, activate the Tempo virtual environment 
 ```python
 import tempo_sim.tempo_core_editor as tce
 import tempo_sim.tempo_world as tw
+from tempo_sim.TempoWorld.WorldControl_pb2 import Value
 
 tce.play_in_editor()                            # Simulation should begin
 tw.spawn_actor(actor_type="BP_SensorRig")       # A tripod with a TempoCamera on top appears
-tw.set_float_property(actor="BP_SensorRig", component="TempoCamera",
-                      property="FOVAngle", value=60.0)
+tw.set_property(actor="BP_SensorRig", component="TempoCamera",
+                property="FOVAngle", value=Value(float_value=60.0))
 ```
 
 > [!NOTE]

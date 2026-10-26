@@ -110,7 +110,7 @@ namespaced under their distribution, so clients import `tempo_sim.TempoSensors` 
 truth for a second, independent pipeline, the **reflected API**, that generates a typed class per
 Unreal class (Python, Rust and C++), so a
 scenario writes `truck.MaxSpeed = 1200.0` instead of
-`set_float_property(actor=..., property="MaxSpeed", ...)`. Its purpose is **drift detection**: when a
+`set_property(actor=..., property="MaxSpeed", value=...)`. Its purpose is **drift detection**: when a
 release regenerates it, a scenario using a property that was removed, retyped or made read-only
 fails under Pyright instead of at runtime. See `TYPED_WORLD_API_PLAN.md`.
 
@@ -277,9 +277,20 @@ committed; fetched.
   subsystems are `U<Domain>ServiceSubsystem`.
 - **Units / frames at the API boundary**: internally Unreal is cm, degrees, left-handed.
   Proto APIs are **meters, radians, right-handed**. Conversions go through
-  `TempoConversion.h` (`QuantityConverter<CM2M, L2R>`, etc.). Note the documented exception:
-  scalar `set_float_property` / vector `set_*_property` do **not** auto-convert (only
-  transforms do) — they take Unreal-native units.
+  `TempoConversion.h` (`QuantityConverter<CM2M, L2R>`, etc.). The documented exception: the
+  RPCs that carry a `Value` (`SetProperty`, `GetProperty(ies)`, `StreamProperty`, `CallFunction`,
+  `RunBatch`) are always Unreal-native and convert nothing. The 38 typed `Set*Property` RPCs and
+  `SetProperties`, deprecated in v0.4.0, keep their old mixed rule (rotators, quats and transforms
+  converted, scalars and vectors raw) by converting at their entry point into the native path.
+- **Transforms carry their scale**: `TempoCore.Transform.scale` is unset-means-(1,1,1) on input, and
+  every transform the server reports sets it. The separate `scale` fields on
+  `SetActorTransformRequest` / `SetComponentTransformRequest` / `GetTransformResponse` are
+  deprecated.
+- **Client wrappers must survive a new proto field.** Python wrappers take keyword arguments; Rust
+  wrappers take the request message (build it with `..Default::default()`); C++ wrappers take a
+  generated `<Name>Args` aggregate (designated initializers). Never generate one positional
+  parameter per field: that made every appended field a breaking change. RPCs with
+  `option deprecated = true` get a language-level deprecation in all three.
 - **Actor identity over RPC**: use `UTempoCoreUtils::GetActorIdentifier`, *not*
   `GetActorNameOrLabel` (editor label race adds/drops `_C`). See `actor_identifier_rpc_naming`
   memory.
@@ -294,17 +305,18 @@ committed; fetched.
   binding, so a bind alone would not fail the way a taken port does.
 - **Units in the reflected API**: the one place in Tempo that is **Unreal-native** — centimetres,
   degrees, left-handed. Raw `UPROPERTY` values carry no semantic tagging, so converting them is
-  guesswork. That is what `native_units` on `GetProperty`/`SetProperty`/`CallFunction` selects, and
+  guesswork. That is why the property and function RPCs convert nothing, and
   why the runtime's value types are Unreal's own, named and shaped as Unreal's are (`FVector`,
   `FRotator` in pitch-yaw-roll order, `FTransform` with its quaternion and scale, `FColor` with
   alpha, `FLinearColor` in float) — never `Vector`, which is `TempoCore.Geometry_pb2.Vector`, metres
-  and right-handed. Under `native_units` a transform travels as `native_transform_value` and an
-  `FLinearColor` as `linear_color_value`, since `TempoCore.Transform` has no scale; `world` mirrors
-  `tempo_world` and speaks SI, re-exporting its types.
+  and right-handed. A transform travels as `native_transform_value` and an `FLinearColor` as
+  `linear_color_value`; `world` mirrors `tempo_world` and speaks SI, re-exporting its types.
   `tempo_sim.conversion` / `tempo_sim::conversion` convert between the two (`ue_to_si`,
   `si_to_ue`, overloaded on the type) with the server's own `TempoConversion.h` rules; a vector
-  is taken to be a length, and a direction has its own handedness-only pair. Don't re-derive the
-  rule anywhere else in the clients.
+  is taken to be a length, and a direction has its own handedness-only pair; an `FQuat` converts
+  exactly to a `Quat`, and a transform's scale passes through. Don't re-derive the rule anywhere
+  else in the clients. (There is no scalar-angle or angular-velocity conversion: the sign of an
+  angle depends on its axis.)
 - **Blueprint exposure is how a Tempo class declares its public scenario API.** The reflected API
   is walked with `bBlueprintAccessibleOnly`, so a property reaches it only when it is
   declared `BlueprintReadWrite` (writable) or `BlueprintReadOnly` (read-only); `VisibleAnywhere` or

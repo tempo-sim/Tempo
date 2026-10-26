@@ -67,8 +67,12 @@ Both a **synchronous** and an **asynchronous** form is generated, with the same 
     ```rust
     use tempo_sim::tempo_world;
 
-    tempo_world::spawn_actor(/* … */)?;                // sync
-    tempo_world::spawn_actor_async(/* … */).await?;    // async — `_async` suffix
+    let request = tempo_world::SpawnActorRequest {
+        actor_type: "BP_SensorRig".into(),
+        ..Default::default()
+    };
+    tempo_world::spawn_actor(request.clone())?;        // sync
+    tempo_world::spawn_actor_async(request).await?;    // async — `_async` suffix
     ```
 
 === "C++"
@@ -76,11 +80,13 @@ Both a **synchronous** and an **asynchronous** form is generated, with the same 
     ```cpp
     #include <tempo.h>
 
-    auto result = tempo::tempo_world::spawn_actor("BP_SensorRig");
+    auto result = tempo::tempo_world::spawn_actor({.actor_type = "BP_SensorRig"});
     ```
 
-The service name does not appear in the function name — nor does the file name or the proto
-package. See [RPC names](../concepts/naming.md#rpc-names) for the exact rule, and the one
+Python takes the request's fields as keyword arguments, Rust takes the request message, and C++
+takes a generated `Args` struct — in every case naming only the fields you set, so a field added in
+a later release never breaks a call. The service name does not appear in the function name — nor
+does the file name or the proto package. See [RPC names](../concepts/naming.md#rpc-names) for the exact rule, and the one
 restriction it implies.
 
 ## Two packages: `tempo-sim` and yours

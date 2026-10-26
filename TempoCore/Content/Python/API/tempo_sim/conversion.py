@@ -1,7 +1,7 @@
 # Copyright Tempo Simulation, LLC. All Rights Reserved
 #
 # Conversions between the reflected API's values, which are Unreal's own (centimeters, degrees,
-# left-handed), and the TempoCore geometry messages the rest of Tempo's API speaks (meters, radians,
+# left-handed), and the geometry messages the rest of Tempo's API speaks (meters, radians,
 # right-handed).
 #
 # The typed API does not convert on its own, because a raw UPROPERTY does not say what it measures
@@ -12,18 +12,23 @@
 #   FVector       <-> Vector      a length: cm <-> m, Y negated
 #   FVector2D     <-> Vector2D    likewise
 #   FRotator      <-> Rotation    degrees <-> radians, pitch and yaw negated, roll kept
-#   FQuat          -> Rotation    as the FRotator Unreal's FQuat::Rotator() makes of it
-#   FTransform    <-> Transform   its translation and rotation, each as above; see below for scale
+#   FQuat         <-> Quat        TempoWorld.Quat: X and Z negated, Y and W kept
+#   FTransform    <-> Transform   its translation and rotation as above, its scale as it is
 #
 # A rate converts as its quantity does, so a velocity in cm/s is a length here. A vector that is
 # not a length at all -- a direction, a normal, a unit axis -- must not be scaled, so it has
 # functions of its own, ue_direction_to_si and si_direction_to_ue, which change the handedness and
 # nothing else. Likewise an angle on its own is not converted here: a bare float is a length.
 #
-# TempoCore.Transform has no scale -- Tempo's RPCs carry a scale beside a transform, never in one --
-# so ue_to_si drops an FTransform's, and si_to_ue makes one of scale 1. Its rotation is a
-# quaternion, and goes through the rotator Unreal itself would make of it, by Unreal's own
-# formulas, reproduced below.
+# A quaternion keeps its shape: ue_to_si makes a right-handed TempoWorld.Quat of an FQuat, and
+# si_to_ue the reverse. A Rotation is Euler angles, so the way from an FQuat to one goes through the
+# rotator Unreal itself would make of it, by Unreal's own formulas, reproduced below:
+#
+#   ue_to_si(rotator_of(quat))
+#
+# An FTransform's rotation goes the same way into a Transform's Euler angles, and back through
+# quat_of. A scale is a ratio, so it passes through unconverted; a Transform whose scale is unset
+# becomes an FTransform of scale (1, 1, 1), as the server reads one.
 #
 # FIntVector, FIntPoint, FColor and FLinearColor have no TempoCore counterpart, so nothing here
 # converts them.
@@ -36,6 +41,7 @@ from .unreal import FQuat, FRotator, FTransform, FVector, FVector2D
 
 if TYPE_CHECKING:
     from .TempoCore.Geometry_pb2 import Rotation, Transform, Vector, Vector2D
+    from .TempoWorld.WorldControl_pb2 import Quat
 
 _CM_PER_M = 100.0
 
@@ -46,6 +52,12 @@ def _geometry():
     # them; it is only importable once they exist.)
     import tempo_sim.TempoCore.Geometry_pb2 as Geometry
     return Geometry
+
+
+def _quat_type():
+    # Imported on first use, as _geometry is.
+    from tempo_sim.TempoWorld.WorldControl_pb2 import Quat
+    return Quat
 
 
 def _normalize_axis(degrees):
@@ -99,7 +111,7 @@ def ue_to_si(value: FVector2D) -> "Vector2D": ...
 @overload
 def ue_to_si(value: FRotator) -> "Rotation": ...
 @overload
-def ue_to_si(value: FQuat) -> "Rotation": ...
+def ue_to_si(value: FQuat) -> "Quat": ...
 @overload
 def ue_to_si(value: FTransform) -> "Transform": ...
 
@@ -121,11 +133,12 @@ def ue_to_si(value):
         return geometry.Rotation(r=math.radians(value.Roll), p=-math.radians(value.Pitch),
                                  y=-math.radians(value.Yaw))
     if isinstance(value, FQuat):
-        return ue_to_si(rotator_of(value))
+        return _quat_type()(x=-value.X, y=value.Y, z=-value.Z, w=value.W)
     if isinstance(value, FTransform):
-        # TempoCore.Transform has no scale; see the top of this module.
         return geometry.Transform(location=ue_to_si(value.Translation),
-                                  rotation=ue_to_si(value.Rotation))
+                                  rotation=ue_to_si(rotator_of(value.Rotation)),
+                                  scale=geometry.Vector(x=value.Scale3D.X, y=value.Scale3D.Y,
+                                                        z=value.Scale3D.Z))
     raise TypeError("ue_to_si takes a float, FVector, FVector2D, FRotator, FQuat or FTransform, "
                     "not {}".format(type(value).__name__))
 
@@ -139,6 +152,8 @@ def si_to_ue(value: "Vector2D") -> FVector2D: ...
 @overload
 def si_to_ue(value: "Rotation") -> FRotator: ...
 @overload
+def si_to_ue(value: "Quat") -> FQuat: ...
+@overload
 def si_to_ue(value: "Transform") -> FTransform: ...
 
 
@@ -146,7 +161,7 @@ def si_to_ue(value):
     """A TempoCore message as the Unreal value for the same quantity.
 
     A float or a vector is taken to be a length; use si_direction_to_ue for a vector that is not. A
-    Transform becomes an FTransform of scale 1, since it carries none.
+    Transform whose scale is unset becomes an FTransform of scale (1, 1, 1).
     """
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return value * _CM_PER_M
@@ -158,11 +173,15 @@ def si_to_ue(value):
     if isinstance(value, geometry.Rotation):
         return FRotator(Pitch=-math.degrees(value.p), Yaw=-math.degrees(value.y),
                         Roll=math.degrees(value.r))
+    if isinstance(value, _quat_type()):
+        return FQuat(X=-value.x, Y=value.y, Z=-value.z, W=value.w)
     if isinstance(value, geometry.Transform):
+        scale = (FVector(X=value.scale.x, Y=value.scale.y, Z=value.scale.z)
+                 if value.HasField("scale") else FVector(X=1.0, Y=1.0, Z=1.0))
         return FTransform(Rotation=quat_of(si_to_ue(value.rotation)),
-                          Translation=si_to_ue(value.location))
-    raise TypeError("si_to_ue takes a float or a TempoCore Vector, Vector2D, Rotation or "
-                    "Transform, not {}".format(type(value).__name__))
+                          Translation=si_to_ue(value.location), Scale3D=scale)
+    raise TypeError("si_to_ue takes a float, a TempoCore Vector, Vector2D, Rotation or Transform, "
+                    "or a TempoWorld Quat, not {}".format(type(value).__name__))
 
 
 def ue_direction_to_si(value: FVector) -> "Vector":

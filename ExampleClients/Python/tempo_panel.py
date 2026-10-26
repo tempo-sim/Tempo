@@ -30,6 +30,8 @@ import gradio as gr
 
 import tempo_sim
 import tempo_sim.tempo_world as tw
+import tempo_sim.TempoCore.Geometry_pb2 as Geometry
+import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
 
 
 class AsyncBridge:
@@ -209,9 +211,9 @@ def _type_hint(property_type: str) -> str:
     """A short parenthetical telling the user the expected input format."""
     t = property_type.lower().strip()
     if t == "vector":
-        return " (X Y Z)"
+        return " (X Y Z, centimeters)"
     if t == "rotator":
-        return " (Roll Pitch Yaw)"
+        return " (Roll Pitch Yaw, degrees)"
     if t == "color":
         return " (R G B, 0-255)"
     if t.endswith("[]"):
@@ -239,88 +241,81 @@ def _error_text(exc) -> str:
     return str(exc)
 
 
-def apply_property(submit, actor, component, name, property_type, value_text):
-    """Parse `value_text` per `property_type` and call the matching typed setter
-    through `submit` (e.g. ``AsyncBridge.submit``). Returns a status string.
-
-    `property_type` is a TempoWorld type ("vector", "float[]", ...) for a
-    top-level property, or an inferred scalar type for a struct member / array
-    element reached by a dotted `name` path. Mirrors WorldPlayground.py's
-    ``set_property_value`` so the GUI and CLI accept the same inputs.
-    """
-    kwargs = dict(actor=actor, component=component, property=name)
-    try:
-        t = property_type.lower().strip()
-
-        # Array types — comma-separated values.
-        if t.endswith("[]"):
-            _apply_array_property(submit, t[:-2], kwargs, value_text)
-        elif t == "bool":
-            submit(tw.set_bool_property, **kwargs, value=_parse_bool(value_text))
-        elif t == "string":
-            submit(tw.set_string_property, **kwargs, value=value_text)
-        elif t == "enum":
-            submit(tw.set_enum_property, **kwargs, value=value_text)
-        elif t in ("int", "int32", "int64"):
-            submit(tw.set_int_property, **kwargs, value=int(value_text))
-        elif t in ("float", "double"):
-            submit(tw.set_float_property, **kwargs, value=float(value_text))
-        elif t == "vector":
-            x, y, z = _three(value_text, "Vector requires 3 values: X Y Z")
-            submit(tw.set_vector_property, **kwargs, x=float(x), y=float(y), z=float(z))
-        elif t == "rotator":
-            r, p, y = _three(value_text, "Rotator requires 3 values: Roll Pitch Yaw")
-            submit(tw.set_rotator_property, **kwargs, r=float(r), p=float(p), y=float(y))
-        elif t == "color":
-            r, g, b = _three(value_text, "Color requires 3 values: R G B (0-255)")
-            submit(tw.set_color_property, **kwargs, r=int(r), g=int(g), b=int(b))
-        elif t == "class":
-            submit(tw.set_class_property, **kwargs, value=value_text)
-        elif t == "asset":
-            submit(tw.set_asset_property, **kwargs, value=value_text)
-        elif t == "actor":
-            submit(tw.set_actor_property, **kwargs, value=value_text)
-        elif t == "component":
-            submit(tw.set_component_property, **kwargs, value=value_text)
-        else:
-            # Unknown scalar — best effort as a string (matches the CLI).
-            submit(tw.set_string_property, **kwargs, value=value_text)
-
-        return f"✓ set {name} = {value_text}"
-    except Exception as exc:  # gRPC errors, parse errors
-        return f"✗ error setting {name}: {_error_text(exc)}"
+# The Value variant an array of each element type travels in, and how one element parses.
+_ARRAY_VARIANTS = {
+    "bool": ("bool_array_value", _parse_bool),
+    "string": ("string_array_value", str),
+    "enum": ("enum_array_value", str),
+    "int": ("int_array_value", int),
+    "int32": ("int_array_value", int),
+    "int64": ("int64_array_value", int),
+    "float": ("float_array_value", float),
+    "double": ("float_array_value", float),
+    "class": ("class_array_value", str),
+    "asset": ("asset_array_value", str),
+    "actor": ("actor_array_value", str),
+    "component": ("component_array_value", str),
+}
 
 
-def _three(value_text, message):
+def _three(value_text, message, kind=float):
     parts = value_text.split()
     if len(parts) != 3:
         raise ValueError(message)
-    return parts
+    return [kind(part) for part in parts]
 
 
-def _apply_array_property(submit, base_type, kwargs, value_text):
-    """Set a whole array property from comma-separated `value_text`."""
-    parts = [v.strip() for v in value_text.split(",")]
-    if base_type == "bool":
-        submit(tw.set_bool_array_property, **kwargs, values=[_parse_bool(v) for v in parts])
-    elif base_type == "string":
-        submit(tw.set_string_array_property, **kwargs, values=parts)
-    elif base_type == "enum":
-        submit(tw.set_enum_array_property, **kwargs, values=parts)
-    elif base_type in ("int", "int32", "int64"):
-        submit(tw.set_int_array_property, **kwargs, values=[int(v) for v in parts])
-    elif base_type in ("float", "double"):
-        submit(tw.set_float_array_property, **kwargs, values=[float(v) for v in parts])
-    elif base_type == "class":
-        submit(tw.set_class_array_property, **kwargs, values=parts)
-    elif base_type == "asset":
-        submit(tw.set_asset_array_property, **kwargs, values=parts)
-    elif base_type == "actor":
-        submit(tw.set_actor_array_property, **kwargs, values=parts)
-    elif base_type == "component":
-        submit(tw.set_component_array_property, **kwargs, values=parts)
-    else:
-        submit(tw.set_string_array_property, **kwargs, values=parts)
+def parse_value(property_type, value_text):
+    """Parse `value_text` per `property_type` into the Value ``set_property`` takes.
+
+    A Value is in Unreal's own units, as the property stores it: centimeters,
+    degrees, left-handed. Mirrors WorldPlayground.py's ``parse_value`` so the
+    GUI and CLI accept the same inputs.
+    """
+    t = property_type.lower().strip()
+
+    # Array types — comma-separated values. An unknown element type goes as strings.
+    if t.endswith("[]"):
+        variant, parse = _ARRAY_VARIANTS.get(t[:-2], ("string_array_value", str))
+        values = [parse(v.strip()) for v in value_text.split(",")]
+        return WorldControl.Value(**{variant: {"values": values}})
+    if t == "bool":
+        return WorldControl.Value(bool_value=_parse_bool(value_text))
+    if t in ("int", "int32"):
+        return WorldControl.Value(int_value=int(value_text))
+    if t == "int64":
+        return WorldControl.Value(int64_value=int(value_text))
+    if t in ("float", "double"):
+        return WorldControl.Value(float_value=float(value_text))
+    if t == "vector":
+        x, y, z = _three(value_text, "Vector requires 3 values: X Y Z (centimeters)")
+        return WorldControl.Value(vector_value=Geometry.Vector(x=x, y=y, z=z))
+    if t == "rotator":
+        r, p, y = _three(value_text, "Rotator requires 3 values: Roll Pitch Yaw (degrees)")
+        return WorldControl.Value(rotator_value=Geometry.Rotation(r=r, p=p, y=y))
+    if t == "color":
+        r, g, b = _three(value_text, "Color requires 3 values: R G B (0-255)", int)
+        return WorldControl.Value(color_value=WorldControl.Color(r=r, g=g, b=b))
+    if t in ("string", "enum", "class", "asset", "actor", "component"):
+        return WorldControl.Value(**{t + "_value": value_text})
+    # Unknown scalar — best effort as a string (matches the CLI).
+    return WorldControl.Value(string_value=value_text)
+
+
+def apply_property(submit, actor, component, name, property_type, value_text):
+    """Parse `value_text` per `property_type` and call ``set_property`` through
+    `submit` (e.g. ``AsyncBridge.submit``). Returns a status string.
+
+    `property_type` is a TempoWorld type ("vector", "float[]", ...) for a
+    top-level property, or an inferred scalar type for a struct member / array
+    element reached by a dotted `name` path.
+    """
+    try:
+        submit(tw.set_property, actor=actor, component=component, property=name,
+               value=parse_value(property_type, value_text))
+        return f"✓ set {name} = {value_text}"
+    except Exception as exc:  # gRPC errors, parse errors
+        return f"✗ error setting {name}: {_error_text(exc)}"
 
 
 # ---------------------------------------------------------------------------

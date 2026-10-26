@@ -426,7 +426,6 @@ fn variant_name(value: &pb::value::Value) -> &'static str {
         V::IntPointValue(_) => "int_point_value",
         V::RotatorValue(_) => "rotator_value",
         V::QuatValue(_) => "quat_value",
-        V::TransformValue(_) => "transform_value",
         V::ColorValue(_) => "color_value",
         V::ClassValue(_) => "class_value",
         V::AssetValue(_) => "asset_value",
@@ -582,8 +581,8 @@ impl ToValue for FIntPoint {
 }
 
 // Carried in a message whose fields are named for radians and right-handed degrees, because that
-// is what every other RPC puts there. With `native_units` set the server does not convert, so
-// these are Unreal's own degrees, and r/p/y are roll, pitch and yaw by name.
+// is what every other RPC puts there. A Value is never converted, so these are Unreal's own
+// degrees, and r/p/y are roll, pitch and yaw by name.
 impl FromValue for FRotator {
     fn from_value(value: &pb::Value) -> Result<Self, TempoError> {
         match variant(value)? {
@@ -606,11 +605,11 @@ impl ToValue for FRotator {
 }
 
 fn quat_from(v: &pb::Quat) -> FQuat {
-    FQuat { x: v.x as f64, y: v.y as f64, z: v.z as f64, w: v.w as f64 }
+    FQuat { x: v.x, y: v.y, z: v.z, w: v.w }
 }
 
 fn quat_to(q: &FQuat) -> pb::Quat {
-    pb::Quat { x: q.x as f32, y: q.y as f32, z: q.z as f32, w: q.w as f32 }
+    pb::Quat { x: q.x, y: q.y, z: q.z, w: q.w }
 }
 
 impl FromValue for FQuat {
@@ -669,7 +668,7 @@ impl FromValue for FColor {
                 r: c.r as u8,
                 g: c.g as u8,
                 b: c.b as u8,
-                a: c.a as u8,
+                a: c.a.map_or(255, |a| a as u8),
             }),
             _ => Err(wrong(value, "a color")),
         }
@@ -683,7 +682,7 @@ impl ToValue for FColor {
                 r: self.r as i32,
                 g: self.g as i32,
                 b: self.b as i32,
-                a: self.a as i32,
+                a: Some(self.a as i32),
             })),
         }
     }
@@ -1285,7 +1284,8 @@ fn flush(queued: Vec<Queued>) -> Result<(), TempoError> {
         return Ok(());
     }
     let ops = queued.iter().map(|queued| queued.op.clone()).collect();
-    settle(queued, crate::tempo_world::run_batch(ops, true))
+    let request = pb::RunBatchRequest { ops, stop_on_failure: true };
+    settle(queued, crate::tempo_world::run_batch(request))
 }
 
 async fn flush_async(queued: Vec<Queued>) -> Result<(), TempoError> {
@@ -1293,7 +1293,8 @@ async fn flush_async(queued: Vec<Queued>) -> Result<(), TempoError> {
         return Ok(());
     }
     let ops = queued.iter().map(|queued| queued.op.clone()).collect();
-    settle(queued, crate::tempo_world::run_batch_async(ops, true).await)
+    let request = pb::RunBatchRequest { ops, stop_on_failure: true };
+    settle(queued, crate::tempo_world::run_batch_async(request).await)
 }
 
 /// Hand each queued op its result, and report the first failure.
@@ -1353,33 +1354,49 @@ fn where_of(object: &ObjectRef, member: &str) -> String {
     }
 }
 
+fn get_request(object: &ObjectRef, property: &str) -> pb::GetPropertyRequest {
+    pb::GetPropertyRequest {
+        actor: object.actor.clone(),
+        component: object.component.clone(),
+        property: property.to_string(),
+        subsystem: object.subsystem.clone(),
+    }
+}
+
+fn call_request(
+    object: &ObjectRef,
+    function: &str,
+    args: Vec<pb::FunctionArg>,
+) -> pb::CallFunctionRequest {
+    pb::CallFunctionRequest {
+        actor: object.actor.clone(),
+        component: object.component.clone(),
+        function: function.to_string(),
+        args,
+        subsystem: object.subsystem.clone(),
+    }
+}
+
+fn set_request(object: &ObjectRef, property: &str, value: pb::Value) -> pb::SetPropertyRequest {
+    pb::SetPropertyRequest {
+        actor: object.actor.clone(),
+        component: object.component.clone(),
+        property: property.to_string(),
+        value: Some(value),
+        subsystem: object.subsystem.clone(),
+    }
+}
+
 fn get_op(object: &ObjectRef, property: &str) -> (pb::BatchOp, String) {
     (
-        pb::BatchOp {
-            op: Some(pb::batch_op::Op::Get(pb::GetPropertyRequest {
-                actor: object.actor.clone(),
-                component: object.component.clone(),
-                property: property.to_string(),
-                native_units: true,
-                subsystem: object.subsystem.clone(),
-            })),
-        },
+        pb::BatchOp { op: Some(pb::batch_op::Op::Get(get_request(object, property))) },
         format!("read {}", where_of(object, property)),
     )
 }
 
 fn call_op(object: &ObjectRef, function: &str, args: Vec<pb::FunctionArg>) -> (pb::BatchOp, String) {
     (
-        pb::BatchOp {
-            op: Some(pb::batch_op::Op::Call(pb::CallFunctionRequest {
-                actor: object.actor.clone(),
-                component: object.component.clone(),
-                function: function.to_string(),
-                args,
-                native_units: true,
-                subsystem: object.subsystem.clone(),
-            })),
-        },
+        pb::BatchOp { op: Some(pb::batch_op::Op::Call(call_request(object, function, args))) },
         format!("call {}", where_of(object, function)),
     )
 }
@@ -1406,14 +1423,8 @@ fn call_setter(
     argument: &str,
     value: pb::Value,
 ) -> Result<(), TempoError> {
-    crate::tempo_world::call_function(
-        object.actor.clone(),
-        object.component.clone(),
-        function.to_string(),
-        vec![pb::FunctionArg { name: argument.to_string(), value: Some(value) }],
-        true,
-        object.subsystem.clone(),
-    )?;
+    let args = vec![pb::FunctionArg { name: argument.to_string(), value: Some(value) }];
+    crate::tempo_world::call_function(call_request(object, function, args))?;
     Ok(())
 }
 
@@ -1423,14 +1434,8 @@ async fn call_setter_async(
     argument: &str,
     value: pb::Value,
 ) -> Result<(), TempoError> {
-    crate::tempo_world::call_function_async(
-        object.actor.clone(),
-        object.component.clone(),
-        function.to_string(),
-        vec![pb::FunctionArg { name: argument.to_string(), value: Some(value) }],
-        true,
-        object.subsystem.clone(),
-    )
+    let args = vec![pb::FunctionArg { name: argument.to_string(), value: Some(value) }];
+    crate::tempo_world::call_function_async(call_request(object, function, args))
     .await?;
     Ok(())
 }
@@ -1458,13 +1463,7 @@ impl ObjectRef {
     ) -> Result<T, TempoError> {
         let (op, description) = get_op(self, property);
         perform(op, description, move |result| decode(&read_value(result)?), || {
-            decode(&crate::tempo_world::get_property(
-                self.actor.clone(),
-                self.component.clone(),
-                property.to_string(),
-                true,
-                self.subsystem.clone(),
-            )?)
+            decode(&crate::tempo_world::get_property(get_request(self, property))?)
         })
     }
 
@@ -1481,14 +1480,8 @@ impl ObjectRef {
             description,
             move |result| decode(returned(&call_results(result)?)?),
             || {
-                let response = crate::tempo_world::call_function(
-                    self.actor.clone(),
-                    self.component.clone(),
-                    function.to_string(),
-                    args,
-                    true,
-                    self.subsystem.clone(),
-                )?;
+                let response =
+                    crate::tempo_world::call_function(call_request(self, function, args))?;
                 decode(returned(&response)?)
             },
         )
@@ -1499,13 +1492,7 @@ impl ObjectRef {
         &self,
         property: &str,
     ) -> impl Future<Output = Result<T, TempoError>> + '_ {
-        let request = crate::tempo_world::get_property_async(
-            self.actor.clone(),
-            self.component.clone(),
-            property.to_string(),
-            true,
-            self.subsystem.clone(),
-        );
+        let request = crate::tempo_world::get_property_async(get_request(self, property));
         async move { T::from_value(&request.await?) }
     }
 
@@ -1519,27 +1506,14 @@ impl ObjectRef {
         &self,
         getter: &str,
     ) -> impl Future<Output = Result<T, TempoError>> + '_ {
-        let request = crate::tempo_world::call_function_async(
-            self.actor.clone(),
-            self.component.clone(),
-            getter.to_string(),
-            Vec::new(),
-            true,
-            self.subsystem.clone(),
-        );
+        let request =
+            crate::tempo_world::call_function_async(call_request(self, getter, Vec::new()));
         async move { T::from_value(returned(&request.await?)?) }
     }
 
     /// Write one property, or queue it when a [`batch`] is open.
     pub fn set<T: ToValue>(&self, property: &str, value: T) -> Result<(), TempoError> {
-        let request = pb::SetPropertyRequest {
-            actor: self.actor.clone(),
-            component: self.component.clone(),
-            property: property.to_string(),
-            value: Some(value.to_value()),
-            native_units: true,
-            subsystem: self.subsystem.clone(),
-        };
+        let request = set_request(self, property, value.to_value());
         if batch_open() {
             enqueue(
                 pb::BatchOp { op: Some(pb::batch_op::Op::Set(request)) },
@@ -1547,14 +1521,7 @@ impl ObjectRef {
             );
             return Ok(());
         }
-        crate::tempo_world::set_property(
-            request.actor,
-            request.component,
-            request.property,
-            request.value.unwrap_or_default(),
-            true,
-            request.subsystem,
-        )?;
+        crate::tempo_world::set_property(request)?;
         Ok(())
     }
 
@@ -1567,14 +1534,8 @@ impl ObjectRef {
         property: &str,
         value: T,
     ) -> impl Future<Output = Result<(), TempoError>> + '_ {
-        let request = crate::tempo_world::set_property_async(
-            self.actor.clone(),
-            self.component.clone(),
-            property.to_string(),
-            value.to_value(),
-            true,
-            self.subsystem.clone(),
-        );
+        let request =
+            crate::tempo_world::set_property_async(set_request(self, property, value.to_value()));
         async move {
             request.await?;
             Ok(())
@@ -1633,13 +1594,7 @@ impl ObjectRef {
         &self,
         property: &str,
     ) -> impl Future<Output = Result<T, TempoError>> + '_ {
-        let request = crate::tempo_world::get_property_async(
-            self.actor.clone(),
-            self.component.clone(),
-            property.to_string(),
-            true,
-            self.subsystem.clone(),
-        );
+        let request = crate::tempo_world::get_property_async(get_request(self, property));
         async move { object_of(&request.await?) }
     }
 
@@ -1671,13 +1626,7 @@ impl ObjectRef {
         &self,
         property: &str,
     ) -> impl Future<Output = Result<Vec<T>, TempoError>> + '_ {
-        let request = crate::tempo_world::get_property_async(
-            self.actor.clone(),
-            self.component.clone(),
-            property.to_string(),
-            true,
-            self.subsystem.clone(),
-        );
+        let request = crate::tempo_world::get_property_async(get_request(self, property));
         async move { objects_of(&request.await?) }
     }
 
@@ -1781,14 +1730,7 @@ impl ObjectRef {
         function: &str,
         args: Vec<pb::FunctionArg>,
     ) -> impl Future<Output = Result<(), TempoError>> + '_ {
-        let request = crate::tempo_world::call_function_async(
-            self.actor.clone(),
-            self.component.clone(),
-            function.to_string(),
-            args,
-            true,
-            self.subsystem.clone(),
-        );
+        let request = crate::tempo_world::call_function_async(call_request(self, function, args));
         async move {
             request.await?;
             Ok(())
@@ -1810,14 +1752,7 @@ impl ObjectRef {
         function: &str,
         args: Vec<pb::FunctionArg>,
     ) -> impl Future<Output = Result<T, TempoError>> + '_ {
-        let request = crate::tempo_world::call_function_async(
-            self.actor.clone(),
-            self.component.clone(),
-            function.to_string(),
-            args,
-            true,
-            self.subsystem.clone(),
-        );
+        let request = crate::tempo_world::call_function_async(call_request(self, function, args));
         async move { T::from_value(returned(&request.await?)?) }
     }
 
@@ -1865,13 +1800,7 @@ impl ObjectRef {
         &self,
         property: &str,
     ) -> Result<impl Iterator<Item = Result<T, TempoError>>, TempoError> {
-        let stream = crate::tempo_world::stream_property(
-            self.actor.clone(),
-            self.component.clone(),
-            property.to_string(),
-            true,
-            self.subsystem.clone(),
-        )?;
+        let stream = crate::tempo_world::stream_property(get_request(self, property))?;
         Ok(stream.map(|message| match message {
             Ok(value) => T::from_value(&value),
             Err(status) => Err(TempoError::Rpc(status)),
@@ -2086,14 +2015,7 @@ impl ObjectRef {
     ) -> Result<pb::CallFunctionResponse, TempoError> {
         let (op, description) = call_op(self, function, args.clone());
         perform(op, description, call_results, || {
-            crate::tempo_world::call_function(
-                self.actor.clone(),
-                self.component.clone(),
-                function.to_string(),
-                args,
-                true,
-                self.subsystem.clone(),
-            )
+            crate::tempo_world::call_function(call_request(self, function, args))
         })
     }
 
@@ -2103,14 +2025,7 @@ impl ObjectRef {
         function: &str,
         args: Vec<pb::FunctionArg>,
     ) -> impl Future<Output = Result<pb::CallFunctionResponse, TempoError>> + '_ {
-        crate::tempo_world::call_function_async(
-            self.actor.clone(),
-            self.component.clone(),
-            function.to_string(),
-            args,
-            true,
-            self.subsystem.clone(),
-        )
+        crate::tempo_world::call_function_async(call_request(self, function, args))
     }
 }
 
@@ -2268,13 +2183,7 @@ impl ObjectRef {
         &self,
         property: &str,
     ) -> impl Future<Output = Result<Vec<T>, TempoError>> + '_ {
-        let request = crate::tempo_world::get_property_async(
-            self.actor.clone(),
-            self.component.clone(),
-            property.to_string(),
-            true,
-            self.subsystem.clone(),
-        );
+        let request = crate::tempo_world::get_property_async(get_request(self, property));
         async move { enums_of(&request.await?) }
     }
 

@@ -17,6 +17,7 @@ import tempo_sim.tempo_sensors as ts
 import tempo_sim.TempoSensors.Sensors_pb2 as Sensors
 import tempo_sim.TempoCore.Geometry_pb2 as Geometry
 import tempo_sim.tempo_world as tw
+import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
 import tempo_sim.TempoImageUtils as tiu
 import tempo_sim.TempoLidarUtils as tlu
 
@@ -204,23 +205,21 @@ def measurement_type_string(type):
 
 
 async def randomize_camera_post_process(camera_name, owner):
-    await tw.set_bool_property(actor=owner, component=camera_name, property="PostProcessSettings.bOverride_WhiteTemp", value=True)
-    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.WhiteTemp", value=random.uniform(2000.0, 700.0))
-
-    await tw.set_bool_property(actor=owner, component=camera_name, property="PostProcessSettings.bOverride_BloomIntensity", value=True)
-    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.BloomIntensity", value=random.uniform(0.0, 1.0))
-
-    await tw.set_bool_property(actor=owner, component=camera_name, property="PostProcessSettings.bOverride_AutoExposureSpeedUp", value=True)
-    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.AutoExposureSpeedUp", value=random.uniform(1.0, 20.0))
-
-    await tw.set_bool_property(actor=owner, component=camera_name, property="PostProcessSettings.bOverride_AutoExposureSpeedDown", value=True)
-    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.AutoExposureSpeedDown", value=random.uniform(1.0, 20.0))
-
-    await tw.set_bool_property(actor=owner, component=camera_name, property="PostProcessSettings.bOverride_ColorSaturation", value=True)
-    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.ColorSaturation.X", value=random.uniform(0.0, 1.0))
-    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.ColorSaturation.Y", value=random.uniform(0.0, 1.0))
-    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.ColorSaturation.Z", value=random.uniform(0.0, 1.0))
-    await tw.set_float_property(actor=owner, component=camera_name, property="PostProcessSettings.ColorSaturation.W", value=random.uniform(0.0, 1.0))
+    settings = [
+        ("bOverride_WhiteTemp", WorldControl.Value(bool_value=True)),
+        ("WhiteTemp", WorldControl.Value(float_value=random.uniform(2000.0, 700.0))),
+        ("bOverride_BloomIntensity", WorldControl.Value(bool_value=True)),
+        ("BloomIntensity", WorldControl.Value(float_value=random.uniform(0.0, 1.0))),
+        ("bOverride_AutoExposureSpeedUp", WorldControl.Value(bool_value=True)),
+        ("AutoExposureSpeedUp", WorldControl.Value(float_value=random.uniform(1.0, 20.0))),
+        ("bOverride_AutoExposureSpeedDown", WorldControl.Value(bool_value=True)),
+        ("AutoExposureSpeedDown", WorldControl.Value(float_value=random.uniform(1.0, 20.0))),
+        ("bOverride_ColorSaturation", WorldControl.Value(bool_value=True)),
+    ] + [("ColorSaturation." + axis, WorldControl.Value(float_value=random.uniform(0.0, 1.0)))
+         for axis in "XYZW"]
+    for name, value in settings:
+        await tw.set_property(actor=owner, component=camera_name,
+                              property="PostProcessSettings." + name, value=value)
 
 
 # ---------------------------------------------------------------------------

@@ -48,6 +48,7 @@ PREAMBLE = """#include <cmath>
 #include <cstdio>
 
 #include "tempo/conversion.h"
+#include "tempo/tempo_world.h"
 #include "tempo/world.h"
 #include "tempo/reflected/core_u_object.h"
 #include "tempo/reflected/engine.h"
@@ -145,11 +146,11 @@ def flags(generated):
             + ["-D" + define for define in DEFINES])
 
 
-def check(generated, source, tmp_path):
+def check(generated, source, tmp_path, extra=()):
     """Syntax-check one snippet body. Returns the compiler's errors about the snippet."""
     snippet = tmp_path / "snippet.cc"
     snippet.write_text(PREAMBLE + source + EPILOGUE)
-    result = subprocess.run([compiler(), "-fsyntax-only"] + flags(generated) + [str(snippet)],
+    result = subprocess.run([compiler(), "-fsyntax-only"] + flags(generated) + list(extra) + [str(snippet)],
                             capture_output=True, text=True)
     errors = [line for line in result.stderr.splitlines()
               if "snippet.cc" in line and "error" in line]
@@ -445,6 +446,47 @@ def test_every_enumerator_has_a_member(generated, tmp_path):
         assert "\t{},".format(member) in header, member
 
 
+# -- the RPC wrappers (gen_cpp_api.py, as the client build generated them) ---------------------------
+
+def test_a_wrapper_takes_its_fields_by_name(generated, tmp_path):
+    """One aggregate per request, so a call names what it sets and a field added later breaks none."""
+    assert check(generated, """
+    TempoWorld::Value value;
+    value.set_float_value(1.0);
+    Result<TempoCore::Empty> set = tempo_world::set_property({.actor = "A", .property = "P", .value = value});
+    Result<TempoWorld::Value> read = tempo_world::get_property({.actor = "A", .property = "P"});
+    Result<ServerStream<TempoWorld::Value>> stream = tempo_world::stream_property({.subsystem = "S"});
+    Result<TempoWorld::GetAllActorsResponse> all = tempo_world::get_all_actors();
+    tempo_world::SetActorTransformArgs move{.actor = "A", .transform = TempoCore::Transform()};
+    Result<TempoCore::Empty> moved = tempo_world::set_actor_transform(move);
+    Result<TempoWorld::CallFunctionResponse> called = tempo_world::call("A", "", "F")
+        .color_arg("Tint", 1, 2, 3).color_arg("Glass", 1, 2, 3, 128).quat_arg("Q", 0, 0, 0, 1)
+        .native_transform_arg("T", TempoWorld::NativeTransform()).execute();
+""", tmp_path) == []
+
+
+@pytest.mark.parametrize("case,body", [
+    ("the old positional form", 'auto r = tempo_world::get_property("A", "", "P", "");'),
+    ("a field the request lacks", 'auto r = tempo_world::get_property({.actor = "A", .native_units = true});'),
+    ("a deprecated field", 'tempo_world::SetActorTransformArgs a{.scale = TempoCore::Vector()};'),
+    ("an argument to an RPC taking Empty", "auto r = tempo_world::get_all_actors({});"),
+    ("a transform in a Value", "TempoWorld::Value v; v.mutable_transform_value();"),
+])
+def test_a_wrapper_refuses_what_the_request_does_not_have(generated, tmp_path, case, body):
+    assert check(generated, "    " + body, tmp_path), "{} must not compile".format(case)
+
+
+def test_a_deprecated_rpcs_wrapper_is_deprecated(generated, tmp_path):
+    call = """
+    auto r = tempo_world::set_bool_property({.actor = "A", .property = "P", .value = true});
+"""
+    errors = check(generated, call, tmp_path, extra=["-Werror=deprecated-declarations"])
+    assert errors and "migration/v0.4.0" in " ".join(errors), errors
+    assert check(generated, """
+    auto r = tempo_world::set_property({.actor = "A", .property = "P"});
+""", tmp_path, extra=["-Werror=deprecated-declarations"]) == []
+
+
 # -- drift must not compile ----------------------------------------------------------------------
 
 @pytest.mark.parametrize("case,body", [
@@ -534,14 +576,22 @@ def test_values_conversions_and_batches_behave(generated):
     expect(std::abs(r.r() - 3.141592653589793) < 1e-12 && std::abs(r.p() + 1.5707963267948966) < 1e-12 &&
            std::abs(r.y() + 0.7853981633974483) < 1e-12, "a rotation converts");
     expect(conversion::ue_direction_to_si(FVector{0, 1, 0}).y() == -1, "a direction is not scaled");
-    // Scale 1: TempoCore::Transform carries none, so a round trip comes back with 1.
-    FTransform pose{conversion::quat_of(FRotator{5, 6, 4}), FVector{1, 2, 3}};
-    FTransform round = conversion::si_to_ue(conversion::ue_to_si(pose));
+    // A transform carries its scale, as given; an unset one is 1.
+    FTransform pose{conversion::quat_of(FRotator{5, 6, 4}), FVector{1, 2, 3}, FVector{2, -3, 4}};
+    TempoCore::Transform si_pose = conversion::ue_to_si(pose);
+    expect(si_pose.scale().x() == 2 && si_pose.scale().y() == -3 && si_pose.scale().z() == 4,
+           "a scale is not converted");
+    FTransform round = conversion::si_to_ue(si_pose);
     FRotator turned = conversion::rotator_of(round.rotation);
     expect(std::abs(round.translation.y - 2) < 1e-9 && std::abs(turned.pitch - 5) < 1e-9 &&
-           std::abs(turned.yaw - 6) < 1e-9 && std::abs(turned.roll - 4) < 1e-9 && round.scale3d.x == 1,
-           "a transform round-trips");
-    expect(conversion::si_to_ue(TempoCore::Transform()) == FTransform{}, "unset is zero");
+           std::abs(turned.yaw - 6) < 1e-9 && std::abs(turned.roll - 4) < 1e-9 &&
+           round.scale3d == pose.scale3d, "a transform round-trips");
+    expect(conversion::si_to_ue(TempoCore::Transform()) == FTransform{}, "unset is zero, and scale 1");
+    // A quaternion converts exactly: x and z negated, y and w kept.
+    FQuat lh{0.1, -0.2, 0.3, 0.927};
+    TempoWorld::Quat rh = conversion::ue_to_si(lh);
+    expect(rh.x() == -0.1 && rh.y() == -0.2 && rh.z() == -0.3 && rh.w() == 0.927 &&
+           conversion::si_to_ue(rh) == lh, "a quaternion round-trips");
     FQuat quarter = conversion::quat_of(FRotator{0, 90, 0});
     expect(std::abs(quarter.z - std::sqrt(0.5)) < 1e-12 && std::abs(quarter.w - std::sqrt(0.5)) < 1e-12,
            "Unreal's FRotator::Quaternion");
@@ -558,6 +608,12 @@ def test_values_conversions_and_batches_behave(generated):
            "a transform keeps its scale");
     expect(ValueTraits<FColor>::from(ValueTraits<FColor>::to(FColor{1, 2, 3, 4})).value() == FColor{1, 2, 3, 4},
            "a color keeps its alpha");
+    TempoWorld::Value opaque;
+    opaque.mutable_color_value()->set_r(9);
+    expect(ValueTraits<FColor>::from(opaque).value() == FColor{9, 0, 0, 255}, "an unset alpha is opaque");
+    FQuat precise{0.1, 0.2, 0.3, 0.9};
+    expect(ValueTraits<FQuat>::from(ValueTraits<FQuat>::to(precise)).value() == precise,
+           "a quaternion is not narrowed");
     FLinearColor linear{0.25f, 0.5f, 0.75f, 0.125f};
     expect(ValueTraits<FLinearColor>::from(ValueTraits<FLinearColor>::to(linear)).value() == linear,
            "a linear color is not squeezed into 8 bits");

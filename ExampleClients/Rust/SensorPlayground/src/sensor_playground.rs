@@ -16,6 +16,8 @@ use show_image::{ImageInfo, ImageView, WindowProxy};
 use tempo_sim::proto::tempo_sensors::ColorEncoding;
 use tempo_sim::proto::tempo_core::{Rotation, Transform, Vector};
 use tempo_sim::proto::tempo_sensors::MeasurementType;
+use tempo_sim::proto::tempo_world::value::Value as V;
+use tempo_sim::proto::tempo_world::Value;
 use tempo_sim::{set_server_async, tempo_sensors, tempo_world, TempoError};
 use tokio::task::JoinHandle;
 use tokio_stream::StreamExt;
@@ -146,6 +148,7 @@ fn parse_transform(text: &str) -> Result<Transform, String> {
             p: parts[4] * std::f64::consts::PI / 180.0,
             y: parts[5] * std::f64::consts::PI / 180.0,
         }),
+        ..Default::default()
     })
 }
 
@@ -177,6 +180,24 @@ struct State {
 // Sensor helpers
 // ---------------------------------------------------------------------------
 
+/// Write one of the camera's properties, in Unreal's own units.
+async fn set_camera_property(
+    owner: &str,
+    camera_name: &str,
+    property: String,
+    value: V,
+) -> Result<(), TempoError> {
+    tempo_world::set_property_async(tempo_world::SetPropertyRequest {
+        actor: owner.to_string(),
+        component: camera_name.to_string(),
+        property,
+        value: Some(Value { value: Some(value) }),
+        ..Default::default()
+    })
+    .await?;
+    Ok(())
+}
+
 async fn randomize_camera_post_process(
     camera_name: &str,
     owner: &str,
@@ -205,38 +226,21 @@ async fn randomize_camera_post_process(
         ),
     ];
     for (override_prop, prop, value) in scalars {
-        tempo_world::set_bool_property_async(
-            owner.to_string(),
-            camera_name.to_string(),
-            override_prop.to_string(),
-            true,
-        )
-        .await?;
-        tempo_world::set_float_property_async(
-            owner.to_string(),
-            camera_name.to_string(),
-            prop.to_string(),
-            value,
-        )
-        .await?;
+        set_camera_property(owner, camera_name, override_prop.to_string(), V::BoolValue(true))
+            .await?;
+        set_camera_property(owner, camera_name, prop.to_string(), V::FloatValue(value)).await?;
     }
-    tempo_world::set_bool_property_async(
-        owner.to_string(),
-        camera_name.to_string(),
+    set_camera_property(
+        owner,
+        camera_name,
         "PostProcessSettings.bOverride_ColorSaturation".to_string(),
-        true,
+        V::BoolValue(true),
     )
     .await?;
     for axis in ["X", "Y", "Z", "W"] {
         let prop = format!("PostProcessSettings.ColorSaturation.{}", axis);
         let v: f32 = rng.gen_range(0.0_f32..=1.0_f32);
-        tempo_world::set_float_property_async(
-            owner.to_string(),
-            camera_name.to_string(),
-            prop,
-            v,
-        )
-        .await?;
+        set_camera_property(owner, camera_name, prop, V::FloatValue(v)).await?;
     }
     Ok(())
 }
@@ -258,8 +262,9 @@ impl Drop for WindowGuard {
 async fn stream_color(sensor: AvailableSensor, window: WindowProxy) {
     let key = format!("{}:{}:Color", sensor.owner, sensor.name);
     let _guard = WindowGuard(window.clone());
+    let request = tempo_sensors::ColorImageRequest { owner: sensor.owner, sensor: sensor.name };
     let mut stream =
-        match tempo_sensors::stream_color_images_async(sensor.owner, sensor.name).await {
+        match tempo_sensors::stream_color_images_async(request).await {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("[{}] Failed to start stream: {}", key, e);
@@ -300,8 +305,9 @@ fn f32s_from_le_bytes(bytes: &[u8]) -> Vec<f32> {
 async fn stream_depth(sensor: AvailableSensor, window: WindowProxy) {
     let key = format!("{}:{}:Depth", sensor.owner, sensor.name);
     let _guard = WindowGuard(window.clone());
+    let request = tempo_sensors::DepthImageRequest { owner: sensor.owner, sensor: sensor.name };
     let mut stream =
-        match tempo_sensors::stream_depth_images_async(sensor.owner, sensor.name).await {
+        match tempo_sensors::stream_depth_images_async(request).await {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("[{}] Failed to start stream: {}", key, e);
@@ -414,14 +420,13 @@ async fn stream_video(sensor: AvailableSensor, window: WindowProxy) {
     // C — functionally fine, just noisy.
     ffmpeg_next::util::log::set_level(ffmpeg_next::util::log::Level::Error);
 
-    let mut stream = match tempo_sensors::stream_video_async(
-        sensor.owner.clone(),
-        sensor.name.clone(),
-        0, // codec H264
-        0, // default bitrate
-        0, // default KFI
-        0, // default profile
-    ).await {
+    // Codec 0 is H264; zero bitrate, keyframe interval and profile take the defaults.
+    let request = tempo_sensors::VideoRequest {
+        owner: sensor.owner.clone(),
+        sensor: sensor.name.clone(),
+        ..Default::default()
+    };
+    let mut stream = match tempo_sensors::stream_video_async(request).await {
         Ok(s) => s,
         Err(e) => {
             eprintln!("[{}] Failed to start stream: {}", key, e);
@@ -513,8 +518,9 @@ async fn stream_video(sensor: AvailableSensor, window: WindowProxy) {
 async fn stream_label(sensor: AvailableSensor, window: WindowProxy) {
     let key = format!("{}:{}:Label", sensor.owner, sensor.name);
     let _guard = WindowGuard(window.clone());
+    let request = tempo_sensors::LabelImageRequest { owner: sensor.owner, sensor: sensor.name };
     let mut stream =
-        match tempo_sensors::stream_label_images_async(sensor.owner, sensor.name).await {
+        match tempo_sensors::stream_label_images_async(request).await {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("[{}] Failed to start stream: {}", key, e);
@@ -810,8 +816,13 @@ async fn stream_lidar(sensor: AvailableSensor) {
         viewer,
     };
 
+    let request = tempo_sensors::LidarScanRequest {
+        owner: sensor.owner,
+        sensor: sensor.name,
+        include_color: false,
+    };
     let mut stream =
-        match tempo_sensors::stream_lidar_scans_async(sensor.owner, sensor.name, false).await {
+        match tempo_sensors::stream_lidar_scans_async(request).await {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("[{}] Failed to start stream: {}", key, e);
@@ -848,8 +859,9 @@ async fn stream_lidar(sensor: AvailableSensor) {
 
 async fn record_color(sensor: AvailableSensor, dir: PathBuf) {
     let key = format!("{}:{}:Color", sensor.owner, sensor.name);
+    let request = tempo_sensors::ColorImageRequest { owner: sensor.owner, sensor: sensor.name };
     let mut stream =
-        match tempo_sensors::stream_color_images_async(sensor.owner, sensor.name).await {
+        match tempo_sensors::stream_color_images_async(request).await {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("[{}] Failed to start: {}", key, e);
@@ -884,8 +896,9 @@ async fn record_color(sensor: AvailableSensor, dir: PathBuf) {
 
 async fn record_depth(sensor: AvailableSensor, dir: PathBuf) {
     let key = format!("{}:{}:Depth", sensor.owner, sensor.name);
+    let request = tempo_sensors::DepthImageRequest { owner: sensor.owner, sensor: sensor.name };
     let mut stream =
-        match tempo_sensors::stream_depth_images_async(sensor.owner, sensor.name).await {
+        match tempo_sensors::stream_depth_images_async(request).await {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("[{}] Failed to start: {}", key, e);
@@ -913,8 +926,9 @@ async fn record_depth(sensor: AvailableSensor, dir: PathBuf) {
 
 async fn record_label(sensor: AvailableSensor, dir: PathBuf) {
     let key = format!("{}:{}:Label", sensor.owner, sensor.name);
+    let request = tempo_sensors::LabelImageRequest { owner: sensor.owner, sensor: sensor.name };
     let mut stream =
-        match tempo_sensors::stream_label_images_async(sensor.owner, sensor.name).await {
+        match tempo_sensors::stream_label_images_async(request).await {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("[{}] Failed to start: {}", key, e);
@@ -962,17 +976,17 @@ async fn flow_add_sensor() {
     let transform = Transform {
         location: Some(Vector { x: 0.0, y: 0.0, z: 0.0 }),
         rotation: Some(Rotation { r: 0.0, p: 0.0, y: 0.0 }),
+        scale: Some(Vector { x: 1.0, y: 1.0, z: 1.0 }),
     };
-    match tempo_world::add_component_async(
-        sensor_type,
+    let request = tempo_world::AddComponentRequest {
+        component_type: sensor_type,
         actor,
-        String::new(),
+        name: String::new(),
         parent,
-        transform,
+        transform: Some(transform),
         socket,
-    )
-    .await
-    {
+    };
+    match tempo_world::add_component_async(request).await {
         Ok(resp) => {
             println!("\n  Added component: {}", resp.name);
             if let Some(t) = &resp.transform {
@@ -997,7 +1011,11 @@ async fn flow_remove_sensor() {
     let Some(s) = sensors.into_iter().find(|s| s.label() == chosen) else {
         return;
     };
-    match tempo_world::destroy_component_async(s.owner.clone(), s.name.clone()).await {
+    let request = tempo_world::DestroyComponentRequest {
+        actor: s.owner.clone(),
+        component: s.name.clone(),
+    };
+    match tempo_world::destroy_component_async(request).await {
         Ok(_) => println!("\n  Destroyed: {}", s.label()),
         Err(e) => println!("  Error while destroying component: {}", e),
     }
@@ -1028,7 +1046,13 @@ async fn flow_reposition_sensor() {
             return;
         }
     };
-    match tempo_world::set_component_transform_async(s.owner, s.name, t, false, None).await {
+    let request = tempo_world::SetComponentTransformRequest {
+        actor: s.owner,
+        component: s.name,
+        transform: Some(t),
+        ..Default::default()
+    };
+    match tempo_world::set_component_transform_async(request).await {
         Ok(_) => println!("\n  Repositioned {}", chosen),
         Err(e) => println!("  Error while repositioning component: {}", e),
     }
@@ -1048,7 +1072,8 @@ async fn flow_get_sensor_properties() {
     let Some(s) = sensors.into_iter().find(|x| x.label() == chosen) else {
         return;
     };
-    match tempo_world::get_component_properties_async(s.owner, s.name).await {
+    let request = tempo_world::GetComponentPropertiesRequest { actor: s.owner, component: s.name };
+    match tempo_world::get_component_properties_async(request).await {
         Ok(resp) => {
             println!();
             for p in resp.properties {
@@ -1261,7 +1286,12 @@ async fn flow_move_actor() {
             return;
         }
     };
-    match tempo_world::set_actor_transform_async(actor.clone(), t, String::new(), None).await {
+    let request = tempo_world::SetActorTransformRequest {
+        actor: actor.clone(),
+        transform: Some(t),
+        ..Default::default()
+    };
+    match tempo_world::set_actor_transform_async(request).await {
         Ok(_) => println!("\n  Moved {}", actor),
         Err(e) => println!("  Error while moving actor: {}", e),
     }

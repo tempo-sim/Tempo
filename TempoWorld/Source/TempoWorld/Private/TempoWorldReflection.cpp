@@ -109,7 +109,7 @@ namespace
 // FLinearColor have reported "vector", "rotator" and "color" since the first version of this
 // API, while the rest report their struct name. That asymmetry is published behavior, so it is
 // reproduced here rather than tidied. FLinearColor is a kind of its own, "linearcolor" -- it reads
-// and writes as float RGBA under native_units, where FColor is 8-bit -- but its type string is still
+// and writes as float RGBA, where FColor is 8-bit -- but its type string is still
 // "color".
 const TCHAR* GetKindName(EValueKind Kind)
 {

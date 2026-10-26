@@ -22,6 +22,15 @@ double normalize_axis(double angle) {
     return angle > 180.0 ? angle - 360.0 : angle;
 }
 
+/// A vector as given: a scale, which has no unit or handedness.
+TempoCore::Vector vector_of(const unreal::FVector& value) {
+    TempoCore::Vector out;
+    out.set_x(value.x);
+    out.set_y(value.y);
+    out.set_z(value.z);
+    return out;
+}
+
 }  // namespace
 
 unreal::FRotator rotator_of(const unreal::FQuat& quat) {
@@ -79,13 +88,22 @@ TempoCore::Rotation ue_to_si(const unreal::FRotator& value) {
     return out;
 }
 
-TempoCore::Rotation ue_to_si(const unreal::FQuat& value) { return ue_to_si(rotator_of(value)); }
+// TempoConversion.h's handedness rule for a quaternion: the axis has its Y negated, and the rotation
+// turns the other way, which negates the whole axis again.
+TempoWorld::Quat ue_to_si(const unreal::FQuat& value) {
+    TempoWorld::Quat out;
+    out.set_x(-value.x);
+    out.set_y(value.y);
+    out.set_z(-value.z);
+    out.set_w(value.w);
+    return out;
+}
 
 TempoCore::Transform ue_to_si(const unreal::FTransform& value) {
-    // TempoCore::Transform has no scale; see the top of conversion.h.
     TempoCore::Transform out;
     *out.mutable_location() = ue_to_si(value.translation);
-    *out.mutable_rotation() = ue_to_si(value.rotation);
+    *out.mutable_rotation() = ue_to_si(rotator_of(value.rotation));
+    *out.mutable_scale() = vector_of(value.scale3d);
     return out;
 }
 
@@ -101,11 +119,19 @@ unreal::FRotator si_to_ue(const TempoCore::Rotation& value) {
     return unreal::FRotator{-degrees(value.p()), -degrees(value.y()), degrees(value.r())};
 }
 
+unreal::FQuat si_to_ue(const TempoWorld::Quat& value) {
+    return unreal::FQuat{-value.x(), value.y(), -value.z(), value.w()};
+}
+
 unreal::FTransform si_to_ue(const TempoCore::Transform& value) {
-    // An unset submessage reads as its defaults, which are the zero the wire means; the scale is 1.
+    // An unset location or rotation reads as its defaults, which are the zero the wire means; an
+    // unset scale means 1, which FTransform's default already is.
     unreal::FTransform out;
     out.rotation = quat_of(si_to_ue(value.rotation()));
     out.translation = si_to_ue(value.location());
+    if (value.has_scale()) {
+        out.scale3d = unreal::FVector{value.scale().x(), value.scale().y(), value.scale().z()};
+    }
     return out;
 }
 

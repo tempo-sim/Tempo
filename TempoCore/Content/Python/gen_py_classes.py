@@ -84,7 +84,7 @@ SINGULAR_VARIANTS = {
     "intpoint": "int_point_value",
     "rotator": "rotator_value",
     "quat": "quat_value",
-    # Under native_units, the shape Unreal stores, with its scale. See NativeTransform.
+    # The shape Unreal stores, with its scale. See NativeTransform.
     "transform": "native_transform_value",
     "color": "color_value",
     "linearcolor": "linear_color_value",

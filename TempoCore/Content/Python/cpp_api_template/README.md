@@ -55,11 +55,32 @@ int main() {
 }
 ```
 
+## Arguments
+
+Each RPC's wrapper takes one argument, a struct of its request's fields named for the request
+(`SetPropertyRequest` -> `SetPropertyArgs`), in the service's namespace. Name the fields you set with
+designated initializers, in the order the struct declares them; every field you leave out is sent
+unset, so a field added to a request later breaks no call.
+
+```cpp
+TempoWorld::Value value;
+value.set_float_value(1200.0);
+auto set = tempo::tempo_world::set_property({.actor = "Truck", .property = "MaxSpeed", .value = value});
+```
+
+A string or a number left out is its zero. A message, a oneof member or an `optional` field is a
+`std::optional`, left unset unless given. An RPC whose request is `TempoCore.Empty` takes no
+argument. A wrapper for a deprecated RPC is `[[deprecated]]`, and a deprecated request field is not
+offered at all: its replacement is.
+
+The property and function RPCs (`get_property`, `set_property`, `call_function`, `run_batch`, ...)
+speak Unreal's own units -- centimeters, degrees, left-handed -- as a `TempoWorld::Value` always is.
+Every other RPC speaks meters, radians and right-handed. `tempo/conversion.h` converts between them.
+
 ## Streaming RPCs
 
 ```cpp
-auto stream_result = tempo::tempo_sensors::stream_color_images(
-    /*owner=*/"Vehicle", /*sensor=*/"Cam0", /*compression_level=*/0);
+auto stream_result = tempo::tempo_sensors::stream_color_images({.owner = "Vehicle", .sensor = "Cam0"});
 if (!stream_result) { /* handle error */ }
 auto stream = std::move(stream_result).value();
 

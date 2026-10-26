@@ -10,6 +10,10 @@ use std::collections::HashMap;
 use clap::Parser;
 use inquire::{Select, Text};
 use tempo_sim::proto::tempo_core::{Rotation, Transform, Vector};
+use tempo_sim::proto::tempo_world::value::Value as V;
+use tempo_sim::proto::tempo_world::{
+    BoolArray, Color, FloatArray, Int64Array, IntArray, StringArray, Value,
+};
 use tempo_sim::{set_server_async, tempo_world};
 
 #[derive(Parser, Debug)]
@@ -74,6 +78,7 @@ fn parse_transform(text: &str) -> Result<Transform, String> {
             p: parts[4] * std::f64::consts::PI / 180.0,
             y: parts[5] * std::f64::consts::PI / 180.0,
         }),
+        ..Default::default()
     })
 }
 
@@ -244,8 +249,8 @@ fn is_leaf_type(prop_type: &str) -> bool {
 fn type_hint(prop_type: &str) -> &'static str {
     match prop_type.trim().to_lowercase().as_str() {
         "bool" => " (true/false)",
-        "vector" => " (X Y Z)",
-        "rotator" => " (Roll Pitch Yaw)",
+        "vector" => " (X Y Z, centimeters, left-handed)",
+        "rotator" => " (Roll Pitch Yaw, degrees)",
         "color" => " (R G B, 0-255)",
         t if t.ends_with("[]") => " (comma-separated values)",
         _ => "",
@@ -256,6 +261,64 @@ fn type_hint(prop_type: &str) -> &'static str {
 // Property setter dispatch
 // ---------------------------------------------------------------------------
 
+fn parse_floats<const N: usize>(text: &str, what: &str) -> Result<[f64; N], String> {
+    let parts: Vec<&str> = text.split_whitespace().collect();
+    if parts.len() != N {
+        return Err(format!("{} requires {} values", what, N));
+    }
+    let mut values = [0.0; N];
+    for (value, part) in values.iter_mut().zip(parts) {
+        *value = part.parse().map_err(|e: std::num::ParseFloatError| e.to_string())?;
+    }
+    Ok(values)
+}
+
+/// The Value a property of this type is written from. A property is written in Unreal's own units
+/// -- centimeters, degrees, left-handed -- exactly as it stores them.
+fn leaf_value(t: &str, v: String) -> Result<V, String> {
+    Ok(match t {
+        "bool" => V::BoolValue(parse_bool(&v)?),
+        "string" => V::StringValue(v),
+        "enum" => V::EnumValue(v),
+        "int" | "int32" => {
+            V::IntValue(v.parse().map_err(|e: std::num::ParseIntError| e.to_string())?)
+        }
+        "int64" => V::Int64Value(v.parse().map_err(|e: std::num::ParseIntError| e.to_string())?),
+        "float" | "double" => {
+            V::FloatValue(v.parse().map_err(|e: std::num::ParseFloatError| e.to_string())?)
+        }
+        "vector" => {
+            let [x, y, z] = parse_floats(&v, "Vector (X Y Z)")?;
+            V::VectorValue(Vector { x, y, z })
+        }
+        "rotator" => {
+            let [r, p, y] = parse_floats(&v, "Rotator (Roll Pitch Yaw)")?;
+            V::RotatorValue(Rotation { r, p, y })
+        }
+        "color" => {
+            let parts: Vec<&str> = v.split_whitespace().collect();
+            if parts.len() != 3 {
+                return Err("Color requires 3 values: R G B (0-255)".into());
+            }
+            let channel = |s: &str| s.parse::<i32>().map_err(|e| e.to_string());
+            V::ColorValue(Color {
+                r: channel(parts[0])?,
+                g: channel(parts[1])?,
+                b: channel(parts[2])?,
+                a: None,
+            })
+        }
+        "class" => V::ClassValue(v),
+        "asset" => V::AssetValue(v),
+        "actor" => V::ActorValue(v),
+        "component" => V::ComponentValue(v),
+        _ => {
+            println!("  Unsupported property type: {}. Attempting as string.", t);
+            V::StringValue(v)
+        }
+    })
+}
+
 async fn set_property_value(
     actor: &str,
     component: &str,
@@ -264,118 +327,53 @@ async fn set_property_value(
     value_text: &str,
 ) -> Result<(), String> {
     let t = prop_type.trim().to_lowercase();
-
-    if let Some(base) = t.strip_suffix("[]") {
-        return set_array_property(base, actor, component, prop_name, value_text).await;
-    }
-
-    let (a, c, p) = (
-        actor.to_string(),
-        component.to_string(),
-        prop_name.to_string(),
-    );
-    let v = value_text.to_string();
-
-    use tempo_world::*;
-    let r = match t.as_str() {
-        "bool" => set_bool_property_async(a, c, p, parse_bool(&v)?).await,
-        "string" => set_string_property_async(a, c, p, v).await,
-        "enum" => set_enum_property_async(a, c, p, v).await,
-        "int" | "int32" | "int64" => {
-            let parsed: i32 = v.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
-            set_int_property_async(a, c, p, parsed).await
-        }
-        "float" | "double" => {
-            let parsed: f32 = v.parse().map_err(|e: std::num::ParseFloatError| e.to_string())?;
-            set_float_property_async(a, c, p, parsed).await
-        }
-        "vector" => {
-            let parts: Vec<&str> = v.split_whitespace().collect();
-            if parts.len() != 3 {
-                return Err("Vector requires 3 values: X Y Z".into());
-            }
-            let x: f32 = parts[0].parse().map_err(|e: std::num::ParseFloatError| e.to_string())?;
-            let y: f32 = parts[1].parse().map_err(|e: std::num::ParseFloatError| e.to_string())?;
-            let z: f32 = parts[2].parse().map_err(|e: std::num::ParseFloatError| e.to_string())?;
-            set_vector_property_async(a, c, p, x, y, z).await
-        }
-        "rotator" => {
-            let parts: Vec<&str> = v.split_whitespace().collect();
-            if parts.len() != 3 {
-                return Err("Rotator requires 3 values: Roll Pitch Yaw".into());
-            }
-            let r: f32 = parts[0].parse().map_err(|e: std::num::ParseFloatError| e.to_string())?;
-            let pi: f32 = parts[1].parse().map_err(|e: std::num::ParseFloatError| e.to_string())?;
-            let yv: f32 = parts[2].parse().map_err(|e: std::num::ParseFloatError| e.to_string())?;
-            set_rotator_property_async(a, c, p, r, pi, yv).await
-        }
-        "color" => {
-            let parts: Vec<&str> = v.split_whitespace().collect();
-            if parts.len() != 3 {
-                return Err("Color requires 3 values: R G B (0-255)".into());
-            }
-            let r: i32 = parts[0].parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
-            let g: i32 = parts[1].parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
-            let b: i32 = parts[2].parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
-            set_color_property_async(a, c, p, r, g, b).await
-        }
-        "class" => set_class_property_async(a, c, p, v).await,
-        "asset" => set_asset_property_async(a, c, p, v).await,
-        "actor" => set_actor_property_async(a, c, p, v).await,
-        "component" => set_component_property_async(a, c, p, v).await,
-        _ => {
-            println!(
-                "  Unsupported property type: {}. Attempting as string.",
-                prop_type
-            );
-            set_string_property_async(a, c, p, v).await
-        }
+    let value = match t.strip_suffix("[]") {
+        Some(base) => array_value(base, value_text)?,
+        None => leaf_value(&t, value_text.to_string())?,
     };
-    r.map(|_| ()).map_err(|e| e.to_string())
+    tempo_world::set_property_async(tempo_world::SetPropertyRequest {
+        actor: actor.to_string(),
+        component: component.to_string(),
+        property: prop_name.to_string(),
+        value: Some(Value { value: Some(value) }),
+        ..Default::default()
+    })
+    .await
+    .map(|_| ())
+    .map_err(|e| e.to_string())
 }
 
-async fn set_array_property(
-    base: &str,
-    actor: &str,
-    component: &str,
-    prop_name: &str,
-    value_text: &str,
-) -> Result<(), String> {
+fn array_value(base: &str, value_text: &str) -> Result<V, String> {
     let parts: Vec<String> = value_text.split(',').map(|v| v.trim().to_string()).collect();
-    let (a, c, p) = (
-        actor.to_string(),
-        component.to_string(),
-        prop_name.to_string(),
-    );
-    use tempo_world::*;
-    let r = match base {
+    let strings = |values| StringArray { values };
+    Ok(match base {
         "bool" => {
-            let vals: Result<Vec<bool>, String> = parts.iter().map(|v| parse_bool(v)).collect();
-            set_bool_array_property_async(a, c, p, vals?).await
+            let values: Result<Vec<bool>, String> = parts.iter().map(|v| parse_bool(v)).collect();
+            V::BoolArrayValue(BoolArray { values: values? })
         }
-        "string" => set_string_array_property_async(a, c, p, parts).await,
-        "enum" => set_enum_array_property_async(a, c, p, parts).await,
-        "int" | "int32" | "int64" => {
-            let vals: Result<Vec<i32>, _> = parts.iter().map(|v| v.parse::<i32>()).collect();
-            set_int_array_property_async(a, c, p, vals.map_err(|e| e.to_string())?).await
+        "string" => V::StringArrayValue(strings(parts)),
+        "enum" => V::EnumArrayValue(strings(parts)),
+        "int" | "int32" => {
+            let values: Result<Vec<i32>, _> = parts.iter().map(|v| v.parse::<i32>()).collect();
+            V::IntArrayValue(IntArray { values: values.map_err(|e| e.to_string())? })
+        }
+        "int64" => {
+            let values: Result<Vec<i64>, _> = parts.iter().map(|v| v.parse::<i64>()).collect();
+            V::Int64ArrayValue(Int64Array { values: values.map_err(|e| e.to_string())? })
         }
         "float" | "double" => {
-            let vals: Result<Vec<f32>, _> = parts.iter().map(|v| v.parse::<f32>()).collect();
-            set_float_array_property_async(a, c, p, vals.map_err(|e| e.to_string())?).await
+            let values: Result<Vec<f32>, _> = parts.iter().map(|v| v.parse::<f32>()).collect();
+            V::FloatArrayValue(FloatArray { values: values.map_err(|e| e.to_string())? })
         }
-        "class" => set_class_array_property_async(a, c, p, parts).await,
-        "asset" => set_asset_array_property_async(a, c, p, parts).await,
-        "actor" => set_actor_array_property_async(a, c, p, parts).await,
-        "component" => set_component_array_property_async(a, c, p, parts).await,
+        "class" => V::ClassArrayValue(strings(parts)),
+        "asset" => V::AssetArrayValue(strings(parts)),
+        "actor" => V::ActorArrayValue(strings(parts)),
+        "component" => V::ComponentArrayValue(strings(parts)),
         _ => {
-            println!(
-                "  Unsupported array type: {}[]. Attempting as string array.",
-                base
-            );
-            set_string_array_property_async(a, c, p, parts).await
+            println!("  Unsupported array type: {}[]. Attempting as string array.", base);
+            V::StringArrayValue(strings(parts))
         }
-    };
-    r.map(|_| ()).map_err(|e| e.to_string())
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -397,7 +395,10 @@ async fn fetch_actors() -> Vec<(String, String)> {
 }
 
 async fn fetch_components(actor: &str) -> Vec<(String, String)> {
-    match tempo_world::get_all_components_async(actor.to_string()).await {
+    match tempo_world::get_all_components_async(tempo_world::GetAllComponentsRequest {
+        actor: actor.to_string(),
+    })
+    .await {
         Ok(r) => r
             .components
             .into_iter()
@@ -419,9 +420,17 @@ struct Property {
 
 async fn fetch_properties(actor: &str, component: Option<&str>) -> Vec<Property> {
     let resp = if let Some(c) = component {
-        tempo_world::get_component_properties_async(actor.to_string(), c.to_string()).await
+        tempo_world::get_component_properties_async(tempo_world::GetComponentPropertiesRequest {
+            actor: actor.to_string(),
+            component: c.to_string(),
+        })
+        .await
     } else {
-        tempo_world::get_actor_properties_async(actor.to_string(), false).await
+        tempo_world::get_actor_properties_async(tempo_world::GetActorPropertiesRequest {
+            actor: actor.to_string(),
+            include_components: false,
+        })
+        .await
     };
     match resp {
         Ok(r) => r
@@ -481,7 +490,12 @@ async fn flow_spawn_actor() {
             return;
         }
     };
-    match tempo_world::spawn_actor_async(actor_type, false, transform, String::new()).await {
+    let request = tempo_world::SpawnActorRequest {
+        actor_type,
+        transform: Some(transform),
+        ..Default::default()
+    };
+    match tempo_world::spawn_actor_async(request).await {
         Ok(resp) => {
             println!("\n  Spawned: {}", resp.name);
             if let Some(t) = &resp.transform {
@@ -502,7 +516,9 @@ async fn flow_destroy_actor() {
     let Some(actor) = pick_keyed("Select actor to destroy", actors).await else {
         return;
     };
-    match tempo_world::destroy_actor_async(actor.clone()).await {
+    match tempo_world::destroy_actor_async(tempo_world::DestroyActorRequest { actor: actor.clone() })
+        .await
+    {
         Ok(_) => println!("\n  Destroyed: {}", actor),
         Err(e) => println!("  Error: {}", e),
     }
@@ -545,17 +561,17 @@ async fn flow_add_component() {
     let identity = Transform {
         location: Some(Vector { x: 0.0, y: 0.0, z: 0.0 }),
         rotation: Some(Rotation { r: 0.0, p: 0.0, y: 0.0 }),
+        scale: Some(Vector { x: 1.0, y: 1.0, z: 1.0 }),
     };
-    match tempo_world::add_component_async(
+    let request = tempo_world::AddComponentRequest {
         component_type,
         actor,
         name,
         parent,
-        identity,
-        String::new(),
-    )
-    .await
-    {
+        transform: Some(identity),
+        socket: String::new(),
+    };
+    match tempo_world::add_component_async(request).await {
         Ok(resp) => {
             println!("\n  Added component: {}", resp.name);
             if let Some(t) = &resp.transform {
@@ -584,7 +600,11 @@ async fn flow_destroy_component() {
     let Some(component) = pick_keyed("Select component to destroy", components).await else {
         return;
     };
-    match tempo_world::destroy_component_async(actor.clone(), component.clone()).await {
+    let request = tempo_world::DestroyComponentRequest {
+        actor: actor.clone(),
+        component: component.clone(),
+    };
+    match tempo_world::destroy_component_async(request).await {
         Ok(_) => println!("\n  Destroyed: {}:{}", actor, component),
         Err(e) => println!("  Error: {}", e),
     }

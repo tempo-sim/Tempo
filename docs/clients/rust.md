@@ -47,7 +47,10 @@ use tempo_sim::{set_server_async, tempo_world};
 #[tokio::main]
 async fn main() -> Result<(), tempo_sim::TempoError> {
     set_server_async("localhost", 10001).await;
-    let response = tempo_world::get_current_actor_state_async("MyActor".into()).await?;
+    let response = tempo_world::get_current_actor_state_async(tempo_world::ActorStateRequest {
+        actor: "MyActor".into(),
+        ..Default::default()
+    }).await?;
     Ok(())
 }
 ```
@@ -56,18 +59,16 @@ The asynchronous form carries an `_async` suffix; the synchronous one has the ba
 blocks on a [tokio](https://crates.io/crates/tokio) runtime internally. The crate is built on
 [tonic](https://crates.io/crates/tonic) and [prost](https://crates.io/crates/prost).
 
-Arguments are **positional** and follow the request message's field order. Fluent builders
-(`batch()`, `call()`) work the same as in Python — see
-[TempoWorld](../plugins/tempo-world.md#batching-property-sets).
+Each function takes its **request message**, which each module re-exports
+(`tempo_world::ActorStateRequest`). Set the fields you need and fill the rest with
+`..Default::default()`: a field added in a later release then takes its default rather than
+breaking the call. An RPC whose request is `TempoCore.Empty` takes no argument, and a deprecated
+RPC's function is marked `#[deprecated]`. The fluent `call()` builder works the same as in Python —
+see [TempoWorld](../plugins/tempo-world.md#calling-functions).
 
 Re-exported at the crate root: `set_server`, `set_server_async`, `set_socket`, `set_socket_async`,
 `tempo_context`, `TempoContext`,
 `TempoError`, `SyncStreamIterator`.
-
-!!! note "Optional message fields"
-
-    Generated wrappers take optional message-typed fields as `impl Into<Option<T>>`, so you can
-    pass either the value or `None` without wrapping at the call site.
 
 ## Publishing your own crate
 

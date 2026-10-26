@@ -137,7 +137,10 @@ def test_component_handles_carry_their_component(classes, wire):
 
 @pytest.fixture
 def requests(monkeypatch, classes):
-    """Every request the runtime builds, as the keyword arguments it hands the generated client."""
+    """Every request the runtime builds, as the keyword arguments it hands the generated client.
+
+    Each is built into its request message first, as the generated client would, so an argument
+    the request has no field for fails here rather than against a sim."""
     import tempo_sim.unreal as unreal
     import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
 
@@ -146,11 +149,13 @@ def requests(monkeypatch, classes):
     class FakeWorld:
         @staticmethod
         def get_property(**kwargs):
+            WorldControl.GetPropertyRequest(**kwargs)
             sent.append(("get_property", kwargs))
             return WorldControl.Value(bool_value=True)
 
         @staticmethod
         def get_properties(**kwargs):
+            WorldControl.GetPropertiesRequest(**kwargs)
             sent.append(("get_properties", kwargs))
 
             class Response:
@@ -159,10 +164,12 @@ def requests(monkeypatch, classes):
 
         @staticmethod
         def set_property(**kwargs):
+            WorldControl.SetPropertyRequest(**kwargs)
             sent.append(("set_property", kwargs))
 
         @staticmethod
         def call_function(**kwargs):
+            WorldControl.CallFunctionRequest(**kwargs)
             sent.append(("call_function", kwargs))
 
             class Response:
@@ -215,7 +222,7 @@ def test_get_subsystem_resolves_it_and_types_the_handle(classes, requests):
     assert subsystem.subsystem == classes.Widget.__tempo_class__
     # Asked once, up front, so a subsystem that declined to exist fails at the lookup.
     assert requests == [("get_properties", {"subsystem": classes.Widget.__tempo_class__,
-                                            "properties": [], "native_units": True})]
+                                            "properties": []})]
 
 
 def test_a_subsystem_cannot_be_held_by_a_reference_property(classes):
@@ -405,8 +412,9 @@ def _flat(value):
 def test_conversions_apply_the_servers_rule(classes):
     # The expected numbers are TempoConversion.h's: cm -> m with Y negated for a length, degrees ->
     # radians with pitch and yaw negated for a rotation, and a direction's handedness alone.
+    import tempo_sim.TempoCore.Geometry_pb2 as Geometry
     import tempo_sim.unreal as unreal
-    from tempo_sim.conversion import (quat_of, si_direction_to_ue, si_to_ue,
+    from tempo_sim.conversion import (quat_of, rotator_of, si_direction_to_ue, si_to_ue,
                                       ue_direction_to_si, ue_to_si)
 
     assert ue_to_si(250.0) == 2.5 and si_to_ue(2.5) == 250.0, "a bare number is a length"
@@ -416,11 +424,23 @@ def test_conversions_apply_the_servers_rule(classes):
     assert (v2.x, v2.y) == (1.0, -0.5)
     r = ue_to_si(unreal.FRotator(Pitch=45.0, Yaw=180.0, Roll=90.0))
     assert (r.r, r.p, r.y) == pytest.approx((math.pi / 2, -math.pi / 4, -math.pi))
-    q = ue_to_si(quat_of(unreal.FRotator(Yaw=90.0)))
-    assert (q.r, q.p, q.y) == pytest.approx((0.0, 0.0, -math.pi / 2))
+    # A quaternion stays one: X and Z negated, Y and W kept, as QuantityConverter<L2R> does it.
+    q = ue_to_si(unreal.FQuat(0.1, 0.2, 0.3, 0.9))
+    assert type(q).__name__ == "Quat"
+    assert (q.x, q.y, q.z, q.w) == pytest.approx((-0.1, 0.2, -0.3, 0.9))
+    assert si_to_ue(q) == unreal.FQuat(0.1, 0.2, 0.3, 0.9)
+    # And reaches a Rotation through the rotator Unreal makes of it.
+    yawed = ue_to_si(rotator_of(quat_of(unreal.FRotator(Yaw=90.0))))
+    assert (yawed.r, yawed.p, yawed.y) == pytest.approx((0.0, 0.0, -math.pi / 2))
     t = ue_to_si(unreal.FTransform(quat_of(unreal.FRotator(Yaw=90.0)),
-                                   unreal.FVector(100.0, 50.0, 0.0), unreal.FVector(2.0, 2.0, 2.0)))
+                                   unreal.FVector(100.0, 50.0, 0.0), unreal.FVector(2.0, 3.0, 4.0)))
     assert (t.location.x, t.location.y, t.rotation.y) == pytest.approx((1.0, -0.5, -math.pi / 2))
+    # A scale is a ratio: carried as it is, handedness and all.
+    assert (t.scale.x, t.scale.y, t.scale.z) == (2.0, 3.0, 4.0)
+    # Unset, it is Unreal's default of 1, as the server reads a transform given without one.
+    unscaled = si_to_ue(Geometry.Transform(location=Geometry.Vector(x=1.0)))
+    assert unscaled.Scale3D == unreal.FVector(1.0, 1.0, 1.0)
+    assert unscaled.Translation == unreal.FVector(100.0, 0.0, 0.0)
 
     d = ue_direction_to_si(unreal.FVector(0.0, 1.0, 0.0))
     assert (d.x, d.y, d.z) == (0.0, -1.0, 0.0)
@@ -428,9 +448,9 @@ def test_conversions_apply_the_servers_rule(classes):
 
     for value in (unreal.FVector(1.0, 2.0, 3.0), unreal.FVector2D(4.0, 5.0),
                   unreal.FRotator(10.0, 20.0, 30.0),
-                  # Scale 1: TempoCore.Transform carries none, so a round trip comes back with 1.
+                  quat_of(unreal.FRotator(-40.0, 150.0, 60.0)),
                   unreal.FTransform(quat_of(unreal.FRotator(4.0, 5.0, 6.0)),
-                                    unreal.FVector(1.0, 2.0, 3.0))):
+                                    unreal.FVector(1.0, 2.0, 3.0), unreal.FVector(0.5, 2.0, -1.0))):
         back = si_to_ue(ue_to_si(value))
         assert type(back) is type(value)
         assert _flat(back) == pytest.approx(_flat(value)), (value, back)
@@ -527,6 +547,26 @@ def test_the_world_mirror_sends_names_for_handles(classes, world_calls):
         ("raycast", {"start": world.Vector(), "end": location, "collision_channel": 0,
                      "ignored_actors": ["Truck", "Marker"]}),
     ]
+
+
+def test_a_transform_carries_its_own_scale(classes, world_calls):
+    """No scale beside the transform: the deprecated field is not sent, and not offered."""
+    import inspect
+
+    import tempo_sim.unreal as unreal
+    import tempo_sim.world as world
+
+    scaled = world.Transform(location=world.Vector(x=1.0), scale=world.Vector(x=2.0, y=2.0, z=2.0))
+    world.set_actor_transform(unreal.Object("Truck"), scaled)
+    world.set_component_transform(unreal.Object("Truck", "Body"), scaled, relative_to_world=True)
+    assert world_calls == [
+        ("set_actor_transform", {"actor": "Truck", "transform": scaled, "relative_to_actor": ""}),
+        ("set_component_transform", {"actor": "Truck", "component": "Body", "transform": scaled,
+                                     "relative_to_world": True}),
+    ]
+    for function in (world.set_actor_transform, world.set_actor_transform_async,
+                     world.set_component_transform, world.set_component_transform_async):
+        assert "scale" not in inspect.signature(function).parameters, function.__name__
 
 
 def test_the_world_mirror_refuses_the_wrong_kind_of_handle(classes, world_calls):
@@ -1387,6 +1427,7 @@ def fake_calls(monkeypatch, classes):
     class FakeWorld:
         @staticmethod
         def call_function(**kwargs):
+            WorldControl.CallFunctionRequest(**kwargs)
             recorded["calls"].append(kwargs)
 
             class Response:
@@ -1411,8 +1452,6 @@ def test_a_function_is_callable_through_the_handle(classes, fake_calls):
     assert call["function"] == "Refresh"
     assert call["actor"] == "MyActor"
     assert list(call["args"]) == []
-    # The typed API is Unreal-native, and a function argument is the same Value a property takes.
-    assert call["native_units"] is True
 
 
 def test_arguments_may_be_positional_or_named(classes, fake_calls):
@@ -1534,6 +1573,7 @@ def test_watch_yields_each_value(classes, monkeypatch):
     class FakeWorld:
         @staticmethod
         def stream_property(**kwargs):
+            WorldControl.GetPropertyRequest(**kwargs)
             asked.update(kwargs)
             for value in (True, False, True):
                 yield WorldControl.Value(bool_value=value)
@@ -1544,7 +1584,6 @@ def test_watch_yields_each_value(classes, monkeypatch):
     assert list(widget.watch("bEnabled")) == [True, False, True]
     assert asked["property"] == "bEnabled"
     assert asked["actor"] == "MyActor"
-    assert asked["native_units"] is True
 
 
 def test_watching_an_unknown_property_fails_immediately(classes, monkeypatch):

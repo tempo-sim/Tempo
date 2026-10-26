@@ -3,10 +3,10 @@
 # The hand-written base of the reflected API: the root class every generated class derives from,
 # and the value types that carry Unreal's structs.
 #
-# Everything in this module is in Unreal's own units -- centimeters, degrees, left-handed -- which is
-# the one place in the Tempo API where that is true. Raw UPROPERTY values carry no semantic tagging,
-# so converting them would be guesswork; the typed API therefore does not convert at all and says so
-# here rather than per property.
+# Everything in this module is in Unreal's own units -- centimeters, degrees, left-handed -- as are
+# the generic property and function RPCs it rides on, and nothing else in the Tempo API. Raw
+# UPROPERTY values carry no semantic tagging, so converting them would be guesswork; the typed API
+# therefore does not convert at all and says so here rather than per property.
 #
 # Which is why the value types here are Unreal's own, named and shaped as Unreal's are -- FVector,
 # FRotator constructed (Pitch, Yaw, Roll), FTransform with its quaternion and scale -- and not the
@@ -315,7 +315,7 @@ class Object:
         if wanted:
             _require_blocking("a snapshot", "`async with handle.snapshot_async()`")
             response = _world().get_properties(
-                **self._target(), properties=wanted, native_units=True)
+                **self._target(), properties=wanted)
         with self._serving(response):
             yield self
 
@@ -334,7 +334,7 @@ class Object:
         response = None
         if wanted:
             response = await _world().get_properties(
-                **self._target(), properties=wanted, native_units=True)
+                **self._target(), properties=wanted)
         with self._serving(response):
             yield self
 
@@ -390,15 +390,13 @@ class Object:
         """
         member = self._watchable(name)
         _require_blocking("watch", "`async for value in handle.watch_async(name)`")
-        for message in _world().stream_property(**self._target(), property=name,
-                                                native_units=True):
+        for message in _world().stream_property(**self._target(), property=name):
             yield _from_value(message, member)
 
     async def watch_async(self, name):
         """`watch`, for a coroutine: `async for speed in truck.watch_async("MaxSpeed")`."""
         member = self._watchable(name)
-        async for message in _world().stream_property(**self._target(), property=name,
-                                                      native_units=True):
+        async for message in _world().stream_property(**self._target(), property=name):
             yield _from_value(message, member)
 
     def _watchable(self, name):
@@ -879,7 +877,7 @@ _COMPONENT_VARIANTS = {
     "vector2d_value": ("x", "y"),
     "int_vector_value": ("x", "y", "z"),
     "int_point_value": ("x", "y"),
-    # The wire's r/p/y carry Unreal's roll, pitch and yaw, unconverted under native_units.
+    # The wire's r/p/y carry Unreal's roll, pitch and yaw, in degrees, unconverted.
     "rotator_value": ("p", "y", "r"),
     "quat_value": ("x", "y", "z", "w"),
     "color_value": ("r", "g", "b", "a"),
@@ -1246,13 +1244,13 @@ class Batch:
     def add_write(self, target, address, variant, value):
         WorldControl = _worldcontrol()
         self._add(WorldControl.BatchOp(set=WorldControl.SetPropertyRequest(
-            **target, property=address, value=_to_value(variant, value), native_units=True)),
+            **target, property=address, value=_to_value(variant, value))),
             "write {}".format(_where(target, address)))
 
     def add_call(self, target, function, argument, variant, value):
         WorldControl = _worldcontrol()
         self._add(WorldControl.BatchOp(call=WorldControl.CallFunctionRequest(
-            **target, function=function, native_units=True,
+            **target, function=function,
             args=[WorldControl.FunctionArg(name=argument, value=_to_value(variant, value))])),
             "call {}".format(_where(target, function)))
 
@@ -1445,7 +1443,7 @@ def _read(target, address, member=None):
         # of them -- a read that skipped the queue would report the value from before the batch.
         WorldControl = _worldcontrol()
         op = WorldControl.BatchOp(get=WorldControl.GetPropertyRequest(
-            **target, property=address, native_units=True))
+            **target, property=address))
         description = "read {}".format(_where(target, address))
 
         def decode(result):
@@ -1459,7 +1457,7 @@ def _read(target, address, member=None):
 
     _require_blocking("Reading {}".format(_where(target, address)),
                       "`await world.get_async(lambda: ...)`")
-    return _from_value(_world().get_property(**target, property=address, native_units=True),
+    return _from_value(_world().get_property(**target, property=address),
                        member)
 
 
@@ -1489,7 +1487,7 @@ def _write(target, address, member, value):
         else:
             _require_blocking("Writing {}".format(_where(target, address)),
                               "`async with world.batch()`")
-            _world().call_function(**target, function=setter, native_units=True,
+            _world().call_function(**target, function=setter,
                                    args=[{"name": argument,
                                           "value": _to_value(member["variant"], value)}])
         return
@@ -1500,7 +1498,7 @@ def _write(target, address, member, value):
 
     _require_blocking("Writing {}".format(_where(target, address)), "`async with world.batch()`")
     _world().set_property(**target, property=address,
-                          value=_to_value(member["variant"], value), native_units=True)
+                          value=_to_value(member["variant"], value))
 
 
 
@@ -1567,7 +1565,7 @@ class BoundFunction:
             # In order with whatever the batch has queued, exactly as a read is.
             WorldControl = _worldcontrol()
             op = WorldControl.BatchOp(call=WorldControl.CallFunctionRequest(
-                **self._owner._target(), function=self._name, native_units=True,
+                **self._owner._target(), function=self._name,
                 args=[WorldControl.FunctionArg(name=argument["name"], value=argument["value"])
                       for argument in arguments]))
             description = "call {}".format(_where(self._owner._target(), self._name))
@@ -1585,7 +1583,7 @@ class BoundFunction:
         _require_blocking("Calling {}".format(_where(self._owner._target(), self._name)),
                           "`await world.call_async(lambda: ...)`")
         response = _world().call_function(**self._owner._target(), function=self._name,
-                                          args=arguments, native_units=True)
+                                          args=arguments)
         return _function_result(response, self._signature)
 
     def __repr__(self):

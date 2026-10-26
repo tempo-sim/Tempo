@@ -8,6 +8,7 @@ import grpc
 import tempo_sim
 import tempo_sim.tempo_world as tw
 import tempo_sim.TempoCore.Geometry_pb2 as Geometry
+import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import FuzzyWordCompleter
@@ -190,56 +191,74 @@ def parse_bool(text):
     raise ValueError(f"Cannot parse '{text}' as bool. Use true/false, 1/0, or yes/no.")
 
 
+# The Value variant an array of each element type travels in, and how one element parses.
+ARRAY_VARIANTS = {
+    "bool": ("bool_array_value", parse_bool),
+    "string": ("string_array_value", str),
+    "enum": ("enum_array_value", str),
+    "int": ("int_array_value", int),
+    "int32": ("int_array_value", int),
+    "int64": ("int64_array_value", int),
+    "float": ("float_array_value", float),
+    "double": ("float_array_value", float),
+    "class": ("class_array_value", str),
+    "asset": ("asset_array_value", str),
+    "actor": ("actor_array_value", str),
+    "component": ("component_array_value", str),
+}
+
+
+def _numbers(value_text, count, message, kind=float):
+    parts = value_text.split()
+    if len(parts) != count:
+        raise ValueError(message)
+    return [kind(part) for part in parts]
+
+
+def parse_value(prop_type, value_text):
+    """Parse value_text according to prop_type into the Value set_property takes.
+
+    A Value is in Unreal's own units, as the property stores it: centimeters, degrees, left-handed.
+    """
+    t = prop_type.lower().strip()
+
+    # Array types. Values are comma-separated.
+    if t.endswith("[]"):
+        base = t[:-2]
+        if base not in ARRAY_VARIANTS:
+            print(f"  Unsupported array type: {base}[]. Attempting as string array.")
+        variant, parse = ARRAY_VARIANTS.get(base, ("string_array_value", str))
+        values = [parse(v.strip()) for v in value_text.split(",")]
+        return WorldControl.Value(**{variant: {"values": values}})
+
+    if t == "bool":
+        return WorldControl.Value(bool_value=parse_bool(value_text))
+    if t in ("int", "int32"):
+        return WorldControl.Value(int_value=int(value_text))
+    if t == "int64":
+        return WorldControl.Value(int64_value=int(value_text))
+    if t in ("float", "double"):
+        return WorldControl.Value(float_value=float(value_text))
+    if t == "vector":
+        x, y, z = _numbers(value_text, 3, "Vector requires 3 values: X Y Z (centimeters)")
+        return WorldControl.Value(vector_value=Geometry.Vector(x=x, y=y, z=z))
+    if t == "rotator":
+        r, p, y = _numbers(value_text, 3, "Rotator requires 3 values: Roll Pitch Yaw (degrees)")
+        return WorldControl.Value(rotator_value=Geometry.Rotation(r=r, p=p, y=y))
+    if t == "color":
+        r, g, b = _numbers(value_text, 3, "Color requires 3 values: R G B (0-255)", int)
+        return WorldControl.Value(color_value=WorldControl.Color(r=r, g=g, b=b))
+    if t in ("string", "enum", "class", "asset", "actor", "component"):
+        return WorldControl.Value(**{t + "_value": value_text})
+    print(f"  Unsupported property type: {prop_type}. Attempting as string.")
+    return WorldControl.Value(string_value=value_text)
+
+
 async def set_property_value(actor, component, prop_name, prop_type, value_text):
-    """Parse value_text according to prop_type and call the correct setter."""
-    kwargs = dict(actor=actor, component=component, property=prop_name)
-
+    """Parse value_text according to prop_type and set the property."""
     try:
-        t = prop_type.lower().strip()
-
-        # Array types
-        if t.endswith("[]"):
-            base = t[:-2]
-            return await _set_array_property(base, kwargs, value_text)
-
-        # Scalar types
-        if t == "bool":
-            await tw.set_bool_property(**kwargs, value=parse_bool(value_text))
-        elif t == "string":
-            await tw.set_string_property(**kwargs, value=value_text)
-        elif t == "enum":
-            await tw.set_enum_property(**kwargs, value=value_text)
-        elif t in ("int", "int32", "int64"):
-            await tw.set_int_property(**kwargs, value=int(value_text))
-        elif t in ("float", "double"):
-            await tw.set_float_property(**kwargs, value=float(value_text))
-        elif t == "vector":
-            parts = value_text.split()
-            if len(parts) != 3:
-                raise ValueError("Vector requires 3 values: X Y Z")
-            await tw.set_vector_property(**kwargs, x=float(parts[0]), y=float(parts[1]), z=float(parts[2]))
-        elif t == "rotator":
-            parts = value_text.split()
-            if len(parts) != 3:
-                raise ValueError("Rotator requires 3 values: Roll Pitch Yaw")
-            await tw.set_rotator_property(**kwargs, r=float(parts[0]), p=float(parts[1]), y=float(parts[2]))
-        elif t == "color":
-            parts = value_text.split()
-            if len(parts) != 3:
-                raise ValueError("Color requires 3 values: R G B (0-255)")
-            await tw.set_color_property(**kwargs, r=int(parts[0]), g=int(parts[1]), b=int(parts[2]))
-        elif t == "class":
-            await tw.set_class_property(**kwargs, value=value_text)
-        elif t == "asset":
-            await tw.set_asset_property(**kwargs, value=value_text)
-        elif t == "actor":
-            await tw.set_actor_property(**kwargs, value=value_text)
-        elif t == "component":
-            await tw.set_component_property(**kwargs, value=value_text)
-        else:
-            print(f"  Unsupported property type: {prop_type}. Attempting as string.")
-            await tw.set_string_property(**kwargs, value=value_text)
-
+        value = parse_value(prop_type, value_text)
+        await tw.set_property(actor=actor, component=component, property=prop_name, value=value)
         return True
     except grpc.aio._call.AioRpcError as e:
         print(f"  RPC Error: {e.details()}")
@@ -247,35 +266,6 @@ async def set_property_value(actor, component, prop_name, prop_type, value_text)
     except (ValueError, IndexError) as e:
         print(f"  Parse error: {e}")
         return False
-
-
-async def _set_array_property(base_type, kwargs, value_text):
-    """Set an array property. Values are comma-separated."""
-    parts = [v.strip() for v in value_text.split(",")]
-
-    if base_type == "bool":
-        await tw.set_bool_array_property(**kwargs, values=[parse_bool(v) for v in parts])
-    elif base_type == "string":
-        await tw.set_string_array_property(**kwargs, values=parts)
-    elif base_type == "enum":
-        await tw.set_enum_array_property(**kwargs, values=parts)
-    elif base_type in ("int", "int32", "int64"):
-        await tw.set_int_array_property(**kwargs, values=[int(v) for v in parts])
-    elif base_type in ("float", "double"):
-        await tw.set_float_array_property(**kwargs, values=[float(v) for v in parts])
-    elif base_type == "class":
-        await tw.set_class_array_property(**kwargs, values=parts)
-    elif base_type == "asset":
-        await tw.set_asset_array_property(**kwargs, values=parts)
-    elif base_type == "actor":
-        await tw.set_actor_array_property(**kwargs, values=parts)
-    elif base_type == "component":
-        await tw.set_component_array_property(**kwargs, values=parts)
-    else:
-        print(f"  Unsupported array type: {base_type}[]. Attempting as string array.")
-        await tw.set_string_array_property(**kwargs, values=parts)
-
-    return True
 
 
 # ---------------------------------------------------------------------------
@@ -534,9 +524,9 @@ def _type_hint(prop_type):
     if t == "bool":
         return " (true/false)"
     elif t == "vector":
-        return " (X Y Z)"
+        return " (X Y Z, centimeters)"
     elif t == "rotator":
-        return " (Roll Pitch Yaw)"
+        return " (Roll Pitch Yaw, degrees)"
     elif t == "color":
         return " (R G B, 0-255)"
     elif t.endswith("[]"):
@@ -550,8 +540,8 @@ TYPE_CHOICES = [
     ("float",     "float"),
     ("string",    "string"),
     ("enum",      "enum"),
-    ("vector",    "vector (X Y Z)"),
-    ("rotator",   "rotator (Roll Pitch Yaw)"),
+    ("vector",    "vector (X Y Z, centimeters)"),
+    ("rotator",   "rotator (Roll Pitch Yaw, degrees)"),
     ("color",     "color (R G B, 0-255)"),
     ("class",     "class"),
     ("asset",     "asset"),

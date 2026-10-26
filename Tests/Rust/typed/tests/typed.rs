@@ -17,7 +17,8 @@ use project::reflected::classes::engine::{
 };
 use project::reflected::enums::EWalkableSlopeBehavior;
 use project::reflected::structs::FWalkableSlopeOverride;
-use tempo_sim::conversion::{quat_of, rotator_of};
+use tempo_sim::conversion::{quat_of, rotator_of, ue_to_si};
+use tempo_sim::proto::tempo_world::{value, Value};
 use tempo_sim::unreal::{Class, FRotator, FTransform, FVector};
 use tempo_sim::world;
 
@@ -65,19 +66,23 @@ impl Spawned {
 
 impl Drop for Spawned {
     fn drop(&mut self) {
-        let _ = tempo_sim::tempo_world::destroy_actor(self.name());
+        let request = tempo_sim::tempo_world::DestroyActorRequest { actor: self.name() };
+        let _ = tempo_sim::tempo_world::destroy_actor(request);
     }
 }
 
 /// Make the actor's root movable. A spawned StaticMeshActor's root is Static, which refuses both a
 /// move and a new mesh -- correctly, and with a false return that the tests below are not about.
 fn make_movable(actor: &Spawned) {
-    tempo_sim::tempo_world::set_enum_property(
-        actor.name(),
-        "StaticMeshComponent0".to_string(),
-        "Mobility".to_string(),
-        "Movable".to_string(),
-    )
+    // The root's own handle, typed, would do this as well; the generic RPC is what a scenario
+    // without the reflected API would write.
+    tempo_sim::tempo_world::set_property(tempo_sim::tempo_world::SetPropertyRequest {
+        actor: actor.name(),
+        component: "StaticMeshComponent0".into(),
+        property: "Mobility".into(),
+        value: Some(Value { value: Some(value::Value::EnumValue("Movable".into())) }),
+        ..Default::default()
+    })
     .expect("make the root movable");
 }
 
@@ -337,6 +342,43 @@ fn a_transform_travels_in_unreals_shape() {
     );
     assert!(close(got.translation.x, 100.0) && close(got.translation.z, 50.0), "{got:?}");
     assert!(close(rotator_of(&got.rotation).yaw, 90.0), "{got:?}");
+}
+
+#[test]
+fn a_transform_set_in_si_carries_its_scale_and_converts_back() {
+    connect();
+    let actor = spawn();
+    make_movable(&actor);
+
+    // The scale rides in the transform, used as given.
+    world::set_actor_transform(
+        actor.actor(),
+        world::Transform {
+            location: Some(world::Vector { x: 1.0, y: 2.0, z: 0.5 }),
+            rotation: Some(world::Rotation { r: 0.0, p: 0.0, y: 0.5 }),
+            scale: Some(world::Vector { x: 2.0, y: 3.0, z: 4.0 }),
+        },
+        None,
+    )
+    .expect("set_actor_transform");
+    let reported = world::get_actor_transform(actor.actor(), None)
+        .expect("get_actor_transform")
+        .transform
+        .expect("a transform");
+
+    // The generated class reads the same transform in Unreal's shape, and converting it gives what
+    // the converting RPC reported.
+    let converted = ue_to_si(&actor.actor().get_transform().expect("GetTransform"));
+    let close = |a: f64, b: f64| (a - b).abs() < 1e-3;
+    let (scale, back) = (reported.scale.expect("a scale"), converted.scale.expect("a scale"));
+    assert!(close(scale.x, 2.0) && close(scale.y, 3.0) && close(scale.z, 4.0), "{scale:?}");
+    assert!(close(back.x, scale.x) && close(back.y, scale.y) && close(back.z, scale.z), "{back:?}");
+    let location = reported.location.expect("a location");
+    let back = converted.location.expect("a location");
+    assert!(close(back.x, location.x) && close(back.y, location.y) && close(back.z, location.z));
+    let rotation = reported.rotation.expect("a rotation");
+    let back = converted.rotation.expect("a rotation");
+    assert!(close(rotation.y, 0.5) && close(back.y, rotation.y), "{rotation:?} vs {back:?}");
 }
 
 #[test]

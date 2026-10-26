@@ -182,6 +182,7 @@ nav:
       - migration/engine-mods-removal.md
       - migration/engine-plugin-mods.md
       - migration/ros-opt-in.md
+      - migration/v0.4.0.md
       - migration/v0.3.0.md
       - migration/sensors-v0.2.0.md
       - migration/v0.1.0.md

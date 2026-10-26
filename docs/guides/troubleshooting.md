@@ -196,8 +196,9 @@ names from the responses.
 
 ### A property set is silently in the wrong units
 
-`set_float_property` and the vector-shaped setters are **not** unit-converted — they write the raw
-`UPROPERTY`, so distances must be in centimeters. Rotators, quats and transforms *are* converted.
+`set_property`, `get_property` and `call_function` are **not** unit-converted — they read and
+write the raw `UPROPERTY`, so a distance is in centimeters and a rotator in degrees. The
+deprecated typed setters differ: their rotators, quats and transforms *are* converted.
 
 [:octicons-arrow-right-24: Units and coordinates](../concepts/conventions.md#the-exception-set_property)
 

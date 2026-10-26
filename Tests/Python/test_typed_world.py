@@ -67,6 +67,12 @@ requires_classes = pytest.mark.skipif(
     reason="the generated class package is not installed (it ships in Packaged/API/Python)")
 
 
+def _make_movable(actor, component):
+    """Make a component Movable: a spawned StaticMeshActor's root is Static, which refuses to move."""
+    tw.set_property(actor=actor, component=component, property="Mobility",
+                    value=WorldControl.Value(enum_value="Movable"))
+
+
 @pytest.fixture
 def actor(sim_server):
     """A spawned StaticMeshActor, destroyed afterwards."""
@@ -84,7 +90,7 @@ def root_component(actor):
     components = tw.get_all_components(actor=actor).components
     assert components, "{} reported no components".format(actor)
     root = next((c.name for c in components if "StaticMesh" in c.component_type), components[0].name)
-    tw.set_enum_property(actor=actor, component=root, property="Mobility", value="Movable")
+    _make_movable(actor, root)
     return actor, root
 
 
@@ -96,8 +102,8 @@ def root_component(actor):
 
 def _round_trip(actor, component, prop, value_kwargs, expected_variant):
     tw.set_property(actor=actor, component=component, property=prop,
-                    value=WorldControl.Value(**value_kwargs), native_units=True)
-    read = tw.get_property(actor=actor, component=component, property=prop, native_units=True)
+                    value=WorldControl.Value(**value_kwargs))
+    read = tw.get_property(actor=actor, component=component, property=prop)
     assert read.WhichOneof("value") == expected_variant, \
         "wrote {} and read back {}".format(expected_variant, read.WhichOneof("value"))
     return read
@@ -113,7 +119,7 @@ def test_bool_round_trips(root_component):
 
 def test_vector_round_trips_in_native_units(root_component):
     actor, root = root_component
-    # native_units, so this is centimetres and nothing is converted in either direction.
+    # A property is Unreal-native, so this is centimetres and nothing is converted either way.
     read = _round_trip(actor, root, "RelativeScale3D",
                        {"vector_value": {"x": 2.0, "y": 3.0, "z": 4.0}}, "vector_value")
     assert (read.vector_value.x, read.vector_value.y, read.vector_value.z) == (2.0, 3.0, 4.0)
@@ -131,7 +137,7 @@ def test_rotator_round_trips_in_degrees(root_component):
 
 def test_enum_round_trips_by_authored_name(root_component):
     actor, root = root_component
-    read = tw.get_property(actor=actor, component=root, property="Mobility", native_units=True)
+    read = tw.get_property(actor=actor, component=root, property="Mobility")
     assert read.WhichOneof("value") == "enum_value"
     # The fixture set it to Movable by name, and the name is what comes back.
     assert read.enum_value == "Movable"
@@ -165,7 +171,7 @@ def test_an_fstring_property_round_trips_exactly(root_component):
                     "string_array_value")
     except grpc.RpcError as error:  # pragma: no cover - depends on the build
         pytest.skip("string array not writable here: {}".format(error))
-    read = tw.get_property(actor=actor, property="Tags", native_units=True)
+    read = tw.get_property(actor=actor, property="Tags")
     # Still an FName, so this asserts identity rather than casing.
     assert [v.lower() for v in read.string_array_value.values] == ["mixed"]
 
@@ -182,19 +188,18 @@ def test_a_read_does_not_create_what_is_missing(actor):
     import grpc
     # Tags starts empty, so index 0 is past the end. A write to it would append.
     with pytest.raises(grpc.RpcError) as caught:
-        tw.get_property(actor=actor, property="Tags[0]", native_units=True)
+        tw.get_property(actor=actor, property="Tags[0]")
     assert caught.value.code() == grpc.StatusCode.OUT_OF_RANGE
 
     # Still empty: the failed read must not have added anything.
-    read = tw.get_property(actor=actor, property="Tags", native_units=True)
+    read = tw.get_property(actor=actor, property="Tags")
     assert list(read.string_array_value.values) == []
 
 
 def test_reading_several_properties_in_one_call(root_component):
     actor, root = root_component
     response = tw.get_properties(actor=actor, component=root,
-                                 properties=["bVisible", "RelativeScale3D", "Mobility"],
-                                 native_units=True)
+                                 properties=["bVisible", "RelativeScale3D", "Mobility"])
     assert [entry.name for entry in response.values] == ["bVisible", "RelativeScale3D", "Mobility"]
     assert all(entry.code == 0 for entry in response.values), \
         [(e.name, e.error) for e in response.values if e.code != 0]
@@ -203,7 +208,7 @@ def test_reading_several_properties_in_one_call(root_component):
 def test_one_unreadable_property_does_not_fail_the_batch(root_component):
     actor, root = root_component
     response = tw.get_properties(actor=actor, component=root,
-                                 properties=["bVisible", "NoSuchPropertyAtAll"], native_units=True)
+                                 properties=["bVisible", "NoSuchPropertyAtAll"])
     by_name = {entry.name: entry for entry in response.values}
     assert by_name["bVisible"].code == 0
     assert by_name["NoSuchPropertyAtAll"].code != 0
@@ -383,14 +388,13 @@ def test_a_handle_made_from_a_name_alone_knows_its_class(sim_server):
 def test_call_function_returns_typed_results(root_component):
     """A function's results come back in the same representation a property read uses."""
     actor, root = root_component
-    response = tw.call_function(actor=actor, component=root, function="GetRelativeTransform",
-                                native_units=True)
+    response = tw.call_function(actor=actor, component=root, function="GetRelativeTransform")
     assert response.results, "GetRelativeTransform should hand something back"
     returned = next(r for r in response.results if r.name == "ReturnValue")
     # The legacy string form is still there, and still a string.
     assert returned.value
-    # The typed form needs no parsing and can be fed straight back in. Under native_units a
-    # transform is Unreal's own shape, quaternion and scale included.
+    # The typed form needs no parsing and can be fed straight back in. A transform is Unreal's own
+    # shape, quaternion and scale included.
     assert returned.HasField("typed_value")
     assert returned.typed_value.WhichOneof("value") == "native_transform_value"
 
@@ -407,14 +411,13 @@ def test_a_typed_result_matches_the_property_it_reports(root_component):
     """
     actor, root = root_component
     tw.set_property(actor=actor, component=root, property="RelativeLocation",
-                    value=WorldControl.Value(vector_value={"x": 10.0, "y": 20.0, "z": 30.0}),
-                    native_units=True)
+                    value=WorldControl.Value(vector_value={"x": 10.0, "y": 20.0, "z": 30.0}))
 
-    from_property = tw.get_property(actor=actor, component=root, property="RelativeLocation",
-                                    native_units=True).vector_value
+    from_property = tw.get_property(actor=actor, component=root,
+                                    property="RelativeLocation").vector_value
     from_function = next(
-        r for r in tw.call_function(actor=actor, component=root, function="GetRelativeTransform",
-                                    native_units=True).results
+        r for r in tw.call_function(actor=actor, component=root,
+                                    function="GetRelativeTransform").results
         if r.name == "ReturnValue").typed_value.native_transform_value.translation
 
     assert (from_function.x, from_function.y, from_function.z) == \
@@ -433,12 +436,11 @@ def test_writing_a_transform_property_does_not_move_the_component(root_component
     """
     actor, root = root_component
     tw.set_property(actor=actor, component=root, property="RelativeLocation",
-                    value=WorldControl.Value(vector_value={"x": 10.0, "y": 20.0, "z": 30.0}),
-                    native_units=True)
+                    value=WorldControl.Value(vector_value={"x": 10.0, "y": 20.0, "z": 30.0}))
 
     world_location = next(
         r for r in tw.call_function(actor=actor, component=root,
-                                    function="K2_GetComponentLocation", native_units=True).results
+                                    function="K2_GetComponentLocation").results
         if r.name == "ReturnValue").typed_value.vector_value
 
     assert (world_location.x, world_location.y, world_location.z) == pytest.approx((0.0, 0.0, 0.0)), \
@@ -477,7 +479,7 @@ def _fields(value):
 def test_a_struct_property_reads_whole(root_component):
     """Every member comes back, inherited ones included, so a read is the whole struct."""
     actor, root = root_component
-    read = tw.get_property(actor=actor, component=root, property="BodyInstance", native_units=True)
+    read = tw.get_property(actor=actor, component=root, property="BodyInstance")
     assert read.WhichOneof("value") == "struct_value"
     assert read.struct_value.struct_name == "FBodyInstance"
     assert {"LinearDamping", "AngularDamping", "bEnableGravity"} <= set(_fields(read))
@@ -490,28 +492,26 @@ def test_a_struct_write_is_a_merge(root_component):
     does, since a struct can carry state reflection never reports.
     """
     actor, root = root_component
-    before = _fields(tw.get_property(actor=actor, component=root, property="BodyInstance",
-                                     native_units=True))
-    tw.set_property(actor=actor, component=root, property="BodyInstance", native_units=True,
+    before = _fields(tw.get_property(actor=actor, component=root, property="BodyInstance"))
+    tw.set_property(actor=actor, component=root, property="BodyInstance",
                     value=_struct_value("FBodyInstance", LinearDamping={"float_value": 0.75}))
-    after = _fields(tw.get_property(actor=actor, component=root, property="BodyInstance",
-                                    native_units=True))
+    after = _fields(tw.get_property(actor=actor, component=root, property="BodyInstance"))
     assert after["LinearDamping"].float_value == pytest.approx(0.75)
     assert after["AngularDamping"] == before["AngularDamping"], "an unmentioned member must not move"
 
 
 def test_a_nested_address_takes_a_struct_value(root_component):
     actor, root = root_component
-    tw.set_property(actor=actor, component=root, property="BodyInstance", native_units=True,
+    tw.set_property(actor=actor, component=root, property="BodyInstance",
                     value=_struct_value("FBodyInstance", AngularDamping={"float_value": 0.25}))
-    assert tw.get_property(actor=actor, component=root, property="BodyInstance.AngularDamping",
-                           native_units=True).float_value == pytest.approx(0.25)
+    assert tw.get_property(actor=actor, component=root,
+                           property="BodyInstance.AngularDamping").float_value == pytest.approx(0.25)
 
 
 def test_the_wrong_struct_is_refused(root_component):
     actor, root = root_component
     with pytest.raises(Exception, match="FHitResult"):
-        tw.set_property(actor=actor, component=root, property="BodyInstance", native_units=True,
+        tw.set_property(actor=actor, component=root, property="BodyInstance",
                         value=_struct_value("FHitResult", Time={"float_value": 1.0}))
 
 
@@ -519,13 +519,12 @@ def test_a_struct_argument_and_result_round_trip(root_component):
     """In through a parameter, out through a return value: the same struct, both ways."""
     actor, root = root_component
     tw.call_function(actor=actor, component=root, function="SetWalkableSlopeOverride",
-                     native_units=True,
                      args=[{"name": "NewOverride", "value": _struct_value(
                          "FWalkableSlopeOverride",
                          WalkableSlopeBehavior={"enum_value": "WalkableSlope_Increase"},
                          WalkableSlopeAngle={"float_value": 33.0})}])
     returned = next(r for r in tw.call_function(
-        actor=actor, component=root, function="GetWalkableSlopeOverride", native_units=True).results
+        actor=actor, component=root, function="GetWalkableSlopeOverride").results
         if r.name == "ReturnValue")
     fields = _fields(returned.typed_value)
     assert fields["WalkableSlopeBehavior"].enum_value == "WalkableSlope_Increase"
@@ -557,7 +556,7 @@ def test_an_out_struct_comes_back_by_name(sim_server):
         # false return, which is not what this test is about.
         root = next(c.name for c in tw.get_all_components(actor=spawned.actor).components
                     if "StaticMesh" in c.component_type)
-        tw.set_enum_property(actor=spawned.actor, component=root, property="Mobility", value="Movable")
+        _make_movable(spawned.actor, root)
         results = spawned.K2_SetActorLocation(unreal.FVector(100.0, 0.0, 0.0), False, True)
         assert results["ReturnValue"] is True
         hit = results["SweepHitResult"]
@@ -578,7 +577,7 @@ def test_a_transform_travels_in_unreals_shape(sim_server):
     try:
         root = next(c.name for c in tw.get_all_components(actor=spawned.actor).components
                     if "StaticMesh" in c.component_type)
-        tw.set_enum_property(actor=spawned.actor, component=root, property="Mobility", value="Movable")
+        _make_movable(spawned.actor, root)
         wanted = unreal.FTransform(quat_of(unreal.FRotator(Yaw=90.0)),
                                    unreal.FVector(100.0, 0.0, 50.0), unreal.FVector(2.0, 3.0, 4.0))
         assert spawned.K2_SetActorTransform(wanted, False, True)["ReturnValue"] is True
@@ -606,8 +605,7 @@ def test_the_world_mirror_works_on_handles(sim_server):
 
         root = next(c for c in world.get_components(spawned, StaticMeshComponent)
                     if c.component != added.component)
-        tw.set_enum_property(actor=spawned.actor, component=root.component, property="Mobility",
-                             value="Movable")
+        _make_movable(spawned.actor, root.component)
         world.set_actor_location(spawned, world.Vector(x=2.0, y=1.0, z=0.5))   # meters, right-handed
         location = world.get_actor_location(spawned).location
         assert (location.x, location.y, location.z) == pytest.approx((2.0, 1.0, 0.5), abs=1e-4)
@@ -625,12 +623,12 @@ def test_the_world_mirror_works_on_handles(sim_server):
 
 def _set_op(actor, prop, **value):
     return WorldControl.BatchOp(set=WorldControl.SetPropertyRequest(
-        actor=actor, property=prop, value=WorldControl.Value(**value), native_units=True))
+        actor=actor, property=prop, value=WorldControl.Value(**value)))
 
 
 def _get_op(actor, prop):
     return WorldControl.BatchOp(get=WorldControl.GetPropertyRequest(
-        actor=actor, property=prop, native_units=True))
+        actor=actor, property=prop))
 
 
 def test_a_batch_reads_its_own_writes_in_order(actor):
@@ -650,7 +648,7 @@ def test_a_batch_carries_calls(actor):
     response = tw.run_batch(ops=[
         _set_op(actor, "Tags", string_array_value={"values": ["batched"]}),
         WorldControl.BatchOp(call=WorldControl.CallFunctionRequest(
-            actor=actor, function="ActorHasTag", native_units=True,
+            actor=actor, function="ActorHasTag",
             args=[WorldControl.FunctionArg(name="Tag", value=WorldControl.Value(string_value="batched"))])),
     ])
     returned = next(r for r in response.results[1].call.results if r.name == "ReturnValue")
@@ -658,7 +656,8 @@ def test_a_batch_carries_calls(actor):
 
 
 def test_a_failed_op_stops_the_batch_when_asked(actor):
-    tw.set_bool_property(actor=actor, property="bCanBeDamaged", value=True)
+    tw.set_property(actor=actor, property="bCanBeDamaged",
+                    value=WorldControl.Value(bool_value=True))
     response = tw.run_batch(stop_on_failure=True, ops=[
         _set_op(actor, "NoSuchProperty", bool_value=True),
         _set_op(actor, "bCanBeDamaged", bool_value=False),
@@ -669,7 +668,8 @@ def test_a_failed_op_stops_the_batch_when_asked(actor):
 
 
 def test_a_failed_op_does_not_stop_the_batch_by_default(actor):
-    tw.set_bool_property(actor=actor, property="bCanBeDamaged", value=True)
+    tw.set_property(actor=actor, property="bCanBeDamaged",
+                    value=WorldControl.Value(bool_value=True))
     response = tw.run_batch(ops=[
         _set_op(actor, "NoSuchProperty", bool_value=True),
         _set_op(actor, "bCanBeDamaged", bool_value=False),
@@ -798,19 +798,18 @@ ENGINE_SUBSYSTEM = "/Script/UMG.GameViewportSubsystem"
 
 def test_a_world_subsystem_property_round_trips(sim_server):
     offset = "BrightnessMeterLateralOffset"
-    before = tw.get_property(subsystem=WORLD_SUBSYSTEM, property=offset, native_units=True)
+    before = tw.get_property(subsystem=WORLD_SUBSYSTEM, property=offset)
     try:
         tw.set_property(subsystem=WORLD_SUBSYSTEM, property=offset,
-                        value=WorldControl.Value(float_value=321.0), native_units=True)
-        read = tw.get_property(subsystem=WORLD_SUBSYSTEM, property=offset, native_units=True)
+                        value=WorldControl.Value(float_value=321.0))
+        read = tw.get_property(subsystem=WORLD_SUBSYSTEM, property=offset)
         assert read.float_value == pytest.approx(321.0)
     finally:
-        tw.set_property(subsystem=WORLD_SUBSYSTEM, property=offset, value=before, native_units=True)
+        tw.set_property(subsystem=WORLD_SUBSYSTEM, property=offset, value=before)
 
 
 def test_a_game_instance_subsystem_function_is_callable(sim_server):
-    response = tw.call_function(subsystem=GAME_INSTANCE_SUBSYSTEM, function="IsPlaying",
-                                native_units=True)
+    response = tw.call_function(subsystem=GAME_INSTANCE_SUBSYSTEM, function="IsPlaying")
     returned = next(r for r in response.results if r.name == "ReturnValue")
     assert returned.typed_value.bool_value is False, "nothing is replaying in a test sim"
 
@@ -822,19 +821,19 @@ def test_an_engine_subsystem_resolves(sim_server):
 
 def test_a_batch_addresses_a_subsystem(sim_server):
     offset = "BrightnessMeterLateralOffset"
-    before = tw.get_property(subsystem=WORLD_SUBSYSTEM, property=offset, native_units=True)
+    before = tw.get_property(subsystem=WORLD_SUBSYSTEM, property=offset)
     try:
         response = tw.run_batch(ops=[
             WorldControl.BatchOp(set=WorldControl.SetPropertyRequest(
                 subsystem=WORLD_SUBSYSTEM, property=offset,
-                value=WorldControl.Value(float_value=123.0), native_units=True)),
+                value=WorldControl.Value(float_value=123.0))),
             WorldControl.BatchOp(get=WorldControl.GetPropertyRequest(
-                subsystem=WORLD_SUBSYSTEM, property=offset, native_units=True)),
+                subsystem=WORLD_SUBSYSTEM, property=offset)),
         ])
         assert [result.code for result in response.results] == [0, 0]
         assert response.results[1].value.float_value == pytest.approx(123.0)
     finally:
-        tw.set_property(subsystem=WORLD_SUBSYSTEM, property=offset, value=before, native_units=True)
+        tw.set_property(subsystem=WORLD_SUBSYSTEM, property=offset, value=before)
 
 
 def test_a_class_that_is_not_a_subsystem_is_not_found(sim_server):
@@ -914,7 +913,7 @@ def test_an_unknown_class_is_not_found(sim_server):
 
 def test_streaming_a_property_yields_per_tick(root_component, ticking):
     actor, root = root_component
-    stream = tw.stream_property(actor=actor, component=root, property="bVisible", native_units=True)
+    stream = tw.stream_property(actor=actor, component=root, property="bVisible")
     try:
         for _ in range(3):
             value = next(stream)
@@ -925,7 +924,7 @@ def test_streaming_a_property_yields_per_tick(root_component, ticking):
 
 def test_streaming_an_unknown_property_errors(actor, ticking):
     import grpc
-    stream = tw.stream_property(actor=actor, property="NoSuchPropertyAtAll", native_units=True)
+    stream = tw.stream_property(actor=actor, property="NoSuchPropertyAtAll")
     with pytest.raises(grpc.RpcError):
         next(stream)
 

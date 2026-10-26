@@ -48,7 +48,7 @@ struct Spawned {
 	Spawned(const Spawned&) = delete;
 	Spawned& operator=(const Spawned&) = delete;
 	~Spawned() {
-		if (owns) (void)tempo::tempo_world::destroy_actor(actor.object().actor_name());
+		if (owns) (void)tempo::tempo_world::destroy_actor({.actor = actor.object().actor_name()});
 	}
 
 	StaticMeshActor actor;
@@ -68,8 +68,12 @@ std::optional<Spawned> spawn() {
 
 /// A spawned StaticMeshActor's root is Static, which refuses to move.
 bool make_movable(const Spawned& spawned) {
-	return tempo::tempo_world::set_enum_property(spawned.actor.object().actor_name(), "StaticMeshComponent0",
-												 "Mobility", "Movable")
+	TempoWorld::Value movable;
+	movable.set_enum_value("Movable");
+	return tempo::tempo_world::set_property({.actor = spawned.actor.object().actor_name(),
+											 .component = "StaticMeshComponent0",
+											 .property = "Mobility",
+											 .value = movable})
 		.ok();
 }
 
@@ -225,6 +229,15 @@ TEMPO_TEST(the_world_mirror_works_on_handles) {
 	auto unreal = spawned->actor.k2_get_actor_location();  // the same place in Unreal's terms
 	REQUIRE_OK(unreal);
 	CHECK(close(unreal.value().y, -100.0, 1e-2));
+
+	// A scale is carried in the transform, unconverted, both ways.
+	world::Transform scaled = conversion::ue_to_si(FTransform{FQuat{}, FVector{0, 0, 50}, FVector{2, 3, 4}});
+	REQUIRE_OK(world::set_actor_transform(spawned->actor, scaled));
+	auto pose = world::get_actor_transform(spawned->actor);
+	REQUIRE_OK(pose);
+	FTransform reported = conversion::si_to_ue(pose.value().transform());
+	CHECK(close(reported.scale3d.x, 2) && close(reported.scale3d.y, 3) && close(reported.scale3d.z, 4));
+	CHECK(close(reported.translation.z, 50, 1e-2));
 
 	REQUIRE_OK(world::destroy_component(added.value()));
 }

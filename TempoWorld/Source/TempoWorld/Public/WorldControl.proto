@@ -12,6 +12,7 @@ message SpawnActorRequest {
   // If true, defer finishing the spawn until FinishSpawningActor is called.
   bool deferred = 2;
   // Spawn transform (world frame, or relative to `relative_to_actor` if set). Meters / right-handed.
+  // Its scale is absolute: it is never composed through `relative_to_actor`.
   TempoCore.Transform transform = 3;
   // Optional actor name that `transform` is interpreted relative to.
   string relative_to_actor = 4;
@@ -73,17 +74,17 @@ message DestroyComponentRequest {
 message SetActorTransformRequest {
   // Name of the actor to move.
   string actor = 1;
-  // Target location and rotation (world frame, or relative to `relative_to_actor` if set).
-  // Meters / radians, right-handed. `transform.location` and `transform.rotation` are honored
-  // independently: supply only the rotation to turn the actor without moving it.
+  // Target location, rotation and scale (world frame, or relative to `relative_to_actor` if set).
+  // Meters / radians, right-handed. `transform.location`, `transform.rotation` and
+  // `transform.scale` are honored independently: supply only the rotation to turn the actor without
+  // moving it. The scale is absolute: it is never composed through `relative_to_actor`.
   TempoCore.Transform transform = 2;
   // Optional actor name that `transform` is interpreted relative to. `transform` is applied first
   // and that actor's transform second, the same order SpawnActor composes in.
   string relative_to_actor = 3;
-  // Optional new world scale. Unitless, so - unlike every other Vector in this API - its
-  // components are used as given, with no meters-to-centimeters or handedness conversion.
-  // Absolute: unlike `transform`, it is never composed through `relative_to_actor`.
-  TempoCore.Vector scale = 4;
+  // Deprecated: set `transform.scale` instead. Honored only when `transform.scale` is unset;
+  // setting both is an error.
+  TempoCore.Vector scale = 4 [deprecated = true];
 }
 
 message SetActorLocationRequest {
@@ -121,13 +122,13 @@ message SetComponentTransformRequest {
   string actor = 1;
   // Name of the component to move.
   string component = 2;
-  // Target location and rotation. Meters / radians, right-handed. Honored independently.
+  // Target location, rotation and scale. Meters / radians, right-handed. Honored independently.
   TempoCore.Transform transform = 3;
-  // If true, `transform` and `scale` are in world space; otherwise they are relative to the
-  // component's parent.
+  // If true, `transform` is in world space; otherwise it is relative to the component's parent.
   bool relative_to_world = 4;
-  // Optional new scale. Unitless: used as given, with no unit or handedness conversion.
-  TempoCore.Vector scale = 5;
+  // Deprecated: set `transform.scale` instead. Honored only when `transform.scale` is unset;
+  // setting both is an error.
+  TempoCore.Vector scale = 5 [deprecated = true];
 }
 
 message SetComponentLocationRequest {
@@ -257,11 +258,12 @@ message GetComponentScale3DRequest {
 // Shared by the actor and component transform getters.
 message GetTransformResponse {
   // Location and rotation, in the frame the request selected. Meters / radians, right-handed.
-  TempoCore.Transform transform = 1;
-  // Scale, unitless and unconverted. For a component this is in the frame the request selected,
+  // Its scale is unitless and unconverted. For a component it is in the frame the request selected,
   // matching SetComponentTransformRequest. For an actor it is always the world scale, whatever
-  // `relative_to_actor` said, matching SetActorTransformRequest's absolute `scale`.
-  TempoCore.Vector scale = 2;
+  // `relative_to_actor` said, matching SetActorTransformRequest's absolute scale.
+  TempoCore.Transform transform = 1;
+  // Deprecated: read `transform.scale`, which holds the same value.
+  TempoCore.Vector scale = 2 [deprecated = true];
 }
 
 message GetLocationResponse {
@@ -385,19 +387,11 @@ message GetPropertyRequest {
   string actor = 1;
   string component = 2;
   string property = 3;
-  // False (the default) converts the way every other RPC does, with one exception. A rotator, a
-  // quaternion or a transform arrives in radians, right-handed, with the transform's location in
-  // meters; but a vector, a 2D vector and every scalar are reported exactly as stored -- Unreal's
-  // centimeters, degrees and left-handed axes -- because a raw property carries no unit to convert
-  // by. True reports the property exactly as Unreal stores it, with no conversion of any kind, and
-  // in Unreal's own shape: a transform as native_transform_value, with its scale, and an
-  // FLinearColor as linear_color_value rather than squeezed into 8 bits.
-  bool native_units = 4;
   // Addresses a subsystem rather than an actor: the class of a world, game-instance, engine or
   // local-player subsystem, by path ("/Script/TempoAgents.TempoAgentsWorldSubsystem") or by name.
   // The instance is the one belonging to the sim's game world (for a local-player subsystem, its
   // first local player). When set, actor and component must be empty.
-  string subsystem = 5;
+  string subsystem = 4;
 }
 
 // Request several properties of one object in a single call. A property that cannot be read does
@@ -406,10 +400,8 @@ message GetPropertiesRequest {
   string actor = 1;
   string component = 2;
   repeated string properties = 3;
-  // As GetPropertyRequest.native_units, applied to every property in the request.
-  bool native_units = 4;
   // As GetPropertyRequest.subsystem.
-  string subsystem = 5;
+  string subsystem = 4;
 }
 
 // One property's value, or why it could not be read.
@@ -746,12 +738,14 @@ message IntPoint {
   int32 y = 2;
 }
 
+// A quaternion's components. As Value.quat_value and in NativeTransform, they are Unreal's own
+// left-handed FQuat, unconverted; the clients' conversion helpers also use it for the right-handed
+// form.
 message Quat {
-  // Right-handed convention; converted to Unreal's left-handed FQuat.
-  float x = 1;
-  float y = 2;
-  float z = 3;
-  float w = 4;
+  double x = 1;
+  double y = 2;
+  double z = 3;
+  double w = 4;
 }
 
 message Color {
@@ -759,9 +753,8 @@ message Color {
   int32 r = 1;
   int32 g = 2;
   int32 b = 3;
-  // Alpha in [0, 255]. A read always reports it. A write uses it only with native_units set, which
-  // is when a value is in Unreal's own shape; without it a write is opaque, as it always was.
-  int32 a = 4;
+  // Alpha in [0, 255]. A read always reports it. Unset in a write means opaque, 255.
+  optional int32 a = 4;
 }
 
 // An FLinearColor: linear, floating-point RGBA, unclamped.
@@ -773,8 +766,8 @@ message LinearColor {
 }
 
 // An FTransform as Unreal stores it: a rotation as a quaternion, a translation in centimeters and a
-// 3D scale, all left-handed. What a transform-valued property reads as and is written from when
-// native_units is set, since TempoCore.Transform carries neither a scale nor a quaternion.
+// 3D scale, all left-handed. What a transform-valued property reads as and is written from, since
+// TempoCore.Transform is in the API's units and holds its rotation as Euler angles.
 message NativeTransform {
   Quat rotation = 1;
   TempoCore.Vector translation = 2;
@@ -808,10 +801,14 @@ message StructArray { repeated StructValue values = 1; }
 // One typed value, independent of what it is assigned to. Used by SetProperty
 // as a property's new value and by CallFunction as an argument's value.
 //
+// A Value is always in Unreal's own units, exactly as the property stores it: centimeters,
+// degrees, left-handed, with nothing converted in either direction. Unlike every other RPC, the
+// ones that take or report a Value (SetProperty, GetProperty, GetProperties, StreamProperty,
+// CallFunction, RunBatch) speak Unreal's units, because a raw property carries no unit to convert
+// by. The clients' conversion helpers convert to and from the API's units.
+//
 // The variant selects how the value is interpreted and which Unreal property
-// types it may be written to - exactly the same rules the singular
-// Set*Property RPCs follow, since they are now expressed in terms of this
-// message. See the README's property type table.
+// types it may be written to. See the README's property type table.
 //
 // A repeated variant names its element kind, not its container: the *_array_value
 // and *_set_value of a kind carry the same payload, and either one writes an
@@ -828,18 +825,14 @@ message Value {
     string string_value = 5;
     // Enum value as its symbolic name.
     string enum_value = 6;
-    // Not converted in either direction: Unreal's own units and handedness, whatever native_units
-    // says. See GetPropertyRequest.native_units.
     TempoCore.Vector vector_value = 7;
     TempoCore.Vector2D vector2d_value = 8;
     IntVector int_vector_value = 9;
     IntPoint int_point_value = 10;
-    // Roll/pitch/yaw in radians, right-handed.
+    // An FRotator's roll, pitch and yaw, in degrees.
     TempoCore.Rotation rotator_value = 11;
-    // Right-handed; converted to and from Unreal's left-handed FQuat.
     Quat quat_value = 12;
-    // Location in meters, rotation in radians, right-handed.
-    TempoCore.Transform transform_value = 13;
+    // An FColor, or an FLinearColor given in 8-bit sRGB.
     Color color_value = 14;
     // Class path or name. Named the same way as SpawnActor's actor_type.
     string class_value = 15;
@@ -871,29 +864,25 @@ message Value {
     StringArray component_set_value = 38;
     StructValue struct_value = 39;
     StructArray struct_array_value = 40;
-    // A transform-valued property with native_units set. See NativeTransform.
+    // An FTransform. See NativeTransform.
     NativeTransform native_transform_value = 41;
-    // An FLinearColor-valued property with native_units set. Without it, FLinearColor reads and
-    // writes as color_value, converted to and from 8-bit sRGB.
+    // An FLinearColor, which always reads this way.
     LinearColor linear_color_value = 42;
   }
+  // A transform in the API's units, which a Value no longer carries: see native_transform_value.
+  reserved 13;
+  reserved "transform_value";
 }
 
-// Generic form of the singular Set*Property RPCs: one request that carries the
-// value's type in the value itself rather than in the RPC name.
+// Write one property: a request that carries the value's type in the value itself rather than in
+// the RPC name. The value is in Unreal's own units; see Value.
 message SetPropertyRequest {
   string actor = 1;
   string component = 2;
   string property = 3;
   Value value = 4;
-  // False (the default) converts the way every other RPC does, with the exception a read has: a
-  // rotator, a quaternion or a transform is given in radians, right-handed, with the transform's
-  // location in meters, while a vector, a 2D vector and every scalar are written exactly as given,
-  // in whatever unit the property holds. True writes every value exactly as given, in Unreal's own
-  // units -- centimeters, degrees, left-handed.
-  bool native_units = 5;
   // As GetPropertyRequest.subsystem.
-  string subsystem = 6;
+  string subsystem = 5;
 }
 
 // One argument to CallFunction.
@@ -913,12 +902,8 @@ message CallFunctionRequest {
   // supplied; out parameters and the return value must not be. Args are
   // applied in order.
   repeated FunctionArg args = 4;
-  // As SetPropertyRequest.native_units, applied to every argument in the call. An argument is the
-  // same Value a property takes, so it is converted by the same rules, exception included: a
-  // vector or a scalar argument is passed exactly as given.
-  bool native_units = 5;
   // As GetPropertyRequest.subsystem.
-  string subsystem = 6;
+  string subsystem = 5;
 }
 
 // One value a function handed back: its return value or an out parameter.
@@ -935,7 +920,7 @@ message FunctionResult {
   // returns -- so a result can be read without parsing, and fed straight back in.
   //
   // Unset for a type the API cannot express as one value, where `value` and `property_type` are
-  // all there is. Honors the request's native_units, exactly as a property read does.
+  // all there is. In Unreal's own units, exactly as a property read is.
   Value typed_value = 4;
 }
 
@@ -1007,7 +992,7 @@ message GetComponentFunctionsRequest {
 
 // One operation in a SetProperties batch. The oneof selects which set-property
 // operation to perform; each variant is the same Set*PropertyRequest message
-// that the corresponding singular RPC accepts.
+// that the corresponding deprecated RPC accepts, and converts the same way.
 message SetPropertyOp {
   oneof op {
     SetBoolPropertyRequest bool_op = 1;
@@ -1048,8 +1033,7 @@ message SetPropertyOp {
     SetAssetSetPropertyRequest asset_set_op = 36;
     SetActorSetPropertyRequest actor_set_op = 37;
     SetComponentSetPropertyRequest component_set_op = 38;
-    // The generic form, carrying the value's type in the value. This is the only op that can
-    // express a native-unit write, since the 38 named ops above have no such field.
+    // The generic form, carrying the value's type in the value, in Unreal's own units.
     SetPropertyRequest generic_op = 39;
   }
 }
@@ -1394,83 +1378,122 @@ service WorldControlService {
 
   rpc StreamProperty(GetPropertyRequest) returns (stream Value);
 
-  rpc SetBoolProperty(SetBoolPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetBoolProperty(SetBoolPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetStringProperty(SetStringPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetStringProperty(SetStringPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetEnumProperty(SetEnumPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetEnumProperty(SetEnumPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetIntProperty(SetIntPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetIntProperty(SetIntPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetInt64Property(SetInt64PropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetInt64Property(SetInt64PropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetFloatProperty(SetFloatPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetFloatProperty(SetFloatPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetVectorProperty(SetVectorPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetVectorProperty(SetVectorPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetVector2DProperty(SetVector2DPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetVector2DProperty(SetVector2DPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetIntVectorProperty(SetIntVectorPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetIntVectorProperty(SetIntVectorPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetIntPointProperty(SetIntPointPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetIntPointProperty(SetIntPointPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetRotatorProperty(SetRotatorPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetRotatorProperty(SetRotatorPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetQuatProperty(SetQuatPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetQuatProperty(SetQuatPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetTransformProperty(SetTransformPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetTransformProperty(SetTransformPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetColorProperty(SetColorPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetColorProperty(SetColorPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetClassProperty(SetClassPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetClassProperty(SetClassPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetAssetProperty(SetAssetPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetAssetProperty(SetAssetPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetActorProperty(SetActorPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetActorProperty(SetActorPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetComponentProperty(SetComponentPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetComponentProperty(SetComponentPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetBoolArrayProperty(SetBoolArrayPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetBoolArrayProperty(SetBoolArrayPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetStringArrayProperty(SetStringArrayPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetStringArrayProperty(SetStringArrayPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetEnumArrayProperty(SetEnumArrayPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetEnumArrayProperty(SetEnumArrayPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetIntArrayProperty(SetIntArrayPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetIntArrayProperty(SetIntArrayPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetInt64ArrayProperty(SetInt64ArrayPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetInt64ArrayProperty(SetInt64ArrayPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetFloatArrayProperty(SetFloatArrayPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetFloatArrayProperty(SetFloatArrayPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetClassArrayProperty(SetClassArrayPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetClassArrayProperty(SetClassArrayPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetAssetArrayProperty(SetAssetArrayPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetAssetArrayProperty(SetAssetArrayPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetActorArrayProperty(SetActorArrayPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetActorArrayProperty(SetActorArrayPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetComponentArrayProperty(SetComponentArrayPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetComponentArrayProperty(SetComponentArrayPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetBoolSetProperty(SetBoolSetPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetBoolSetProperty(SetBoolSetPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetStringSetProperty(SetStringSetPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetStringSetProperty(SetStringSetPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetEnumSetProperty(SetEnumSetPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetEnumSetProperty(SetEnumSetPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetIntSetProperty(SetIntSetPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetIntSetProperty(SetIntSetPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetInt64SetProperty(SetInt64SetPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetInt64SetProperty(SetInt64SetPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetFloatSetProperty(SetFloatSetPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetFloatSetProperty(SetFloatSetPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetClassSetProperty(SetClassSetPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetClassSetProperty(SetClassSetPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetAssetSetProperty(SetAssetSetPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetAssetSetProperty(SetAssetSetPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetActorSetProperty(SetActorSetPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetActorSetProperty(SetActorSetPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetComponentSetProperty(SetComponentSetPropertyRequest) returns (TempoCore.Empty);
+  // Deprecated: use SetProperty, whose Value is in Unreal's own units.
+  rpc SetComponentSetProperty(SetComponentSetPropertyRequest) returns (TempoCore.Empty) { option deprecated = true; }
 
-  rpc SetProperties(SetPropertiesRequest) returns (SetPropertiesResponse);
+  // Deprecated: use RunBatch, whose set ops take SetPropertyRequest.
+  rpc SetProperties(SetPropertiesRequest) returns (SetPropertiesResponse) { option deprecated = true; }
 
   rpc SetProperty(SetPropertyRequest) returns (TempoCore.Empty);
 

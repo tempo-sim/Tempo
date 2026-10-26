@@ -9,6 +9,7 @@
 #include "TempoWorldUtils.h"
 #include "TempoWorldReflection.h"
 #include "TempoWorldPropertyValues.h"
+#include "TempoWorldTransforms.h"
 
 #include "AssetRegistry/ARFilter.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -158,7 +159,8 @@ FVector ToUnrealScale(const TempoCore::Vector& Scale)
 
 FTransform ToUnrealTransform(const TempoCore::Transform& Transform)
 {
-	return FTransform(ToUnrealRotation(Transform.rotation()), ToUnrealLocation(Transform.location()));
+	return FTransform(ToUnrealRotation(Transform.rotation()), ToUnrealLocation(Transform.location()),
+		Transform.has_scale() ? ToUnrealScale(Transform.scale()) : FVector::OneVector);
 }
 
 TempoCore::Vector FromUnrealLocation(const FVector& Location)
@@ -196,6 +198,7 @@ TempoCore::Transform FromUnrealTransform(const FTransform& Transform)
 	TempoCore::Transform OutTransform;
 	*OutTransform.mutable_location() = FromUnrealLocation(Transform.GetLocation());
 	*OutTransform.mutable_rotation() = FromUnrealRotation(Transform.GetRotation().Rotator());
+	*OutTransform.mutable_scale() = FromUnrealScale(Transform.GetScale3D());
 	return OutTransform;
 }
 
@@ -347,8 +350,6 @@ void UTempoWorldControlServiceSubsystem::SpawnActor(const SpawnActorRequest& Req
 	}
 
 	FTransform SpawnTransform = ToUnrealTransform(Request.transform());
-	FVector SpawnLocation = SpawnTransform.GetLocation();
-	FRotator SpawnRotation = SpawnTransform.GetRotation().Rotator();
 
 	if (!Request.relative_to_actor().empty())
 	{
@@ -360,19 +361,24 @@ void UTempoWorldControlServiceSubsystem::SpawnActor(const SpawnActorRequest& Req
 			ResponseContinuation.ExecuteIfBound(SpawnActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 			return;
 		}
+		// The scale is absolute, as SetActorTransform's is: composed with unit scale, so neither the
+		// frame's scale nor a negative requested one (which FTransform composes through a matrix)
+		// can disturb the composed location and rotation, then restored as given.
+		const FVector SpawnScale = SpawnTransform.GetScale3D();
+		SpawnTransform.SetScale3D(FVector::OneVector);
 		SpawnTransform = SpawnTransform * RelativeToActor->GetActorTransform();
-		SpawnLocation = SpawnTransform.GetLocation();
-		SpawnRotation = SpawnTransform.GetRotation().Rotator();
+		SpawnTransform.SetScale3D(SpawnScale);
 	}
 
 	FActorSpawnParameters SpawnParameters;
 	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 	const AActor* SpawnedActor = Request.deferred()
 		? World->SpawnActorDeferred<AActor>(Class, SpawnTransform, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn)
-		: World->SpawnActor(Class, &SpawnLocation, &SpawnRotation, SpawnParameters);
+		: World->SpawnActor(Class, &SpawnTransform, SpawnParameters);
 
 	if (!SpawnedActor)
 	{
+		const FVector SpawnLocation = SpawnTransform.GetLocation();
 		const FString ErrorMsg = FString::Printf(TEXT("Failed to spawn actor of type '%s' at location (%f, %f, %f)"), *ActorTypeName, SpawnLocation.X, SpawnLocation.Y, SpawnLocation.Z);
 		ResponseContinuation.ExecuteIfBound(SpawnActorResponse(), grpc::Status(grpc::ABORTED, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
@@ -876,6 +882,42 @@ namespace
 	}
 }
 
+namespace
+{
+	template <typename RequestType>
+	grpc::Status GetRequestedScaleImpl(const RequestType& Request, const TCHAR* RequestName, TOptional<FVector>& OutScale)
+	{
+PRAGMA_DISABLE_DEPRECATION_WARNINGS
+		const bool bHasDeprecatedScale = Request.has_scale();
+		const TempoCore::Vector& DeprecatedScale = Request.scale();
+PRAGMA_ENABLE_DEPRECATION_WARNINGS
+		if (Request.transform().has_scale() && bHasDeprecatedScale)
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("%s request sets both transform.scale and the deprecated scale; set only transform.scale"), RequestName);
+			return grpc::Status(grpc::INVALID_ARGUMENT, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+		if (Request.transform().has_scale())
+		{
+			OutScale = ToUnrealScale(Request.transform().scale());
+		}
+		else if (bHasDeprecatedScale)
+		{
+			OutScale = ToUnrealScale(DeprecatedScale);
+		}
+		return grpc::Status_OK;
+	}
+}
+
+grpc::Status GetRequestedScale(const SetActorTransformRequest& Request, TOptional<FVector>& OutScale)
+{
+	return GetRequestedScaleImpl(Request, TEXT("SetActorTransform"), OutScale);
+}
+
+grpc::Status GetRequestedScale(const SetComponentTransformRequest& Request, TOptional<FVector>& OutScale)
+{
+	return GetRequestedScaleImpl(Request, TEXT("SetComponentTransform"), OutScale);
+}
+
 void UTempoWorldControlServiceSubsystem::SetActorTransform(const TempoWorld::SetActorTransformRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const
 {
 	AActor* Actor = nullptr;
@@ -894,10 +936,19 @@ void UTempoWorldControlServiceSubsystem::SetActorTransform(const TempoWorld::Set
 		return;
 	}
 
+	TOptional<FVector> Scale;
+	const grpc::Status ScaleStatus = GetRequestedScale(Request, Scale);
+	if (!ScaleStatus.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), ScaleStatus);
+		return;
+	}
+
 	// Start from where the actor already is, then overlay only the members the request supplied.
 	// Members it left unset are identity in Requested, but they are never read, so composing them
-	// through the reference frame costs nothing.
-	const FTransform Requested = ToUnrealTransform(Request.transform()) * Frame;
+	// through the reference frame costs nothing. The scale is left out of the composition; see below.
+	const FTransform Requested = FTransform(ToUnrealRotation(Request.transform().rotation()),
+		ToUnrealLocation(Request.transform().location())) * Frame;
 	FTransform Result = Actor->GetActorTransform();
 
 	if (Request.transform().has_location())
@@ -910,9 +961,9 @@ void UTempoWorldControlServiceSubsystem::SetActorTransform(const TempoWorld::Set
 	}
 	// Scale is deliberately absolute: composing a non-uniform scale through a rotated frame does
 	// not survive as an FTransform, so the reference frame never applies to it.
-	if (Request.has_scale())
+	if (Scale.IsSet())
 	{
-		Result.SetScale3D(ToUnrealScale(Request.scale()));
+		Result.SetScale3D(Scale.GetValue());
 	}
 
 	Actor->SetActorTransform(Result, /*bSweep=*/false, /*OutSweepHitResult=*/nullptr, TransformTeleport);
@@ -1025,6 +1076,14 @@ void UTempoWorldControlServiceSubsystem::SetComponentTransform(const TempoWorld:
 		return;
 	}
 
+	TOptional<FVector> Scale;
+	const grpc::Status ScaleStatus = GetRequestedScale(Request, Scale);
+	if (!ScaleStatus.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), ScaleStatus);
+		return;
+	}
+
 	// Same partial-update rule as SetActorTransform, read back from whichever space the caller is
 	// setting so that an unset member round-trips to exactly the value it already had.
 	const FTransform Requested = ToUnrealTransform(Request.transform());
@@ -1038,9 +1097,9 @@ void UTempoWorldControlServiceSubsystem::SetComponentTransform(const TempoWorld:
 	{
 		Result.SetRotation(Requested.GetRotation());
 	}
-	if (Request.has_scale())
+	if (Scale.IsSet())
 	{
-		Result.SetScale3D(ToUnrealScale(Request.scale()));
+		Result.SetScale3D(Scale.GetValue());
 	}
 
 	if (Request.relative_to_world())
@@ -1163,7 +1222,10 @@ void UTempoWorldControlServiceSubsystem::GetActorTransform(const TempoWorld::Get
 	*Response.mutable_transform() = FromUnrealTransform(Transform);
 	// The actor's own world scale, not Transform's - Transform is expressed in relative_to_actor's
 	// frame, and scale is never composed through that frame on the way in or the way out.
-	*Response.mutable_scale() = FromUnrealScale(WorldScale);
+	*Response.mutable_transform()->mutable_scale() = FromUnrealScale(WorldScale);
+PRAGMA_DISABLE_DEPRECATION_WARNINGS
+	*Response.mutable_scale() = Response.transform().scale();
+PRAGMA_ENABLE_DEPRECATION_WARNINGS
 
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
@@ -1232,7 +1294,9 @@ void UTempoWorldControlServiceSubsystem::GetComponentTransform(const TempoWorld:
 	*Response.mutable_transform() = FromUnrealTransform(Transform);
 	// Unlike the actor's, a component's scale does follow the frame - SetComponentTransform's
 	// scale honors relative_to_world the same way.
-	*Response.mutable_scale() = FromUnrealScale(Transform.GetScale3D());
+PRAGMA_DISABLE_DEPRECATION_WARNINGS
+	*Response.mutable_scale() = Response.transform().scale();
+PRAGMA_ENABLE_DEPRECATION_WARNINGS
 
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
@@ -2308,15 +2372,15 @@ FString NameReferencedObject(const UObject* Object, TempoWorldReflection::EValue
 // Read one element of a container into a scalar Value, reusing the scalar paths below rather than
 // repeating them per element type.
 grpc::Status ReadContainerElement(const void* ElementPtr, const FProperty* ElementProperty,
-	bool bNativeUnits, PropertyValue& OutValue)
+	PropertyValue& OutValue)
 {
 	// An element property's offset is zero, so the element pointer is also its container.
-	return WritePropertyToValue(ElementPtr, ElementProperty, bNativeUnits, OutValue);
+	return WritePropertyToValue(ElementPtr, ElementProperty, OutValue);
 }
 
 // Read every member of a struct into a StructValue, each by the scalar or nested paths below. Only
 // reached for a struct the classifier calls value-expressible, so every member has a representation.
-grpc::Status WriteStructToValue(const UScriptStruct* Struct, const void* StructPtr, bool bNativeUnits,
+grpc::Status WriteStructToValue(const UScriptStruct* Struct, const void* StructPtr,
 	TempoWorld::StructValue& OutValue)
 {
 	OutValue.set_struct_name(TCHAR_TO_UTF8(*Struct->GetStructCPPName()));
@@ -2326,7 +2390,7 @@ grpc::Status WriteStructToValue(const UScriptStruct* Struct, const void* StructP
 		// The authored name, which is what a nested address resolves a member by.
 		Field->set_name(TCHAR_TO_UTF8(*It->GetAuthoredName()));
 		// A member's offset is relative to the struct, so the struct is its container.
-		const grpc::Status Status = WritePropertyToValue(StructPtr, *It, bNativeUnits, *Field->mutable_value());
+		const grpc::Status Status = WritePropertyToValue(StructPtr, *It, *Field->mutable_value());
 		if (!Status.ok())
 		{
 			return Status;
@@ -2337,8 +2401,7 @@ grpc::Status WriteStructToValue(const UScriptStruct* Struct, const void* StructP
 
 // Read a property into a Value. The inverse of SetValueOnTarget, and driven by the same classifier,
 // so that a property the generated stubs present as readable is one this can actually read.
-grpc::Status WritePropertyToValue(const void* Container, const FProperty* Property, bool bNativeUnits,
-	PropertyValue& OutValue)
+grpc::Status WritePropertyToValue(const void* Container, const FProperty* Property, PropertyValue& OutValue)
 {
 	using namespace TempoWorldReflection;
 	const FTypeInfo Type = ClassifyProperty(Property);
@@ -2439,7 +2502,6 @@ grpc::Status WritePropertyToValue(const void* Container, const FProperty* Proper
 	}
 	case EValueKind::Vector:
 	{
-		// Vectors are not unit-converted in either direction; see the documented exception.
 		FVector V;
 		CastFieldChecked<FStructProperty>(Property)->GetValue_InContainer(Container, &V);
 		TempoCore::Vector* Out = OutValue.mutable_vector_value();
@@ -2474,10 +2536,6 @@ grpc::Status WritePropertyToValue(const void* Container, const FProperty* Proper
 	{
 		FRotator V;
 		CastFieldChecked<FStructProperty>(Property)->GetValue_InContainer(Container, &V);
-		if (!bNativeUnits)
-		{
-			V = QuantityConverter<Deg2Rad, L2R>::Convert(V);
-		}
 		TempoCore::Rotation* Out = OutValue.mutable_rotator_value();
 		Out->set_r(V.Roll); Out->set_p(V.Pitch); Out->set_y(V.Yaw);
 		return grpc::Status_OK;
@@ -2486,10 +2544,6 @@ grpc::Status WritePropertyToValue(const void* Container, const FProperty* Proper
 	{
 		FQuat V;
 		CastFieldChecked<FStructProperty>(Property)->GetValue_InContainer(Container, &V);
-		if (!bNativeUnits)
-		{
-			V = QuantityConverter<UC_NONE, L2R>::Convert(V);
-		}
 		TempoWorld::Quat* Out = OutValue.mutable_quat_value();
 		Out->set_x(V.X); Out->set_y(V.Y); Out->set_z(V.Z); Out->set_w(V.W);
 		return grpc::Status_OK;
@@ -2498,26 +2552,18 @@ grpc::Status WritePropertyToValue(const void* Container, const FProperty* Proper
 	{
 		FTransform V;
 		CastFieldChecked<FStructProperty>(Property)->GetValue_InContainer(Container, &V);
-		if (bNativeUnits)
-		{
-			// Report the transform exactly as Unreal stores it, in its own shape: a quaternion, a
-			// translation in cm and a scale, left-handed. TempoCore.Transform has room for neither
-			// the scale nor the quaternion.
-			TempoWorld::NativeTransform* Out = OutValue.mutable_native_transform_value();
-			const FQuat Rotation = V.GetRotation();
-			Out->mutable_rotation()->set_x(Rotation.X); Out->mutable_rotation()->set_y(Rotation.Y);
-			Out->mutable_rotation()->set_z(Rotation.Z); Out->mutable_rotation()->set_w(Rotation.W);
-			const FVector Translation = V.GetTranslation();
-			Out->mutable_translation()->set_x(Translation.X); Out->mutable_translation()->set_y(Translation.Y);
-			Out->mutable_translation()->set_z(Translation.Z);
-			const FVector Scale = V.GetScale3D();
-			Out->mutable_scale3d()->set_x(Scale.X); Out->mutable_scale3d()->set_y(Scale.Y);
-			Out->mutable_scale3d()->set_z(Scale.Z);
-		}
-		else
-		{
-			*OutValue.mutable_transform_value() = FromUnrealTransform(V);
-		}
+		// Exactly as Unreal stores it, in its own shape: a quaternion, a translation in cm and a
+		// scale, left-handed.
+		TempoWorld::NativeTransform* Out = OutValue.mutable_native_transform_value();
+		const FQuat Rotation = V.GetRotation();
+		Out->mutable_rotation()->set_x(Rotation.X); Out->mutable_rotation()->set_y(Rotation.Y);
+		Out->mutable_rotation()->set_z(Rotation.Z); Out->mutable_rotation()->set_w(Rotation.W);
+		const FVector Translation = V.GetTranslation();
+		Out->mutable_translation()->set_x(Translation.X); Out->mutable_translation()->set_y(Translation.Y);
+		Out->mutable_translation()->set_z(Translation.Z);
+		const FVector Scale = V.GetScale3D();
+		Out->mutable_scale3d()->set_x(Scale.X); Out->mutable_scale3d()->set_y(Scale.Y);
+		Out->mutable_scale3d()->set_z(Scale.Z);
 		return grpc::Status_OK;
 	}
 	case EValueKind::Color:
@@ -2532,26 +2578,16 @@ grpc::Status WritePropertyToValue(const void* Container, const FProperty* Proper
 	{
 		FLinearColor V;
 		CastFieldChecked<FStructProperty>(Property)->GetValue_InContainer(Container, &V);
-		if (bNativeUnits)
-		{
-			// As Unreal stores it: linear and floating point. 8 bits of sRGB would lose both.
-			TempoWorld::LinearColor* Out = OutValue.mutable_linear_color_value();
-			Out->set_r(V.R); Out->set_g(V.G); Out->set_b(V.B); Out->set_a(V.A);
-		}
-		else
-		{
-			// What this has always reported, for the callers that predate native_units.
-			const FColor Converted = V.ToFColor(true);
-			TempoWorld::Color* Out = OutValue.mutable_color_value();
-			Out->set_r(Converted.R); Out->set_g(Converted.G); Out->set_b(Converted.B); Out->set_a(Converted.A);
-		}
+		// As Unreal stores it: linear and floating point. 8 bits of sRGB would lose both.
+		TempoWorld::LinearColor* Out = OutValue.mutable_linear_color_value();
+		Out->set_r(V.R); Out->set_g(V.G); Out->set_b(V.B); Out->set_a(V.A);
 		return grpc::Status_OK;
 	}
 	case EValueKind::Struct:
 	{
 		const FStructProperty* StructProperty = CastFieldChecked<FStructProperty>(Property);
 		return WriteStructToValue(StructProperty->Struct, StructProperty->ContainerPtrToValuePtr<void>(Container),
-			bNativeUnits, *OutValue.mutable_struct_value());
+			*OutValue.mutable_struct_value());
 	}
 	case EValueKind::Class:
 	case EValueKind::Asset:
@@ -2600,7 +2636,7 @@ grpc::Status WritePropertyToValue(const void* Container, const FProperty* Proper
 			for (int32 Index = 0; Index < Helper.Num(); ++Index)
 			{
 				PropertyValue Element;
-				const grpc::Status Status = ReadContainerElement(Helper.GetRawPtr(Index), ArrayProperty->Inner, bNativeUnits, Element);
+				const grpc::Status Status = ReadContainerElement(Helper.GetRawPtr(Index), ArrayProperty->Inner, Element);
 				if (!Status.ok()) { return Status; }
 				Elements.Add(MoveTemp(Element));
 			}
@@ -2612,7 +2648,7 @@ grpc::Status WritePropertyToValue(const void* Container, const FProperty* Proper
 			{
 				if (!Helper.IsValidIndex(Index)) { continue; }
 				PropertyValue Element;
-				const grpc::Status Status = ReadContainerElement(Helper.GetElementPtr(Index), SetProperty->ElementProp, bNativeUnits, Element);
+				const grpc::Status Status = ReadContainerElement(Helper.GetElementPtr(Index), SetProperty->ElementProp, Element);
 				if (!Status.ok()) { return Status; }
 				Elements.Add(MoveTemp(Element));
 			}
@@ -2703,7 +2739,7 @@ grpc::Status WritePropertyToValue(const void* Container, const FProperty* Proper
 
 // Read one property of one object, by the same addressing SetProperty accepts.
 grpc::Status GetPropertyOnObject(const FString& PropertyName, UObject* Object,
-	bool bNativeUnits, PropertyValue& OutValue)
+	PropertyValue& OutValue)
 {
 	FProperty* Property = nullptr;
 	FString InnerPropertyName;
@@ -2730,7 +2766,7 @@ grpc::Status GetPropertyOnObject(const FString& PropertyName, UObject* Object,
 		return grpc::Status(Code, std::string(TCHAR_TO_UTF8(*ResolveError)));
 	}
 
-	return WritePropertyToValue(LeafContainer, LeafProperty, bNativeUnits, OutValue);
+	return WritePropertyToValue(LeafContainer, LeafProperty, OutValue);
 }
 
 void UTempoWorldControlServiceSubsystem::StreamProperty(const GetPropertyRequest& Request,
@@ -2741,11 +2777,9 @@ void UTempoWorldControlServiceSubsystem::StreamProperty(const GetPropertyRequest
 	Subscription.Component = FString(UTF8_TO_TCHAR(Request.component().c_str()));
 	Subscription.Subsystem = FString(UTF8_TO_TCHAR(Request.subsystem().c_str()));
 	Subscription.Property = FString(UTF8_TO_TCHAR(Request.property().c_str()));
-	Subscription.bNativeUnits = Request.native_units();
 
-	const FString Key = FString::Printf(TEXT("%s/%s/%s/%s/%d"), *Subscription.Actor,
-		*Subscription.Component, *Subscription.Subsystem, *Subscription.Property,
-		Subscription.bNativeUnits ? 1 : 0);
+	const FString Key = FString::Printf(TEXT("%s/%s/%s/%s"), *Subscription.Actor,
+		*Subscription.Component, *Subscription.Subsystem, *Subscription.Property);
 
 	FPropertySubscription& Existing = PendingPropertyRequests.FindOrAdd(Key, MoveTemp(Subscription));
 	Existing.Continuations.Add(ResponseContinuation);
@@ -2775,7 +2809,7 @@ void UTempoWorldControlServiceSubsystem::Tick(float DeltaTime)
 		PropertyValue Value;
 		if (Status.ok())
 		{
-			Status = GetPropertyOnObject(Subscription.Property, Object, Subscription.bNativeUnits, Value);
+			Status = GetPropertyOnObject(Subscription.Property, Object, Value);
 		}
 
 		for (const TResponseDelegate<PropertyValue>& Continuation : Subscription.Continuations)
@@ -2807,7 +2841,7 @@ void UTempoWorldControlServiceSubsystem::GetProperty(const GetPropertyRequest& R
 
 	PropertyValue Value;
 	const grpc::Status Status = GetPropertyOnObject(
-		FString(UTF8_TO_TCHAR(Request.property().c_str())), Object, Request.native_units(), Value);
+		FString(UTF8_TO_TCHAR(Request.property().c_str())), Object, Value);
 	ResponseContinuation.ExecuteIfBound(Status.ok() ? Value : PropertyValue(), Status);
 }
 
@@ -2832,7 +2866,7 @@ void UTempoWorldControlServiceSubsystem::GetProperties(const GetPropertiesReques
 
 		PropertyValue Value;
 		const grpc::Status Status = GetPropertyOnObject(
-			FString(UTF8_TO_TCHAR(RequestedName.c_str())), Object, Request.native_units(), Value);
+			FString(UTF8_TO_TCHAR(RequestedName.c_str())), Object, Value);
 		if (Status.ok())
 		{
 			*Entry->mutable_value() = Value;
@@ -3524,7 +3558,7 @@ grpc::Status AddressErrorStatus(TempoWorldReflection::EAddressError Error, const
 // of one member has always done. Each member is converted, range-checked and type-matched by the
 // same code as any other property, because it goes through the same function.
 grpc::Status WriteStructFields(const UWorld* World, const UScriptStruct* Struct, void* StructPtr,
-	const TempoWorld::StructValue& Value, bool bNativeUnits)
+	const TempoWorld::StructValue& Value)
 {
 	const FString StructName = Struct->GetStructCPPName();
 	if (!Value.struct_name().empty())
@@ -3559,7 +3593,7 @@ grpc::Status WriteStructFields(const UWorld* World, const UScriptStruct* Struct,
 		FPropertyTarget MemberTarget;
 		MemberTarget.Container = StructPtr;
 		MemberTarget.Property = Member;
-		const grpc::Status Status = SetValueOnTarget(World, MemberTarget, Field.value(), bNativeUnits);
+		const grpc::Status Status = SetValueOnTarget(World, MemberTarget, Field.value());
 		if (!Status.ok())
 		{
 			const FString ErrorMsg = FString::Printf(TEXT("%s.%s: %s"), *StructName, *FieldName, UTF8_TO_TCHAR(Status.error_message().c_str()));
@@ -3571,7 +3605,7 @@ grpc::Status WriteStructFields(const UWorld* World, const UScriptStruct* Struct,
 
 // A StructValue into a struct-valued property, parameter, or nested address naming one.
 grpc::Status SetStructValueOnTarget(const UWorld* World, const FPropertyTarget& Target,
-	const TempoWorld::StructValue& Value, bool bNativeUnits)
+	const TempoWorld::StructValue& Value)
 {
 	grpc::Status Status = grpc::Status_OK;
 	{
@@ -3595,7 +3629,7 @@ grpc::Status SetStructValueOnTarget(const UWorld* World, const FPropertyTarget& 
 		}
 
 		Status = WriteStructFields(World, StructProperty->Struct, StructProperty->ContainerPtrToValuePtr<void>(LeafContainer),
-			Value, bNativeUnits);
+			Value);
 	}
 
 	if (Status.ok())
@@ -3609,7 +3643,7 @@ grpc::Status SetStructValueOnTarget(const UWorld* World, const FPropertyTarget& 
 // from the struct's defaults, so a member an element does not mention is the default rather than
 // whatever happened to be at that index before.
 grpc::Status SetStructArrayOnTarget(const UWorld* World, const FPropertyTarget& Target,
-	const TempoWorld::StructArray& Values, bool bNativeUnits)
+	const TempoWorld::StructArray& Values)
 {
 	grpc::Status Status = grpc::Status_OK;
 	{
@@ -3639,7 +3673,7 @@ grpc::Status SetStructArrayOnTarget(const UWorld* World, const FPropertyTarget& 
 		for (int32 Index = 0; Index < Values.values_size() && Status.ok(); ++Index)
 		{
 			// An element's offset is zero, so the element pointer is its own value pointer.
-			Status = WriteStructFields(World, ElementProperty->Struct, ArrayHelper.GetRawPtr(Index), Values.values(Index), bNativeUnits);
+			Status = WriteStructFields(World, ElementProperty->Struct, ArrayHelper.GetRawPtr(Index), Values.values(Index));
 		}
 	}
 
@@ -3652,8 +3686,7 @@ grpc::Status SetStructArrayOnTarget(const UWorld* World, const FPropertyTarget& 
 
 // The one place that knows how each Value variant maps onto Unreal property types. Both the
 // singular Set*Property RPCs and CallFunction's arguments come through here.
-grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target, const PropertyValue& Value,
-	bool bNativeUnits)
+grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target, const PropertyValue& Value)
 {
 	switch (Value.value_case())
 	{
@@ -3715,29 +3748,15 @@ grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target
 		Rotator.Roll = Value.rotator_value().r();
 		Rotator.Pitch = Value.rotator_value().p();
 		Rotator.Yaw = Value.rotator_value().y();
-		return SetStructOnTarget(World, Target,
-			bNativeUnits ? Rotator : QuantityConverter<Rad2Deg,R2L>::Convert(Rotator), TEXT("FRotator"));
+		return SetStructOnTarget(World, Target, Rotator, TEXT("FRotator"));
 	}
 	case PropertyValue::kQuatValue:
 	{
-		const FQuat Given(Value.quat_value().x(), Value.quat_value().y(), Value.quat_value().z(), Value.quat_value().w());
-		// Convert from right-handed (API convention) to Unreal's left-handed FQuat.
-		const FQuat Quat = bNativeUnits ? Given : QuantityConverter<UC_NONE, R2L>::Convert(Given);
+		const FQuat Quat(Value.quat_value().x(), Value.quat_value().y(), Value.quat_value().z(), Value.quat_value().w());
 		return SetStructOnTarget(World, Target, Quat, TEXT("FQuat"));
-	}
-	case PropertyValue::kTransformValue:
-	{
-		// Same conventions as SpawnActor/SetActorTransform: m -> cm for location, rad/right-handed -> deg/left-handed for rotation.
-		const FTransform Transform = bNativeUnits
-			? FTransform(
-				FRotator(Value.transform_value().rotation().p(), Value.transform_value().rotation().y(), Value.transform_value().rotation().r()),
-				FVector(Value.transform_value().location().x(), Value.transform_value().location().y(), Value.transform_value().location().z()))
-			: ToUnrealTransform(Value.transform_value());
-		return SetStructOnTarget(World, Target, Transform, TEXT("FTransform"));
 	}
 	case PropertyValue::kNativeTransformValue:
 	{
-		// Unreal's own shape, unconverted, whatever native_units says: there is no SI form of it.
 		const TempoWorld::NativeTransform& Given = Value.native_transform_value();
 		const FTransform Transform(
 			FQuat(Given.rotation().x(), Given.rotation().y(), Given.rotation().z(), Given.rotation().w()),
@@ -3759,7 +3778,7 @@ grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target
 		Color.R = Value.color_value().r();
 		Color.G = Value.color_value().g();
 		Color.B = Value.color_value().b();
-		Color.A = bNativeUnits ? Value.color_value().a() : 255;
+		Color.A = Value.color_value().has_a() ? Value.color_value().a() : 255;
 
 		const grpc::Status ColorStatus = SetStructOnTarget(World, Target, Color, TEXT("FColor"));
 		if (ColorStatus.ok())
@@ -3927,11 +3946,11 @@ grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target
 	}
 	case PropertyValue::kStructValue:
 	{
-		return SetStructValueOnTarget(World, Target, Value.struct_value(), bNativeUnits);
+		return SetStructValueOnTarget(World, Target, Value.struct_value());
 	}
 	case PropertyValue::kStructArrayValue:
 	{
-		return SetStructArrayOnTarget(World, Target, Value.struct_array_value(), bNativeUnits);
+		return SetStructArrayOnTarget(World, Target, Value.struct_array_value());
 	}
 	case PropertyValue::VALUE_NOT_SET:
 	default:
@@ -3941,8 +3960,7 @@ grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target
 
 // Resolve the actor/component and property a Set*PropertyRequest names, then write Value into it.
 template <typename RequestType>
-grpc::Status SetPropertyOnObject(const UWorld* World, const RequestType& Request, const PropertyValue& Value,
-	bool bNativeUnits = false)
+grpc::Status SetPropertyOnObject(const UWorld* World, const RequestType& Request, const PropertyValue& Value)
 {
 	FPropertyTarget Target;
 	const grpc::Status GetObjectStatus = GetObjectForRequest(World, Request, Target.Object);
@@ -3958,7 +3976,43 @@ grpc::Status SetPropertyOnObject(const UWorld* World, const RequestType& Request
 		return GetPropertyStatus;
 	}
 
-	return SetValueOnTarget(World, Target, Value, bNativeUnits);
+	return SetValueOnTarget(World, Target, Value);
+}
+
+PropertyValue RotatorValueFromSI(double Roll, double Pitch, double Yaw)
+{
+	const FRotator Rotator = QuantityConverter<Rad2Deg,R2L>::Convert(FRotator(Pitch, Yaw, Roll));
+	PropertyValue Value;
+	Value.mutable_rotator_value()->set_r(Rotator.Roll);
+	Value.mutable_rotator_value()->set_p(Rotator.Pitch);
+	Value.mutable_rotator_value()->set_y(Rotator.Yaw);
+	return Value;
+}
+
+PropertyValue QuatValueFromSI(double X, double Y, double Z, double W)
+{
+	const FQuat Quat = QuantityConverter<UC_NONE, R2L>::Convert(FQuat(X, Y, Z, W));
+	PropertyValue Value;
+	TempoWorld::Quat* Out = Value.mutable_quat_value();
+	Out->set_x(Quat.X); Out->set_y(Quat.Y); Out->set_z(Quat.Z); Out->set_w(Quat.W);
+	return Value;
+}
+
+PropertyValue TransformValueFromSI(const TempoCore::Transform& Transform)
+{
+	const FTransform Native = ToUnrealTransform(Transform);
+	PropertyValue Value;
+	TempoWorld::NativeTransform* Out = Value.mutable_native_transform_value();
+	const FQuat Rotation = Native.GetRotation();
+	Out->mutable_rotation()->set_x(Rotation.X); Out->mutable_rotation()->set_y(Rotation.Y);
+	Out->mutable_rotation()->set_z(Rotation.Z); Out->mutable_rotation()->set_w(Rotation.W);
+	const FVector Translation = Native.GetTranslation();
+	Out->mutable_translation()->set_x(Translation.X); Out->mutable_translation()->set_y(Translation.Y);
+	Out->mutable_translation()->set_z(Translation.Z);
+	const FVector Scale = Native.GetScale3D();
+	Out->mutable_scale3d()->set_x(Scale.X); Out->mutable_scale3d()->set_y(Scale.Y);
+	Out->mutable_scale3d()->set_z(Scale.Z);
+	return Value;
 }
 
 // Credit: https://stackoverflow.com/a/44065093
@@ -4063,30 +4117,19 @@ grpc::Status SetPropertyImpl<SetIntPointPropertyRequest>(const UWorld* World, co
 template<>
 grpc::Status SetPropertyImpl<SetRotatorPropertyRequest>(const UWorld* World, const SetRotatorPropertyRequest& Request)
 {
-	PropertyValue Value;
-	Value.mutable_rotator_value()->set_r(Request.r());
-	Value.mutable_rotator_value()->set_p(Request.p());
-	Value.mutable_rotator_value()->set_y(Request.y());
-	return SetPropertyOnObject(World, Request, Value);
+	return SetPropertyOnObject(World, Request, RotatorValueFromSI(Request.r(), Request.p(), Request.y()));
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetQuatPropertyRequest>(const UWorld* World, const SetQuatPropertyRequest& Request)
 {
-	PropertyValue Value;
-	Value.mutable_quat_value()->set_x(Request.x());
-	Value.mutable_quat_value()->set_y(Request.y());
-	Value.mutable_quat_value()->set_z(Request.z());
-	Value.mutable_quat_value()->set_w(Request.w());
-	return SetPropertyOnObject(World, Request, Value);
+	return SetPropertyOnObject(World, Request, QuatValueFromSI(Request.x(), Request.y(), Request.z(), Request.w()));
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetTransformPropertyRequest>(const UWorld* World, const SetTransformPropertyRequest& Request)
 {
-	PropertyValue Value;
-	*Value.mutable_transform_value() = Request.value();
-	return SetPropertyOnObject(World, Request, Value);
+	return SetPropertyOnObject(World, Request, TransformValueFromSI(Request.value()));
 }
 
 template<>
@@ -4096,6 +4139,7 @@ grpc::Status SetPropertyImpl<SetColorPropertyRequest>(const UWorld* World, const
 	Value.mutable_color_value()->set_r(Request.r());
 	Value.mutable_color_value()->set_g(Request.g());
 	Value.mutable_color_value()->set_b(Request.b());
+	Value.mutable_color_value()->set_a(255);
 	return SetPropertyOnObject(World, Request, Value);
 }
 
@@ -4343,9 +4387,7 @@ namespace
 		case SetPropertyOp::kAssetSetOp:        return SetPropertyImpl(World, Op.asset_set_op());
 		case SetPropertyOp::kActorSetOp:        return SetPropertyImpl(World, Op.actor_set_op());
 		case SetPropertyOp::kComponentSetOp:    return SetPropertyImpl(World, Op.component_set_op());
-		// The generic op carries its own native_units, so a batched native-unit write goes here.
-		case SetPropertyOp::kGenericOp:         return SetPropertyOnObject(World, Op.generic_op(),
-			Op.generic_op().value(), Op.generic_op().native_units());
+		case SetPropertyOp::kGenericOp:         return SetPropertyOnObject(World, Op.generic_op(), Op.generic_op().value());
 		case SetPropertyOp::OP_NOT_SET:
 		default:
 			return grpc::Status(grpc::FAILED_PRECONDITION, "SetPropertyOp has no op set");
@@ -4374,7 +4416,7 @@ void UTempoWorldControlServiceSubsystem::SetProperties(const SetPropertiesReques
 void UTempoWorldControlServiceSubsystem::SetPropertyValue(const SetPropertyRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const
 {
 	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
-		SetPropertyOnObject(GetWorld(), Request, Request.value(), Request.native_units()));
+		SetPropertyOnObject(GetWorld(), Request, Request.value()));
 }
 
 namespace
@@ -4486,7 +4528,7 @@ namespace
 				return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 			}
 
-			const grpc::Status SetStatus = SetValueOnTarget(World, Target, Arg.value(), Request.native_units());
+			const grpc::Status SetStatus = SetValueOnTarget(World, Target, Arg.value());
 			if (!SetStatus.ok())
 			{
 				const FString ErrorMsg = FString::Printf(TEXT("Argument %d ('%s') of function '%s': %s"), ArgIndex, *ParmName, *Function->GetName(), UTF8_TO_TCHAR(SetStatus.error_message().c_str()));
@@ -4521,7 +4563,7 @@ namespace
 			// failing the call: the string form is still useful, and the caller asked to invoke a
 			// function, not to read this parameter.
 			PropertyValue TypedValue;
-			if (WritePropertyToValue(Frame, Parm, Request.native_units(), TypedValue).ok())
+			if (WritePropertyToValue(Frame, Parm, TypedValue).ok())
 			{
 				*Result->mutable_typed_value() = TypedValue;
 			}
@@ -4659,7 +4701,7 @@ void UTempoWorldControlServiceSubsystem::RunBatch(const RunBatchRequest& Request
 		switch (Op.op_case())
 		{
 		case BatchOp::kSet:
-			Status = SetPropertyOnObject(World, Op.set(), Op.set().value(), Op.set().native_units());
+			Status = SetPropertyOnObject(World, Op.set(), Op.set().value());
 			break;
 		case BatchOp::kGet:
 		{
@@ -4668,8 +4710,7 @@ void UTempoWorldControlServiceSubsystem::RunBatch(const RunBatchRequest& Request
 			PropertyValue Value;
 			if (Status.ok())
 			{
-				Status = GetPropertyOnObject(FString(UTF8_TO_TCHAR(Op.get().property().c_str())), Object,
-					Op.get().native_units(), Value);
+				Status = GetPropertyOnObject(FString(UTF8_TO_TCHAR(Op.get().property().c_str())), Object, Value);
 			}
 			if (Status.ok())
 			{

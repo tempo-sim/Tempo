@@ -62,7 +62,7 @@ C++20. On Windows, copy `tempogrpc.dll` next to the executable. Without CMake, m
 int main() {
     tempo::set_server("localhost", 10001);
 
-    auto state = tempo::tempo_world::get_current_actor_state("MyActor", false);
+    auto state = tempo::tempo_world::get_current_actor_state({.actor = "MyActor"});
     if (!state) {
         return 1;  // Result<T> carries a TempoError; nothing here throws
     }
@@ -71,6 +71,14 @@ int main() {
 
 Function names match the Python and Rust clients — `pascal_to_snake` of the RPC name, namespaced
 by module under `tempo::`.
+
+Each function takes one argument, a generated aggregate named after its request message with
+`Request` replaced by `Args` — `ActorStateArgs` for `ActorStateRequest` — with one member per field
+and a default for every one. Name the members you set with C++20 designated initializers, in the
+order the struct declares them, and leave the rest out: a field added in a later release then gets
+its default rather than breaking the call. A message-typed member is a `std::optional`, so leaving
+it out leaves the field unset. An RPC whose request is `TempoCore.Empty` takes no argument, and a
+deprecated RPC's function is marked `[[deprecated]]`.
 
 ## The reflected API
 

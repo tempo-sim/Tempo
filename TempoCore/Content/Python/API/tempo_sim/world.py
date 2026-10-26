@@ -175,7 +175,7 @@ async def get_subsystem_async(cls: type[T]) -> T:
     (`ShouldCreateSubsystem`) and that is better reported at the lookup. A class that is not a
     subsystem at all is refused the same way.
     """
-    await _world().get_properties(subsystem=cls.__tempo_class__, properties=[], native_units=True)
+    await _world().get_properties(subsystem=cls.__tempo_class__, properties=[])
     return cls(subsystem=cls.__tempo_class__, class_path=cls.__tempo_class__)
 
 
@@ -315,16 +315,16 @@ deactivate_component = _blocking(deactivate_component_async)
 
 # -- transforms ----------------------------------------------------------------------------------
 #
-# SI throughout, as tempo_world is: meters, radians, right-handed. A scale is a ratio, and rides
-# beside a transform rather than in it, as it does there.
+# SI throughout, as tempo_world is: meters, radians, right-handed. A transform carries its scale,
+# which is a ratio and so is never converted; left unset, it is (1, 1, 1).
 
 async def set_actor_transform_async(actor: Object, transform: Transform,
-                                    relative_to_actor: Optional[Object] = None,
-                                    scale: Optional[Vector] = None) -> None:
-    """tempo_world.set_actor_transform, given handles."""
+                                    relative_to_actor: Optional[Object] = None) -> None:
+    """tempo_world.set_actor_transform, given handles. The transform's scale is absolute: it is
+    never composed through `relative_to_actor`."""
     await _world().set_actor_transform(
         actor=_actor(actor), transform=transform,
-        relative_to_actor=_actor(relative_to_actor, "relative_to_actor"), scale=scale)
+        relative_to_actor=_actor(relative_to_actor, "relative_to_actor"))
 
 
 set_actor_transform = _blocking(set_actor_transform_async)
@@ -361,12 +361,11 @@ set_actor_scale3d = _blocking(set_actor_scale3d_async)
 
 
 async def set_component_transform_async(component: Object, transform: Transform,
-                                        relative_to_world: bool = False,
-                                        scale: Optional[Vector] = None) -> None:
+                                        relative_to_world: bool = False) -> None:
     """tempo_world.set_component_transform, given a handle."""
     actor, name = _component(component)
     await _world().set_component_transform(actor=actor, component=name, transform=transform,
-                                           relative_to_world=relative_to_world, scale=scale)
+                                           relative_to_world=relative_to_world)
 
 
 set_component_transform = _blocking(set_component_transform_async)
@@ -406,7 +405,8 @@ set_component_scale3d = _blocking(set_component_scale3d_async)
 
 
 async def get_actor_transform_async(actor: Object, relative_to_actor: Optional[Object] = None):
-    """tempo_world.get_actor_transform, given handles: a GetTransformResponse."""
+    """tempo_world.get_actor_transform, given handles: a GetTransformResponse, whose transform
+    carries the actor's world scale."""
     return await _world().get_actor_transform(
         actor=_actor(actor), relative_to_actor=_actor(relative_to_actor, "relative_to_actor"))
 
@@ -450,8 +450,8 @@ def _component_query(component, relative_to_component):
 async def get_component_transform_async(component: Object, frame: int = 0,
                                         relative_to_component: Optional[Object] = None,
                                         socket: str = ""):
-    """tempo_world.get_component_transform, given handles: a GetTransformResponse. `frame` is a
-    TempoWorld.ComponentFrame."""
+    """tempo_world.get_component_transform, given handles: a GetTransformResponse, whose transform
+    carries the scale in the frame selected. `frame` is a TempoWorld.ComponentFrame."""
     actor, name, relative = _component_query(component, relative_to_component)
     return await _world().get_component_transform(actor=actor, component=name, frame=frame,
                                                   relative_to_component=relative, socket=socket)

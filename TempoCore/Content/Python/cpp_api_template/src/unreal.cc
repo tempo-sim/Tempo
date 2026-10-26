@@ -35,7 +35,6 @@ TempoWorld::GetPropertyRequest get_request(const ObjectRef& object, std::string_
     request.set_actor(object.actor_name());
     request.set_component(object.component_name());
     request.set_property(std::string(property));
-    request.set_native_units(true);
     request.set_subsystem(object.subsystem_class());
     return request;
 }
@@ -47,7 +46,6 @@ TempoWorld::CallFunctionRequest call_request(const ObjectRef& object, std::strin
     request.set_component(object.component_name());
     request.set_function(std::string(function));
     for (auto& arg : args) *request.add_args() = std::move(arg);
-    request.set_native_units(true);
     request.set_subsystem(object.subsystem_class());
     return request;
 }
@@ -345,9 +343,8 @@ TempoWorld::Value ValueTraits<FIntPoint>::to(const FIntPoint& v) {
     return value;
 }
 
-// Carried in a message whose fields are named for radians and right-handed degrees, because that is
-// what every other RPC puts there. With native_units set the server does not convert, so these are
-// Unreal's own degrees, and r/p/y are roll, pitch and yaw by name.
+// Carried in TempoCore's Rotation, whose fields every other RPC fills in radians, right-handed. A
+// Value is Unreal's own, so here they are degrees, and r/p/y are roll, pitch and yaw by name.
 Result<FRotator> ValueTraits<FRotator>::from(const TempoWorld::Value& value) {
     if (value.value_case() != TempoWorld::Value::kRotatorValue) return detail::wrong(value, "a rotator");
     const auto& v = value.rotator_value();
@@ -368,10 +365,10 @@ namespace {
 FQuat quat_from(const TempoWorld::Quat& v) { return FQuat{v.x(), v.y(), v.z(), v.w()}; }
 
 void quat_to(const FQuat& q, TempoWorld::Quat* out) {
-    out->set_x(static_cast<float>(q.x));
-    out->set_y(static_cast<float>(q.y));
-    out->set_z(static_cast<float>(q.z));
-    out->set_w(static_cast<float>(q.w));
+    out->set_x(q.x);
+    out->set_y(q.y);
+    out->set_z(q.z);
+    out->set_w(q.w);
 }
 
 void vector_to(const FVector& v, TempoCore::Vector* out) {
@@ -417,7 +414,7 @@ Result<FColor> ValueTraits<FColor>::from(const TempoWorld::Value& value) {
     if (value.value_case() != TempoWorld::Value::kColorValue) return detail::wrong(value, "a color");
     const auto& c = value.color_value();
     return FColor{static_cast<std::uint8_t>(c.r()), static_cast<std::uint8_t>(c.g()),
-                  static_cast<std::uint8_t>(c.b()), static_cast<std::uint8_t>(c.a())};
+                  static_cast<std::uint8_t>(c.b()), static_cast<std::uint8_t>(c.has_a() ? c.a() : 255)};
 }
 
 TempoWorld::Value ValueTraits<FColor>::to(const FColor& v) {
@@ -710,7 +707,6 @@ Result<void> write(const ObjectRef& object, std::string_view property, TempoWorl
     request.set_component(object.component_name());
     request.set_property(std::string(property));
     *request.mutable_value() = std::move(value);
-    request.set_native_units(true);
     request.set_subsystem(object.subsystem_class());
     if (batch_open()) {
         TempoWorld::BatchOp op;

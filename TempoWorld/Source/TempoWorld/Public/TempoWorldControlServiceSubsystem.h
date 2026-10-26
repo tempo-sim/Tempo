@@ -195,9 +195,8 @@ protected:
 	/**
 	 * One property being watched, and everyone waiting on it.
 	 *
-	 * Keyed by a string built from everything that changes what is read -- the object, the address
-	 * and the units -- so two clients watching the same property share one read, while one watching
-	 * it in native units does not receive the other's converted value.
+	 * Keyed by a string built from everything that changes what is read -- the object and the
+	 * address -- so two clients watching the same property share one read.
 	 *
 	 * Holds the address as plain strings rather than the request message, which keeps the generated
 	 * protobuf header out of this one: everything else here is forward-declared, and a subscription
@@ -209,7 +208,6 @@ protected:
 		FString Component;
 		FString Subsystem;
 		FString Property;
-		bool bNativeUnits = false;
 		TArray<TResponseDelegate<TempoWorld::Value>> Continuations;
 	};
 

@@ -32,6 +32,13 @@ TEMPO_SIM_KEEP = {
 }
 PROJECT_PKG_KEEP = {".gitignore", "__init__.py", "py.typed"}
 
+MIGRATION_URL = "https://tempo-sim.readthedocs.io/en/latest/migration/v0.4.0/"
+
+
+def deprecation_message(name):
+    """The warning a deprecated wrapper raises, and its docstring's note."""
+    return "{} is deprecated; see {}".format(name, MIGRATION_URL)
+
 
 def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
     """Generate per-service wrapper modules across the two distributions.
@@ -52,6 +59,8 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
     all_enums = {}
     all_messages = {}
     all_services = {}
+    # (service full name, RPC name) of every RPC whose method options mark it deprecated.
+    deprecated_rpcs = set()
 
     # (package dir, namespace, non-generated files to keep) per distribution.
     roots = [(tempo_sim_dir, INFRA_PACKAGE, TEMPO_SIM_KEEP)]
@@ -102,6 +111,10 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
                                                         f"This is not allowed! Please rename one.")
                                     module_rpcs.add(rpc_name)
                             all_services = all_services | services
+                            for service_descriptor in module_descriptor.services_by_name.values():
+                                for method in service_descriptor.methods:
+                                    if method.GetOptions().deprecated:
+                                        deprecated_rpcs.add((service_descriptor.full_name, method.name))
             if contains_services:
                 output_file = f"{pascal_to_snake(module_dir_name)}.py"
                 potentially_stale[namespace].discard(output_file)
@@ -112,6 +125,7 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
                     f.write("from curio.meta import awaitable\n")
                     f.write("import asyncio\n")
                     f.write("import typing\n")
+                    f.write("import warnings\n")
                     f.write("\n\n")
 
     for root_dir, namespace, _ in roots:
@@ -125,6 +139,9 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         tempo_message_descriptor.resolve_names(all_messages | all_enums)
 
     # Every RPC gets sync and async versions. The correct one will automatically be chosen by context.
+    # A deprecated one warns on every call. The blocking form is reached through curio's @awaitable
+    # wrapper, one frame more than the async form, whose body runs in the awaiting coroutine; a stream
+    # runs in whatever iterates it. Each stacklevel names the caller's own line.
     simple_rpc_template = \
         "import " \
         "{% for import in imports %}" \
@@ -149,6 +166,10 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "    {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
         ") -> {{ response.full_name }}:\n" \
+        "{% if deprecated %}" \
+        "    \"\"\"{{ deprecated }}\"\"\"\n" \
+        "    warnings.warn(\"{{ deprecated }}\", DeprecationWarning, stacklevel=3)\n" \
+        "{% endif %}" \
         "    return run_async(_{{ name }}(\n" \
         "{% for field in request.fields %}" \
         "        {{ field.name }}={{ field.name }}{% if not loop.last %},{% endif %}\n" \
@@ -161,6 +182,10 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "    {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
         ") -> {{ response.full_name }}:\n" \
+        "{% if deprecated %}" \
+        "    \"\"\"{{ deprecated }}\"\"\"\n" \
+        "    warnings.warn(\"{{ deprecated }}\", DeprecationWarning, stacklevel=2)\n" \
+        "{% endif %}" \
         "    return await _{{ name }}(\n" \
         "{% for field in request.fields %}" \
         "        {{ field.name }}={{ field.name }}{% if not loop.last %},{% endif %}\n" \
@@ -196,6 +221,10 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "    {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
         ") -> typing.AsyncIterator[{{ response.full_name }}]:\n" \
+        "{% if deprecated %}" \
+        "    \"\"\"{{ deprecated }}\"\"\"\n" \
+        "    warnings.warn(\"{{ deprecated }}\", DeprecationWarning, stacklevel=2)\n" \
+        "{% endif %}" \
         "    async_gen = _{{ name }}(\n" \
         "{% for field in request.fields %}" \
         "        {{ field.name }}={{ field.name }}{% if not loop.last %},{% endif %}\n" \
@@ -213,6 +242,10 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "    {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
         ") -> typing.AsyncIterator[{{ response.full_name }}]:\n" \
+        "{% if deprecated %}" \
+        "    \"\"\"{{ deprecated }}\"\"\"\n" \
+        "    warnings.warn(\"{{ deprecated }}\", DeprecationWarning, stacklevel=2)\n" \
+        "{% endif %}" \
         "    async for response in _{{ name }}(\n" \
         "{% for field in request.fields %}" \
         "        {{ field.name }}={{ field.name }}{% if not loop.last %},{% endif %}\n" \
@@ -237,9 +270,16 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "    Methods mirror the singular ``set_*_property`` free functions; each appends an op\n" \
         "    to the batch and returns ``self`` for fluent chaining. Call :meth:`execute` (sync)\n" \
         "    or ``await`` :meth:`execute_async` to send.\n" \
+        "{% if deprecated %}" \
+        "\n" \
+        "    {{ deprecated }}\n" \
+        "{% endif %}" \
         '    """\n' \
         "\n" \
         "    def __init__(self):\n" \
+        "{% if deprecated %}" \
+        "        warnings.warn(\"{{ deprecated }}\", DeprecationWarning, stacklevel=2)\n" \
+        "{% endif %}" \
         "        self._ops = []\n" \
         "\n" \
         "{% for method in methods %}" \
@@ -272,7 +312,15 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "\n\n" \
         "def batch() -> Batch:\n" \
         '    """Create a new property-set batch builder."""\n' \
+        "{% if deprecated %}" \
+        "    # Warns on its caller's behalf, rather than Batch's __init__ warning about this line.\n" \
+        "    warnings.warn(\"{{ deprecated }}\", DeprecationWarning, stacklevel=2)\n" \
+        "    staged = Batch.__new__(Batch)\n" \
+        "    staged._ops = []\n" \
+        "    return staged\n" \
+        "{% else %}" \
         "    return Batch()\n" \
+        "{% endif %}" \
         "\n\n"
 
     # Template for a Call class that stages typed CallFunction arguments. One method per
@@ -361,8 +409,12 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
                 for field in tempo_request_descriptor.fields:
                     if field.module_name:
                         imports.add(field.module_name)
+                deprecated = None
+                if (service_name, rpc_descriptor.name) in deprecated_rpcs:
+                    deprecated = deprecation_message(pascal_to_snake(rpc_descriptor.name))
                 for template in templates:
                     f.write(template.render(
+                        deprecated=deprecated,
                         name=pascal_to_snake(rpc_descriptor.name),
                         rpc=rpc_descriptor,
                         service=tempo_service_descriptor,
@@ -383,11 +435,13 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         # Find the service in the same proto module that exposes SetProperties.
         proto_package = proto_full_name.rsplit(".", 1)[0]
         owning_service = None
-        for service in all_services.values():
+        owning_service_name = None
+        for service_name, service in all_services.items():
             if service.module_name.split(".")[:2] != set_property_op_desc.module_name.split(".")[:2]:
                 continue
             if any(rpc.name == "SetProperties" for rpc in service.rpcs):
                 owning_service = service
+                owning_service_name = service_name
                 break
         if owning_service is None:
             continue
@@ -417,6 +471,8 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         output_file = os.path.join(ns_dir[namespace], f"{pascal_to_snake(tempo_module_name)}.py")
         with open(output_file, 'a') as f:
             f.write(j2_environment.from_string(batch_template).render(
+                deprecated=(deprecation_message("Batch")
+                            if (owning_service_name, "SetProperties") in deprecated_rpcs else None),
                 methods=methods,
                 pb2=pb2_module,
                 pb2_grpc=pb2_grpc_module,

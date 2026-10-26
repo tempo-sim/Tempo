@@ -22,6 +22,9 @@ message Rotation {
 message Transform {
   Vector location = 1;
   Rotation rotation = 2;
+  // Unitless, so used as given, with no unit or handedness conversion. Unset means (1, 1, 1) where
+  // a transform is given; a transform Tempo reports always has it set.
+  Vector scale = 3;
 }
 
 message Box {

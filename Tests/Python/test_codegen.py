@@ -457,7 +457,8 @@ def test_conversions_are_typed_by_what_they_convert(generated, tmp_path):
     # si_to_ue matches anything, and a Rotation converts to a type-checked float.
     errors = check(generated, """
 import tempo_sim.TempoCore.Geometry_pb2 as Geometry
-from tempo_sim.conversion import (si_direction_to_ue, si_to_ue, ue_direction_to_si,
+import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+from tempo_sim.conversion import (rotator_of, si_direction_to_ue, si_to_ue, ue_direction_to_si,
                                   ue_to_si)
 from tempo_sim.unreal import FQuat, FRotator, FTransform, FVector, FVector2D
 
@@ -466,13 +467,15 @@ def ok() -> None:
     v: Geometry.Vector = ue_to_si(FVector())
     v2: Geometry.Vector2D = ue_to_si(FVector2D())
     r: Geometry.Rotation = ue_to_si(FRotator())
-    q: Geometry.Rotation = ue_to_si(FQuat())
+    q: WorldControl.Quat = ue_to_si(FQuat())
+    qr: Geometry.Rotation = ue_to_si(rotator_of(FQuat()))
     t: Geometry.Transform = ue_to_si(FTransform())
     d: Geometry.Vector = ue_direction_to_si(FVector())
     centimeters: float = si_to_ue(2.5)
     uv: FVector = si_to_ue(Geometry.Vector())
     uv2: FVector2D = si_to_ue(Geometry.Vector2D())
     ur: FRotator = si_to_ue(Geometry.Rotation())
+    uq: FQuat = si_to_ue(WorldControl.Quat())
     ut: FTransform = si_to_ue(Geometry.Transform())
     ud: FVector = si_direction_to_ue(Geometry.Vector())
 """, tmp_path)
@@ -483,6 +486,7 @@ def ok() -> None:
     ("a conversion typed as another quantity",
      "v: FVector = si_to_ue(Geometry.Rotation())"),
     ("an SI result typed as Unreal", "v: FVector = ue_to_si(FVector())"),
+    ("a quaternion taken for a rotation", "r: Geometry.Rotation = ue_to_si(FQuat())"),
     ("converting an Unreal value the wrong way", "si_to_ue(FVector())"),
     ("converting an SI value the wrong way", "ue_to_si(Geometry.Vector())"),
     ("a value with no SI counterpart", "ue_to_si(FColor())"),
@@ -496,7 +500,7 @@ def test_conversion_misuse_is_a_type_error(generated, tmp_path, case, source):
     errors = check(generated, """
 import tempo_sim.TempoCore.Geometry_pb2 as Geometry
 from tempo_sim.conversion import si_to_ue, ue_direction_to_si, ue_to_si
-from tempo_sim.unreal import FColor, FRotator, FTransform, FVector
+from tempo_sim.unreal import FColor, FQuat, FRotator, FTransform, FVector
 
 def drift() -> None:
     {}

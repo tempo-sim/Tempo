@@ -14,8 +14,8 @@
 //! | [`FVector`]      | `Vector`    | a length: cm ↔ m, Y negated                                 |
 //! | [`FVector2D`]    | `Vector2D`  | likewise                                                    |
 //! | [`FRotator`]     | `Rotation`  | degrees ↔ radians, pitch and yaw negated, roll kept         |
-//! | [`FQuat`]        | `Rotation`  | one way: as the `FRotator` Unreal's `FQuat::Rotator()` makes |
-//! | [`FTransform`]   | `Transform` | its translation and rotation, each as above                 |
+//! | [`FQuat`]        | `Quat`      | exact: X and Z negated, Y and W kept                        |
+//! | [`FTransform`]   | `Transform` | translation and rotation as above, scale as given           |
 //!
 //! A rate converts as its quantity does, so a velocity in cm/s is a length here. A vector that is
 //! not a length at all — a direction, a normal, a unit axis — must not be scaled, so it has
@@ -23,13 +23,17 @@
 //! handedness and nothing else. Likewise an angle on its own is not converted here: a bare `f64` is
 //! a length.
 //!
-//! `TempoCore.Transform` has no scale — Tempo's RPCs carry a scale beside a transform, never in one —
-//! so [`ue_to_si`] drops an [`FTransform`]'s, and [`si_to_ue`] makes one of scale 1. Its rotation is
-//! a quaternion, and goes through the rotator Unreal itself would make of it, by Unreal's own
-//! formulas ([`rotator_of`], [`quat_of`]).
+//! The `Quat` an [`FQuat`] converts to is `TempoWorld`'s, right-handed and as exact as the
+//! quaternion itself. A `TempoCore` `Rotation` holds Euler angles instead, so to get one from an
+//! [`FQuat`], go through the rotator Unreal itself would make of it: `ue_to_si(&rotator_of(&q))`.
+//! [`rotator_of`] and [`quat_of`] follow Unreal's own formulas.
 //!
-//! `FIntVector`, `FIntPoint`, `FColor` and `FLinearColor` have no TempoCore counterpart, so nothing
-//! here converts them.
+//! A scale is a ratio, so an [`FTransform`]'s goes into the `Transform` as it is, and back the same
+//! way; a `Transform` whose scale is unset means scale 1. Its rotation goes through the rotator, as
+//! above, since a `Transform` holds a `Rotation`.
+//!
+//! `FIntVector`, `FIntPoint`, `FColor` and `FLinearColor` have no SI counterpart, so nothing here
+//! converts them.
 //!
 //! ```rust
 //! use tempo_sim::conversion::{si_to_ue, ue_to_si};
@@ -42,6 +46,7 @@
 //! ```
 
 use crate::proto::tempo_core as si;
+use crate::proto::tempo_world::Quat;
 use crate::unreal::{FQuat, FRotator, FTransform, FVector, FVector2D};
 
 const CM_PER_M: f64 = 100.0;
@@ -73,7 +78,7 @@ pub fn ue_to_si<T: UeToSi>(value: &T) -> T::Si {
 /// A TempoCore message as the Unreal value for the same quantity.
 ///
 /// An `f64` or a vector is taken to be a length; use [`si_direction_to_ue`] for a vector that is
-/// not. A `Transform` becomes an [`FTransform`] of scale 1, since it carries none.
+/// not. A `Transform` with no scale becomes an [`FTransform`] of scale 1.
 pub fn si_to_ue<T: SiToUe>(value: &T) -> T::Ue {
     value.to_ue()
 }
@@ -208,21 +213,34 @@ impl SiToUe for si::Rotation {
 }
 
 impl UeToSi for FQuat {
-    type Si = si::Rotation;
+    type Si = Quat;
 
-    fn to_si(&self) -> si::Rotation {
-        rotator_of(self).to_si()
+    /// Right-handed, as `TempoConversion.h` converts one: the axis's Y negated for the handedness,
+    /// then the whole axis negated for the opposite sense of rotation.
+    fn to_si(&self) -> Quat {
+        Quat { x: -self.x, y: self.y, z: -self.z, w: self.w }
     }
 }
+
+impl SiToUe for Quat {
+    type Ue = FQuat;
+
+    fn to_ue(&self) -> FQuat {
+        FQuat { x: -self.x, y: self.y, z: -self.z, w: self.w }
+    }
+}
+
+const UNIT_SCALE: FVector = FVector { x: 1.0, y: 1.0, z: 1.0 };
 
 impl UeToSi for FTransform {
     type Si = si::Transform;
 
-    /// The scale is dropped: TempoCore's Transform has none.
+    /// The scale is a ratio, so it is carried as it is.
     fn to_si(&self) -> si::Transform {
         si::Transform {
             location: Some(self.translation.to_si()),
-            rotation: Some(self.rotation.to_si()),
+            rotation: Some(rotator_of(&self.rotation).to_si()),
+            scale: Some(si::Vector { x: self.scale3d.x, y: self.scale3d.y, z: self.scale3d.z }),
         }
     }
 }
@@ -230,13 +248,13 @@ impl UeToSi for FTransform {
 impl SiToUe for si::Transform {
     type Ue = FTransform;
 
-    /// Scale 1, since the message carries none; a field it leaves unset is the zero it means on the
-    /// wire.
+    /// The scale as it is, or 1 when it is unset; a location or rotation left unset is the zero it
+    /// means on the wire.
     fn to_ue(&self) -> FTransform {
         FTransform {
             rotation: quat_of(&self.rotation.as_ref().map(SiToUe::to_ue).unwrap_or_default()),
             translation: self.location.as_ref().map(SiToUe::to_ue).unwrap_or_default(),
-            ..FTransform::default()
+            scale3d: self.scale.as_ref().map_or(UNIT_SCALE, |s| FVector { x: s.x, y: s.y, z: s.z }),
         }
     }
 }

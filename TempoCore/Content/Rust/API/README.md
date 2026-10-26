@@ -38,6 +38,23 @@ The API is organized into per-service modules:
 - `tempo_sensors`
 - `tempo_world`
 
+Each wrapper takes its request message, which its module re-exports, and has an `_async` twin. An
+RPC whose request is empty takes nothing:
+
+```rust,no_run
+use tempo_sim::tempo_world;
+
+fn main() -> Result<(), tempo_sim::TempoError> {
+    let spawned = tempo_world::spawn_actor(tempo_world::SpawnActorRequest {
+        actor_type: "StaticMeshActor".into(),
+        ..Default::default()
+    })?;
+    let _actors = tempo_world::get_all_actors()?;
+    tempo_world::destroy_actor(tempo_world::DestroyActorRequest { actor: spawned.name })?;
+    Ok(())
+}
+```
+
 Common helpers (`set_server`, `set_server_async`, `tempo_context`, `TempoContext`,
 `TempoError`, `SyncStreamIterator`) are re-exported at the crate root.
 

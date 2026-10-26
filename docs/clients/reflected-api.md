@@ -3,7 +3,9 @@
 The property API addresses everything by string:
 
 ```python
-tempo_world.set_float_property(actor="Truck_2", property="MaxSpeed", value=1200.0)
+from tempo_sim.TempoWorld.WorldControl_pb2 import Value
+
+tempo_world.set_property(actor="Truck_2", property="MaxSpeed", value=Value(float_value=1200.0))
 ```
 
 Nothing checks that spelling until the call runs. Rename `MaxSpeed` in C++ or in a Blueprint and
@@ -292,7 +294,10 @@ returns:
     let location = sweeper.k2_get_actor_location()?;     // FVector, centimetres
     let metres = ue_to_si(&location);                    // world::Vector, metres
 
-    let state = tempo_sim::tempo_world::get_current_actor_state("Marker".into(), false)?;
+    let state = tempo_sim::tempo_world::get_current_actor_state(tempo_sim::tempo_world::ActorStateRequest {
+        actor: "Marker".into(),
+        ..Default::default()
+    })?;
     let pose = si_to_ue(&state.transform.unwrap_or_default());   // FTransform
     ```
 
@@ -304,7 +309,7 @@ returns:
     auto location = sweeper.k2_get_actor_location();               // Result<FVector>, centimetres
     tempo::world::Vector metres = tempo::conversion::ue_to_si(location.value());
 
-    auto state = tempo::tempo_world::get_current_actor_state("Marker", false);
+    auto state = tempo::tempo_world::get_current_actor_state({.actor = "Marker"});
     tempo::unreal::FTransform pose = tempo::conversion::si_to_ue(state.value().transform());
     ```
 
@@ -314,22 +319,24 @@ returns:
 | `FVector` | `Vector` | a length: cm ↔ m, Y negated |
 | `FVector2D` | `Vector2D` | likewise |
 | `FRotator` | `Rotation` | degrees ↔ radians, pitch and yaw negated, roll kept |
-| `FQuat` | `Rotation` | one way: as the `FRotator` Unreal's `FQuat::Rotator()` makes of it |
-| `FTransform` | `Transform` | its translation and rotation, each as above |
+| `FQuat` | `Quat` | exact: X and Z negated |
+| `FTransform` | `Transform` | its translation and rotation, each as above, and its scale as given |
 
 These are the server's own rules ([Conventions](../concepts/conventions.md)), and the rotation math
 is Unreal's own: `rotator_of` and `quat_of` reproduce `FQuat::Rotator()` and
-`FRotator::Quaternion()` formula for formula, singularities included.
+`FRotator::Quaternion()` formula for formula, singularities included. For an `FQuat` as Euler
+angles, convert the rotator Unreal would make of it: `ue_to_si(rotator_of(q))`.
 
 !!! warning "What does not survive a conversion"
 
     - **A direction is not a length.** A number or a vector is taken to be a length and scaled —
       right for a location or a velocity, wrong for a normal or a unit axis. For those use
       `ue_direction_to_si` and `si_direction_to_ue`, which change the handedness and nothing else.
-      An angle on its own is not converted at all.
-    - **A transform's scale.** `TempoCore.Transform` has none — Tempo's RPCs carry a scale beside a
-      transform, never in one — so `ue_to_si` drops an `FTransform`'s, and `si_to_ue` makes one of
-      scale 1.
+      An angle on its own is not converted at all, since whether its sign changes depends on the
+      axis it turns about; neither is an angular velocity.
+    - **A transform's rotation, through Euler angles.** `Transform.rotation` is a `Rotation`, so an
+      `FTransform`'s quaternion reaches it through `rotator_of`, singularities included. Convert
+      `FTransform.Rotation` on its own for an exact `Quat`.
     - **Integer vectors and colors** have no TempoCore counterpart and are not converted.
 
 ### One call instead of twenty
