@@ -685,13 +685,16 @@ class Generator:
         return order
 
     def emit_structs(self):
-        """structs_fwd.h, structs.h and structs.cc.
+        """structs_fwd.h, structs.h, and the definition files, {source path: text}.
 
         Per struct, a proxy to reach into it by address, `<Name>Ref`, which is what a struct
         property's accessor returns, so a nested address like PostProcessSettings.BloomIntensity
         checks member by member. And when it travels whole, a value, `<Name>`, every member a
         std::optional, because a write is a merge and an unset member leaves the destination as it
         was.
+
+        The definitions are split a hundred structs to a file, as the classes' are: one file needs
+        some 10 GB to compile, enough to get the compiler killed on a CI runner.
         """
         structs = sorted(self.schema.get("structs", []), key=lambda s: s["name"])
         forward = [GENERATED, "", "#pragma once", "", "namespace tempo::reflected::structs {", ""]
@@ -702,7 +705,7 @@ class Generator:
         forward += ["", "}  // namespace tempo::reflected::structs", ""]
 
         references = set()
-        values, traits, source = [], ["namespace tempo::unreal {", ""], []
+        values, traits, value_source = [], ["namespace tempo::unreal {", ""], {}
         for struct_name in self.value_order():
             struct = self.structs_by_name[struct_name]
             name = ident(struct_name)
@@ -722,6 +725,7 @@ class Generator:
                 "};",
                 "",
             ]
+            source = value_source[struct_name] = []
             source.append("{}<{}> StructTraits<{}>::from(const StructFields& fields) {{".format(
                 RESULT, qualified, qualified))
             source.append("\t{} value;".format(qualified))
@@ -741,7 +745,7 @@ class Generator:
             self.stats["struct_values"] += 1
         traits += ["}  // namespace tempo::unreal", ""]
 
-        proxies, proxy_source = [], []
+        proxies, proxy_source = [], {}
         for struct in structs:
             name = ident(struct["name"])
             expressible = struct["name"] in self.expressible_structs
@@ -767,7 +771,7 @@ class Generator:
                 proxies.append("")
                 proxies += body
             proxies += ["", "private:", "\t{}::StructRef ref_;".format(RUNTIME), "};", ""]
-            proxy_source += body_source
+            proxy_source[struct["name"]] = body_source
             self.stats["structs"] += 1
 
         # A struct value can hold a handle by value, so the classes it names are complete here.
@@ -778,11 +782,18 @@ class Generator:
         header += ['#include "{}"'.format(i) for i in includes]
         header += ["", "namespace tempo::reflected::structs {", ""] + values + proxies
         header += ["}  // namespace tempo::reflected::structs", ""] + traits
-        cc = [GENERATED, "", '#include "tempo/reflected/structs.h"', "",
-              "namespace tempo::unreal {", ""] + source + ["}  // namespace tempo::unreal", ""]
-        cc += ["namespace tempo::reflected::structs {", ""] + proxy_source + [
-            "", "}  // namespace tempo::reflected::structs", ""]
-        return "\n".join(forward), "\n".join(header), "\n".join(cc)
+        sources = {}
+        for index in range(0, len(structs), 100):
+            names = [struct["name"] for struct in structs[index:index + 100]]
+            cc = [GENERATED, "", '#include "tempo/reflected/structs.h"', "", "namespace tempo::unreal {", ""]
+            for name in names:
+                cc += value_source.get(name, [])
+            cc += ["}  // namespace tempo::unreal", "", "namespace tempo::reflected::structs {", ""]
+            for name in names:
+                cc += proxy_source[name]
+            cc += ["", "}  // namespace tempo::reflected::structs", ""]
+            sources["structs_{}.cc".format(index // 100)] = "\n".join(cc)
+        return "\n".join(forward), "\n".join(header), sources
 
     def emit_struct_member(self, member, proxy, used, references):
         name = member["name"]
@@ -1067,10 +1078,11 @@ def generate(schema_path, output_dir, docs=False):
     write_file(os.path.join(include, "tempo/reflected/enums.h"), enums_h)
     write_file(os.path.join(src, "enums.cc"), enums_cc)
 
-    structs_fwd, structs_h, structs_cc = generator.emit_structs()
+    structs_fwd, structs_h, structs_sources = generator.emit_structs()
     write_file(os.path.join(include, "tempo/reflected/structs_fwd.h"), structs_fwd)
     write_file(os.path.join(include, "tempo/reflected/structs.h"), structs_h)
-    write_file(os.path.join(src, "structs.cc"), structs_cc)
+    for path, text in structs_sources.items():
+        write_file(os.path.join(src, path), text)
 
     write_file(os.path.join(include, "tempo/reflected/hierarchy.h"), HIERARCHY_H)
     write_file(os.path.join(src, "hierarchy.cc"), generator.emit_hierarchy())

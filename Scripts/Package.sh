@@ -219,7 +219,8 @@ PACKAGE_PYTHON_PACKAGE() {
 # nothing about the cause.
 #
 # Either way, classes an earlier package left in the source tree are removed rather than shipped:
-# they describe a different build.
+# they describe a different build. When only the C++ classes failed, the Python and Rust ones still
+# ship.
 CLEAR_REFLECTED_API() {
   if [[ -n "$PYTHON_BIN" ]]; then
     "$PYTHON_BIN" "$PROJECT_ROOT/Plugins/Tempo/TempoCore/Content/Python/gen_project_package.py" \
@@ -233,13 +234,21 @@ CLEAR_REFLECTED_API() {
 if [[ -n "$TEMPO_SKIP_REFLECTED_API" && "$TEMPO_SKIP_REFLECTED_API" != "0" ]]; then
   echo "Skipping the reflected API (TEMPO_SKIP_REFLECTED_API is set)"
   CLEAR_REFLECTED_API
-elif ! "$SCRIPT_DIR"/GenReflectedAPI.sh; then
-  if [[ -n "$TEMPO_REQUIRE_REFLECTED_API" && "$TEMPO_REQUIRE_REFLECTED_API" != "0" ]]; then
-    echo "Failed to generate the reflected API, which TEMPO_REQUIRE_REFLECTED_API requires" >&2
-    exit 1
+else
+  REFLECTED_API_STATUS=0
+  "$SCRIPT_DIR"/GenReflectedAPI.sh || REFLECTED_API_STATUS=$?
+  if [[ $REFLECTED_API_STATUS -ne 0 ]]; then
+    if [[ -n "$TEMPO_REQUIRE_REFLECTED_API" && "$TEMPO_REQUIRE_REFLECTED_API" != "0" ]]; then
+      echo "Failed to generate the reflected API, which TEMPO_REQUIRE_REFLECTED_API requires" >&2
+      exit 1
+    fi
+    if [[ $REFLECTED_API_STATUS -eq 3 ]]; then
+      echo "Warning: failed to generate the reflected C++ API; the packaged build will include only the Python and Rust ones" >&2
+    else
+      echo "Warning: failed to generate the reflected API; the packaged build will not include them" >&2
+      CLEAR_REFLECTED_API
+    fi
   fi
-  echo "Warning: failed to generate the reflected API; the packaged build will not include them" >&2
-  CLEAR_REFLECTED_API
 fi
 
 # Copy the C++ client to Packaged/API/Cpp/, self-contained: its headers and archives, the reflected

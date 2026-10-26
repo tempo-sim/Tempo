@@ -352,6 +352,7 @@ def test_tempo_components_declare_their_own_configuration():
     assert derived is not None and not derived["writable"]
 
 
+@requires_classes
 def test_discovery_by_a_base_class_can_be_narrowed(sim_server):
     """The whole point of asking for a base class: sorting out what came back."""
     StaticMeshActor = registered().python_class(SPAWNABLE)
@@ -368,6 +369,7 @@ def test_discovery_by_a_base_class_can_be_narrowed(sim_server):
         tw.destroy_actor(actor=spawned.actor)
 
 
+@requires_classes
 def test_a_handle_made_from_a_name_alone_knows_its_class(sim_server):
     """get_actor() without a class makes no call, so is_a has to go and ask."""
     StaticMeshActor = registered().python_class(SPAWNABLE)
@@ -700,6 +702,7 @@ def test_a_typed_batch_defers_and_orders(sim_server):
         tw.destroy_actor(actor=spawned.actor)
 
 
+@requires_classes
 def test_a_coroutine_writes_and_reads_through_the_typed_classes(sim_server):
     """The async forms against a real sim: spawn and destroy awaited, writes queued in an async
     batch -- accessor write included -- and reads awaited through a deferred lambda."""

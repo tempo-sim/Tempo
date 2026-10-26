@@ -257,7 +257,7 @@ def test_generates_the_expected_files(generated):
                  "include/tempo/reflected/engine.h",
                  "include/tempo/reflected/classes/engine/Widget.h",
                  "include/tempo/reflected/assets/game.h", "src/hierarchy.cc", "src/enums.cc",
-                 "src/structs.cc", "CMakeLists.txt"):
+                 "src/structs_0.cc", "CMakeLists.txt"):
         assert (generated / name).exists(), "{} was not generated".format(name)
 
 

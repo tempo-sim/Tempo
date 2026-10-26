@@ -9,6 +9,9 @@
 #
 #   Scripts/GenReflectedAPI.sh
 #
+# Exits 3 when only the C++ classes failed, having generated the Python and Rust ones, so that
+# Package.sh can still ship those. Any other failure exits 1.
+#
 # The schema lands in Saved/TempoSchema/tempo_schema.json. The classes go into the project's own
 # client package and crate, beside the wrappers its protos generate -- `tempo_sample.reflected` in
 # Content/Python/API and `tempo_sample::reflected` in Content/Rust/API -- which Package.sh then
@@ -211,9 +214,16 @@ if [ -n "${TEMPO_GEN_CPP_API:-}" ] && [ "${TEMPO_GEN_CPP_API}" != "0" ]; then
   CPP_CLASSES_DIR="$SCHEMA_DIR/cpp"
   rm -rf "$CPP_CLASSES_DIR"
   echo "Generating tempo::reflected"
-  "$PYTHON_BIN" "$PYTHON_DIR/gen_cpp_classes.py" "$GENERATE_FROM" "$CPP_CLASSES_DIR"
-  "$PYTHON_BIN" "$PYTHON_DIR/build_cpp_classes.py" "$CPP_CLASSES_DIR" "$CPP_API_DIR" \
-    "$SCRIPT_DIR/../TempoCore/Source/ThirdParty/gRPC"
+  # A compiler can fail here for reasons of its own, out of memory on a small machine for one, which
+  # say nothing about the Python and Rust classes already generated from the same schema.
+  if ! "$PYTHON_BIN" "$PYTHON_DIR/gen_cpp_classes.py" "$GENERATE_FROM" "$CPP_CLASSES_DIR" ||
+     ! "$PYTHON_BIN" "$PYTHON_DIR/build_cpp_classes.py" "$CPP_CLASSES_DIR" "$CPP_API_DIR" \
+         "$SCRIPT_DIR/../TempoCore/Source/ThirdParty/gRPC"; then
+    rm -rf "$CPP_API_DIR/include/tempo/reflected"
+    rm -f "$CPP_API_DIR"/lib/*/libtempo_reflected.a "$CPP_API_DIR"/lib/*/tempo_reflected.lib
+    echo "Failed to generate the reflected C++ API; the Python and Rust ones were generated" >&2
+    exit 3
+  fi
 else
   echo "Skipping the reflected C++ API (set TEMPO_GEN_CPP_API=1 to generate it)"
 fi

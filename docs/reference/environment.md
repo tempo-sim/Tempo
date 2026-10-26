@@ -35,7 +35,8 @@
 `TEMPO_REQUIRE_REFLECTED_API`
 
 :   Set to `1` to make a failure to generate the reflected API fail `Package.sh`. Without it the
-    failure is a warning and the package ships without the reflected API.
+    failure is a warning and the package ships without the reflected API, or, when only the C++
+    classes failed to build, with the Python and Rust ones alone.
 
 ## Testing
 
