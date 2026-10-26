@@ -6,8 +6,8 @@ of a simulation, if a property was renamed since it was written. The
 a fresh checkout to a scenario a checker reads, and to watching it catch a rename.
 
 What it assumes: a packaged build, Python 3.9 or newer, and nothing else. The same classes are
-generated for Rust; [step 11](#11-rust-instead-of-python) is that path, and the steps before it
-apply to both.
+generated for Rust and C++; [step 11](#11-rust-instead-of-python) and
+[step 12](#12-c-instead-of-python) are those paths, and the steps before them apply to all three.
 
 ## 1. Package the build
 
@@ -23,37 +23,45 @@ ls Packaged/API/Python
 tempo-sample  tempo-sim
 ```
 
-Two distributions, and you want both:
+Two distributions, of which only the project's comes from here:
 
 | Distribution | What it is |
 |---|---|
-| `tempo-sim` | The client: the generated gRPC wrappers, the runtime behind attribute access, `tempo_sim.world` and `tempo_sim.conversion`. The same for every project. |
 | `tempo-sample` | The host project's own package, named after the project: the reflected API of this build, as `tempo_sample.reflected`, exact for its engine and including its Blueprints and asset catalog, and the project's own services, if it defines any. |
+| `tempo-sim` | The client: the generated gRPC wrappers, the runtime behind attribute access, `tempo_sim.world` and `tempo_sim.conversion`. The same for every project, and the same release that is on PyPI, which is where to install it from. |
 
 !!! note "`Package.sh` only"
 
     `Package.bat` does not build the Python wheels today, so on Windows run the packaging step
     through Git Bash.
 
-## 2. Make a virtual environment
+## 2. Choose an environment
 
-Keep it out of the engine's Python and out of `TempoEnv`, which the build scripts own:
+`TempoEnv`, the virtual environment the build creates in the project root, already has both
+packages: the build installs them, and packaging installs this build's classes into it. Activate it
+and skip to [step 4](#4-turn-a-type-checker-on):
+
+```bash
+source TempoEnv/bin/activate       # Windows: source TempoEnv/Scripts/activate
+```
+
+A scenario repository of its own, with dependencies of its own, wants an environment of its own
+instead:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 ```
 
-## 3. Install the client and the classes
+## 3. Install the classes
+
+In an environment of your own, install the project's wheel:
 
 ```bash
-pip install Packaged/API/Python/tempo-sim/*.whl \
-            Packaged/API/Python/tempo-sample/*.whl
+pip install Packaged/API/Python/tempo-sample/*.whl
 ```
 
-`tempo-sim` is the same for every project and is also on PyPI. The project's wheel pins the version
-it was generated against, so `pip install Packaged/API/Python/tempo-sample/*.whl` on its own fetches
-the matching `tempo-sim` from there.
+It pins the `tempo-sim` version it was generated against, so pip installs that from PyPI beside it.
 
 Importing the classes is what registers them with the runtime, so the check is an import:
 
@@ -317,21 +325,17 @@ should not pay for generating 16 MB of it:
 TEMPO_GEN_RUST_API=1 Scripts/Package.sh
 ```
 
-That leaves two crates beside each other:
-
-```
-Packaged/API/Rust/tempo-sim/          the client and the reflected API's runtime
-Packaged/API/Rust/tempo-sample/       this build's classes (module `reflected`) and its services
-```
-
-Point a scenario crate at both. The project crate depends on `tempo-sim` by relative path, so keep
-them together or copy both:
+That leaves the project's crate in `Packaged/API/Rust/tempo-sample/`: this build's classes, as
+its module `reflected`, and its services. Depend on it by path, and on `tempo-sim` from crates.io:
 
 ```toml
 [dependencies]
-tempo-sim = { path = "../Packaged/API/Rust/tempo-sim" }
+tempo-sim = "0.4"
 tempo-sample = { path = "../Packaged/API/Rust/tempo-sample" }
 ```
+
+The project crate depends on the `tempo-sim` version it was generated against, from crates.io too,
+so the two resolve to one copy and its types are the ones your code names.
 
 The classes are behind the crate's `reflected` feature, which is on by default; a crate that only
 calls the project's services can turn it off with `default-features = false` and skip compiling
@@ -392,6 +396,91 @@ Three things read differently from Python, and the
   first: `widget.target()?.visible()?`.
 - **Async is a separate `_async` twin** — `lidar.horizontal_beams_async().await?` — matching every
   other generated Tempo Rust API, with `world::batch_async` for a batch.
+
+## 12. C++ instead of Python
+
+The same schema generates the C++ classes too, with the guarantee coming from the compiler again.
+They are behind the C++ client's opt-in:
+
+```bash
+TEMPO_GEN_CPP_API=1 Scripts/Package.sh
+```
+
+That leaves a self-contained client in `Packaged/API/Cpp/`: the headers and archives of the RPC
+client and of this build's classes, the gRPC headers and shared library they need, and a CMake
+package config. Point a scenario's build at it:
+
+```cmake
+find_package(Tempo CONFIG REQUIRED PATHS <project_root>/Packaged/API/Cpp)
+target_link_libraries(my_scenario PRIVATE tempo::reflected)
+```
+
+Then the same scenario as [step 6](#6-run-the-example), in C++:
+
+```cpp
+#include <cstdio>
+
+#include <tempo.h>
+#include <tempo/world.h>
+#include <tempo/reflected/classes/game/street_sweeper/blueprint/BP_StreetSweeper_C.h>
+#include <tempo/reflected/classes/tempo_sensors/TempoLidar.h>
+
+using tempo::reflected::classes::game::street_sweeper::blueprint::BP_StreetSweeper_C;
+
+int main() {
+    tempo::set_server("localhost", 10001);
+
+    // The classes and the sim have to describe the same build.
+    if (auto checked = tempo::world::check_schema(); !checked) return 1;
+
+    auto sweepers = tempo::world::get_actors<BP_StreetSweeper_C>();
+    if (!sweepers) return 1;
+    for (const BP_StreetSweeper_C& sweeper : sweepers.value()) {
+        // A component, typed as its own class.
+        auto lidar = sweeper.tempo_lidar();
+        auto horizontal = lidar.horizontal_beams();
+        auto vertical = lidar.vertical_beams();
+        if (!horizontal || !vertical) return 1;
+        std::printf("%dx%d beams\n", horizontal.value(), vertical.value());
+
+        // Four writes, one round trip. Nothing is sent if the body fails.
+        auto written = tempo::world::batch([&]() -> tempo::Result<void> {
+            if (auto r = lidar.set_horizontal_beams(1024); !r) return r;
+            if (auto r = lidar.set_vertical_beams(64); !r) return r;
+            if (auto r = lidar.set_horizontal_fov(90.0); !r) return r;
+            return lidar.set_max_distance(20000.0);    // centimetres -- 200 m
+        });
+        if (!written) return 1;
+
+        // RelativeLocation is declared five classes up, on SceneComponent.
+        auto location = lidar.relative_location();
+        if (!location) return 1;
+        std::printf("%f %f %f\n", location.value().x, location.value().y, location.value().z);
+    }
+}
+```
+
+The build is the whole check. The same four kinds of mistake as in
+[step 8](#8-watch-a-rename-get-caught) fail like this:
+
+```text
+error: no member named 'horizontal_beems' in 'tempo::reflected::classes::tempo_sensors::TempoLidar'
+error: no member named 'set_b_color_enabled' in 'tempo::reflected::classes::tempo_sensors::TempoLidar'
+error: cannot initialize a parameter of type '::std::int32_t' (aka 'int') with an lvalue of type 'const char[5]'
+error: no member named 'no_such_thing' in 'tempo::reflected::classes::engine::StaticMeshComponent'
+```
+
+Autocomplete comes from any editor that reads the CMake project, clangd among them.
+
+Three things read differently from Python, and the [C++ client](../clients/cpp.md#the-reflected-api)
+page has the rest:
+
+- **Names are snake_case**, exactly as in Rust: `HorizontalBeams` becomes `horizontal_beams`.
+- **Every call returns a `Result`**, which is `[[nodiscard]]`: check it, or cast one whose outcome
+  does not matter to `void`.
+- **A class you use needs its header.** A header declares and forward-declares only, so calling a
+  method that returns a class you have not included is an incomplete-type error naming it. The C++
+  client is synchronous throughout; there are no async twins.
 
 ## Next
 

@@ -25,13 +25,21 @@ source <project_root>/TempoEnv/bin/activate
 source <project_root>/TempoEnv/Scripts/activate
 ```
 
-Alternatively, install them into your system Python or another virtual environment:
+Packaging installs the project's reflected classes into `TempoEnv` too.
+
+To use them from another environment, install `tempo-sim` from PyPI and the project package from
+the project:
 
 ```bash
-pip install "<project_root>/Plugins/Tempo/TempoCore/Content/Python/API"
-# And, for the project package, if present:
+pip install tempo-sim
+# And the project package, if the project has one: from a packaged build, with its reflected classes,
+pip install <project_root>/Packaged/API/Python/<your-project>/*.whl
+# or from its source, with only its services.
 pip install "<project_root>/Content/Python/API"
 ```
+
+The project package pins the `tempo-sim` version it was generated against, which pip installs from
+PyPI if it is not already there.
 
 ## The shape of the API
 

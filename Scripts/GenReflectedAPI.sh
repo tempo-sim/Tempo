@@ -191,6 +191,22 @@ echo "Generating $IMPORT_NAME.reflected"
   "$GENERATE_FROM" "$CLASSES_DIR" "--package=$IMPORT_NAME.reflected"
 echo "Reflected Python API generated at $CLASSES_DIR"
 
+# Into TempoEnv as well, which the build installs the project package into, so a script run there
+# -- against the editor or this build -- has this build's classes rather than an earlier one's.
+TEMPO_ENV="$PROJECT_ROOT/TempoEnv"
+TEMPO_ENV_PYTHON=""
+for candidate in "$TEMPO_ENV/bin/python3" "$TEMPO_ENV/Scripts/python.exe"; do
+  if [ -x "$candidate" ]; then
+    TEMPO_ENV_PYTHON="$candidate"
+    break
+  fi
+done
+if [ -n "$TEMPO_ENV_PYTHON" ]; then
+  "$TEMPO_ENV_PYTHON" -m pip install "$PROJECT_ROOT/Content/Python/API" --no-deps --force-reinstall --quiet
+  "$TEMPO_ENV_PYTHON" "$PYTHON_DIR/update_venv_cache.py" "$(cd "$SCRIPT_DIR/../TempoCore" && pwd)" "$TEMPO_ENV" "$PROJECT_ROOT"
+  echo "Installed $IMPORT_NAME into $TEMPO_ENV"
+fi
+
 # The Rust types, from the same schema, into the project's own crate as its `reflected` module. The
 # crate's manifest and lib.rs are written after them, because lib.rs declares what src/ holds.
 if [ -n "$RUST" ]; then

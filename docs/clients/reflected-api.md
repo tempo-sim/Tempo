@@ -62,16 +62,15 @@ Five things about the reflected API catch people out. Each has a section below.
 ## Installing
 
 The classes are generated from the build they describe, when it is packaged (`Package.sh` runs
-`Scripts/GenReflectedAPI.sh`), and they ship with it:
+`Scripts/GenReflectedAPI.sh`), and they ship with it, in the project's own package:
 
 ```bash
-pip install Packaged/API/Python/tempo-sim/*.whl \
-            Packaged/API/Python/tempo-sample/*.whl
+pip install Packaged/API/Python/tempo-sample/*.whl
 ```
 
-The project's wheel pins the `tempo-sim` version it was generated against, and that version is on
-PyPI, so installing the project's wheel alone fetches `tempo-sim` from there. Only the project's
-package has to come from `Packaged/API`.
+The project's wheel pins the `tempo-sim` version it was generated against, so pip installs that
+from PyPI beside it. Packaging also installs the classes into the project's `TempoEnv`, which
+already has both packages.
 
 They are the `reflected` subpackage of the project's own package, beside its services:
 `tempo_sample.reflected` for TempoSample, `<your_project>.reflected` for yours, there even when the
@@ -619,11 +618,12 @@ day any of it changes.
 
 The classes are generated for Rust too, from the same schema and with the same guarantee, as the
 `reflected` module of the project's own crate — behind its `reflected` feature, which is on by
-default. The crate ships beside `tempo-sim` when the build is packaged with `TEMPO_GEN_RUST_API=1`:
+default. The crate ships in `Packaged/API/Rust` when the build is packaged with
+`TEMPO_GEN_RUST_API=1`, and depends on `tempo-sim` from crates.io, as yours does:
 
 ```toml
 [dependencies]
-tempo-sim = { path = "Packaged/API/Rust/tempo-sim" }
+tempo-sim = "0.4"
 tempo-sample = { path = "Packaged/API/Rust/tempo-sample" }
 ```
 

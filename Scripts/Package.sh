@@ -155,10 +155,11 @@ PACKAGE_RUST_CRATE() {
         cp "$CRATE_DIR/$rel" "$DEST/$rel"
       fi
     done
-  # A crate depending on tempo-sim by path names it where the source tree has it, which is not
-  # where Packaged/API/Rust does: beside it. Not `sed -i`, whose suffix argument BSD requires and
-  # GNU rejects.
-  sed -E '/^tempo-sim[[:space:]]*=/s/path[[:space:]]*=[[:space:]]*"[^"]*"/path = "..\/tempo-sim"/' \
+  # A project crate depends on tempo-sim by path and version, the path naming the source tree. The
+  # packaged copy keeps only the version, so a consumer builds it against tempo-sim from crates.io,
+  # one copy shared with their own dependency on it. Not `sed -i`, whose suffix argument BSD
+  # requires and GNU rejects.
+  sed -E '/^tempo-sim[[:space:]]*=/s/path[[:space:]]*=[[:space:]]*"[^"]*"[[:space:]]*,[[:space:]]*//' \
     "$DEST/Cargo.toml" > "$DEST/Cargo.toml.relocated"
   mv "$DEST/Cargo.toml.relocated" "$DEST/Cargo.toml"
 }

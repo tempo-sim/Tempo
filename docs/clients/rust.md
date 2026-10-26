@@ -28,12 +28,17 @@ it.
 
 ## Consuming it
 
-From another Rust project, depend on it by path or git ref:
+From another Rust project, depend on `tempo-sim` from crates.io, and on your project's crate, if
+it has one, from its packaged build:
 
 ```toml
 [dependencies]
-tempo-sim = { path = "<plugin_root>/TempoCore/Content/Rust/API" }
+tempo-sim = "0.4"
+tempo-sample = { path = "<project_root>/Packaged/API/Rust/tempo-sample" }
 ```
+
+The packaged project crate depends on the `tempo-sim` version it was generated against, from
+crates.io, so the two resolve to one copy.
 
 ## The shape of the API
 
@@ -111,9 +116,10 @@ Full generated API documentation for the published crate is on
     reflected API, generate and use your project crate — it depends on `tempo-sim` and adds your
     modules.
 
-    By default the generated project crate references `tempo-sim` by **local path**. Set
-    `"tempo_sim_source": "registry"` in `crate_info.json` to depend on the published crates.io
-    crate instead.
+    The project crate in the source tree references `tempo-sim` by local path as well as version,
+    so a build there uses the plugin's own copy; the copy in `Packaged/API/Rust` references the
+    version alone, on crates.io. Set `"tempo_sim_source": "registry"` in `crate_info.json` to make
+    the source tree's crate use crates.io too.
 
 ## Reflected API
 

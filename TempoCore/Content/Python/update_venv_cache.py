@@ -12,8 +12,12 @@ from pathlib import Path
 from prebuild_cache import PrebuildCache
 
 
-def collect_venv_input_files(plugin_root: Path) -> list:
-    """Collect files that affect venv state (requirements + API source)."""
+def collect_venv_input_files(plugin_root: Path, project_root: Path = None) -> list:
+    """Collect files that affect venv state (requirements + API source).
+
+    The project's own package is installed into the venv too, so its files count: its service
+    wrappers change at build time and its reflected classes at package time.
+    """
     files = []
     # requirements.txt
     req_file = plugin_root / "Content/Python/API/requirements.txt"
@@ -23,6 +27,11 @@ def collect_venv_input_files(plugin_root: Path) -> list:
     api_dir = plugin_root / "Content/Python"
     for f in api_dir.rglob("*.py"):
         files.append(f)
+    if project_root is not None:
+        project_api_dir = project_root / "Content/Python/API"
+        if project_api_dir.exists():
+            files.extend(sorted(f for f in project_api_dir.rglob("*")
+                                if f.is_file() and f.suffix in (".py", ".pyi", ".json", ".toml")))
     return files
 
 
@@ -54,15 +63,16 @@ def collect_venv_output_files(venv_dir: Path) -> list:
 
 def main():
     if len(sys.argv) < 3:
-        print("Usage: update_venv_cache.py <plugin_root> <venv_dir>", file=sys.stderr)
+        print("Usage: update_venv_cache.py <plugin_root> <venv_dir> [project_root]", file=sys.stderr)
         sys.exit(1)
 
     plugin_root = Path(sys.argv[1])
     venv_dir = Path(sys.argv[2])
+    project_root = Path(sys.argv[3]) if len(sys.argv) > 3 else None
 
     cache = PrebuildCache(plugin_root / ".tempo_prebuild_cache.json")
 
-    venv_input_files = collect_venv_input_files(plugin_root)
+    venv_input_files = collect_venv_input_files(plugin_root, project_root)
     venv_output_files = collect_venv_output_files(venv_dir)
 
     cache.update("venv", venv_input_files, venv_output_files,
