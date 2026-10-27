@@ -968,6 +968,52 @@ FTempoCameraIntrinsics UTempoCamera::GetIntrinsics() const
 	return FTempoCameraIntrinsics(SizeXY, FOVAngle, LensParameters.GetClampedPrincipalPoint());
 }
 
+bool UTempoCamera::SetCalibratedIntrinsics(const FIntPoint& InSizeXY, double FocalLength, const FVector2D& PrincipalPoint, const FTempoLensParameters& InLensParameters)
+{
+	if (InSizeXY.X <= 0 || InSizeXY.Y <= 0 || !(FocalLength > 0.0))
+	{
+		UE_LOG(LogTempoSensors, Error, TEXT("SetCalibratedIntrinsics: invalid size %d x %d or focal length %f"), InSizeXY.X, InSizeXY.Y, FocalLength);
+		return false;
+	}
+
+	// The FOV is found by inverting the model's own ComputeFOutputForFullImage, which is how the camera turns an
+	// FOV back into a focal length, so the two cannot disagree. The output focal length falls as the FOV grows,
+	// so bisect over the FOVs the camera accepts.
+	const TUniquePtr<FLensModel> Model = CreateLensModel(InLensParameters, 0.0, 0.0);
+	const double MaxFOVDeg = InLensParameters.IsSingleCapture() ? 179.9 : 240.0;
+	double Low = 1e-3;
+	double High = MaxFOVDeg;
+	const double FocalAtHigh = Model->ComputeFOutputForFullImage(InSizeXY, High);
+	const double FocalAtLow = Model->ComputeFOutputForFullImage(InSizeXY, Low);
+	if (FocalAtLow <= 0.0 || FocalLength > FocalAtLow || (FocalAtHigh > 0.0 && FocalLength < FocalAtHigh))
+	{
+		UE_LOG(LogTempoSensors, Error, TEXT("SetCalibratedIntrinsics: no FOV up to %.1f degrees gives a %d pixel wide image a focal length of %f with this lens"),
+			MaxFOVDeg, InSizeXY.X, FocalLength);
+		return false;
+	}
+	for (int32 Iteration = 0; Iteration < 100 && High - Low > 1e-9; ++Iteration)
+	{
+		const double Mid = 0.5 * (Low + High);
+		const double FocalAtMid = Model->ComputeFOutputForFullImage(InSizeXY, Mid);
+		// A model's projection can end before MaxFOVDeg (a lens that folds back), where it reports no focal length.
+		if (FocalAtMid > 0.0 && FocalAtMid >= FocalLength)
+		{
+			Low = Mid;
+		}
+		else
+		{
+			High = Mid;
+		}
+	}
+
+	LensParameters = InLensParameters;
+	// A normalized offset from the image center, X right / Y down, which every lens model honors.
+	LensParameters.PrincipalPoint = FVector2D(PrincipalPoint.X / InSizeXY.X - 0.5, PrincipalPoint.Y / InSizeXY.Y - 0.5);
+	SizeXY = InSizeXY;
+	FOVAngle = 0.5 * (Low + High);
+	return true;
+}
+
 void UTempoCamera::OnRenderCompleted()
 {
 	Super::OnRenderCompleted();

@@ -302,6 +302,15 @@ public:
 
 	FTempoCameraIntrinsics GetIntrinsics() const;
 
+	/**
+	 * Configure the camera from a calibration: the image size, the focal length and principal point in pixels,
+	 * and the lens. The horizontal FOV is the one the lens model's own projection turns back into FocalLength,
+	 * so GetIntrinsics reports the calibration it was given. Set it before the camera activates. Returns false,
+	 * changing nothing, when no FOV realizes FocalLength with this lens.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Tempo")
+	bool SetCalibratedIntrinsics(const FIntPoint& InSizeXY, double FocalLength, const FVector2D& PrincipalPoint, const FTempoLensParameters& InLensParameters);
+
 	// Begin ITempoSensorInterface
 	virtual TOptional<TFuture<void>> SendMeasurements() override;
 	// End ITempoSensorInterface
