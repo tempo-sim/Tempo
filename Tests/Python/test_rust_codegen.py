@@ -172,7 +172,9 @@ def check(workspace, body):
 
     environment = dict(os.environ, CARGO_TARGET_DIR=TARGET_DIR)
     result = subprocess.run(
-        [cargo, "build", "--quiet", "--message-format=short"],
+        # Uncoloured whatever the environment says: CI's Rust setup exports CARGO_TERM_COLOR=always,
+        # and a coloured line has escape codes between the location and "error".
+        [cargo, "build", "--quiet", "--message-format=short", "--color=never"],
         cwd=str(snippet), capture_output=True, text=True, env=environment)
     errors = [line for line in result.stderr.splitlines()
               if line.startswith("src/main.rs") and ": error" in line]
