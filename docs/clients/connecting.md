@@ -160,18 +160,29 @@ told, through `grpc-timeout`). The setting is process-wide, like the connection,
 overridden for a stretch of calls -- longer for one known to be slow, such as a level load.
 
 Only unary calls get a deadline. A gRPC deadline bounds a whole call, and a stream (camera frames,
-lidar scans, state updates) is meant to outlive any one request, so streams never get one.
+lidar scans, state updates) is meant to outlive any one request, so streams never get one. A call's
+deadline also covers connecting, when it is the call that opens the connection.
+
+A call that fails with `DEADLINE_EXCEEDED` may still complete on the server. Before retrying one
+that changes the world (spawning an actor, stepping, loading a level, calling a function), check
+whether it took effect, or it may happen twice.
+
+The C++ client has no request timeout yet.
 
 === "Python"
 
     ```python
     import tempo_sim
+    import tempo_sim.tempo_core as tc
 
     tempo_sim.set_request_timeout(120.0)        # seconds; None for no deadline
 
     with tempo_sim.with_request_timeout(600.0):  # this block only, sync or async calls
-        tempo_sim.tempo_core.load_level("/Game/Maps/Big")
+        tc.load_level("/Game/Maps/Big")
     ```
+
+    A task started inside the block keeps the override for its whole life, because asyncio copies
+    the context into it.
 
 === "Rust"
 
@@ -187,6 +198,7 @@ lidar scans, state updates) is meant to outlive any one request, so streams neve
     ```
 
     An override is seen by every call its future or closure makes, but not by a task it spawns.
+    `request_timeout()` reads the deadline a call made here would get.
 
 ## Compression
 

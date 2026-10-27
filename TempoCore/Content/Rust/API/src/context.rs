@@ -310,8 +310,9 @@ pub fn request_timeout() -> Option<Duration> {
 }
 
 /// Run `calls` with `timeout` in place of the process-wide deadline: longer for a call known to be
-/// slow, shorter for one that must not stall, `None` for none. Seen by every RPC `calls` makes,
-/// sync or async, but not by a task it spawns.
+/// slow, shorter for one that must not stall, `None` for none. Seen by every RPC `calls` awaits, but
+/// not by a task it spawns. Blocking calls go in [`with_request_timeout_sync`] instead: one made
+/// inside an async runtime panics.
 pub async fn with_request_timeout<F: Future>(timeout: Option<Duration>, calls: F) -> F::Output {
     REQUEST_TIMEOUT_OVERRIDE.scope(timeout, calls).await
 }
@@ -321,25 +322,43 @@ pub fn with_request_timeout_sync<R>(timeout: Option<Duration>, calls: impl FnOnc
     REQUEST_TIMEOUT_OVERRIDE.sync_scope(timeout, calls)
 }
 
-/// Send one unary request under the current deadline. The deadline goes to the server as
-/// `grpc-timeout` and is enforced here too, so a call that exceeds it fails with
-/// `DEADLINE_EXCEEDED` whether or not the server noticed, and is dropped mid-flight.
+/// Send one unary request under the current deadline, connecting first if need be. The deadline
+/// covers the connect as well as the call. What is left of it goes to the server as `grpc-timeout`,
+/// and it is enforced here too, so a call that exceeds it fails with `DEADLINE_EXCEEDED` whether or
+/// not the server noticed, and is dropped mid-flight.
 ///
-/// Every generated unary wrapper sends through this.
+/// Every generated unary wrapper sends through this, with `call` making the request on the channel.
 pub async fn send<Req, Resp, Fut>(
     message: Req,
-    call: impl FnOnce(tonic::Request<Req>) -> Fut,
+    call: impl FnOnce(Channel, tonic::Request<Req>) -> Fut,
+) -> Result<Resp, TempoError>
+where
+    Fut: Future<Output = Result<tonic::Response<Resp>, tonic::Status>>,
+{
+    send_via(connected_channel(), message, call).await
+}
+
+async fn send_via<Conn, Req, Resp, Fut>(
+    connect: impl Future<Output = Result<Conn, TempoError>>,
+    message: Req,
+    call: impl FnOnce(Conn, tonic::Request<Req>) -> Fut,
 ) -> Result<Resp, TempoError>
 where
     Fut: Future<Output = Result<tonic::Response<Resp>, tonic::Status>>,
 {
     let mut request = tonic::Request::new(message);
     let Some(timeout) = request_timeout() else {
-        return Ok(call(request).await?.into_inner());
+        let connection = connect.await?;
+        return Ok(call(connection, request).await?.into_inner());
     };
-    request.set_timeout(timeout);
-    match tokio::time::timeout(timeout, call(request)).await {
-        Ok(response) => Ok(response?.into_inner()),
+    let deadline = tokio::time::Instant::now() + timeout;
+    let response = async {
+        let connection = connect.await?;
+        request.set_timeout(deadline.saturating_duration_since(tokio::time::Instant::now()));
+        Ok::<_, TempoError>(call(connection, request).await?.into_inner())
+    };
+    match tokio::time::timeout_at(deadline, response).await {
+        Ok(response) => response,
         Err(_) => Err(TempoError::Rpc(tonic::Status::deadline_exceeded(format!(
             "no response within {timeout:?}"
         )))),
@@ -414,26 +433,35 @@ mod tests {
         set_request_timeout(Some(Duration::from_secs(5)));
         assert_eq!(request_timeout(), Some(Duration::from_secs(5)));
 
-        // An override wins inside, sync or async, and is gone after.
+        // An override wins inside, in blocking or async code, and is gone after.
         with_request_timeout_sync(None, || assert_eq!(request_timeout(), None));
         rt().block_on(with_request_timeout(Some(Duration::from_millis(7)), async {
             assert_eq!(request_timeout(), Some(Duration::from_millis(7)));
         }));
         assert_eq!(request_timeout(), Some(Duration::from_secs(5)));
 
-        // A call slower than its deadline fails with DEADLINE_EXCEEDED, and one within it does not.
-        let slow = |_: tonic::Request<()>| async {
+        // A call slower than its deadline fails with DEADLINE_EXCEEDED, and so does a connect that
+        // never completes; one within it does not.
+        let connected = || async { Ok::<_, TempoError>(()) };
+        let slow = |_: (), _: tonic::Request<()>| async {
             std::future::pending::<Result<tonic::Response<()>, tonic::Status>>().await
         };
-        let error = rt()
-            .block_on(with_request_timeout(Some(Duration::from_millis(20)), send((), slow)))
-            .unwrap_err();
-        match error {
-            TempoError::Rpc(status) => assert_eq!(status.code(), tonic::Code::DeadlineExceeded),
+        let expect_deadline_exceeded = |result: Result<(), TempoError>| match result {
+            Err(TempoError::Rpc(status)) => assert_eq!(status.code(), tonic::Code::DeadlineExceeded),
             other => panic!("expected DEADLINE_EXCEEDED, got {other:?}"),
-        }
+        };
+        expect_deadline_exceeded(rt().block_on(with_request_timeout(
+            Some(Duration::from_millis(20)),
+            send_via(connected(), (), slow),
+        )));
+        let never_connects = std::future::pending::<Result<(), TempoError>>();
+        let fast = |_: (), _: tonic::Request<()>| async { Ok(tonic::Response::new(())) };
+        expect_deadline_exceeded(rt().block_on(with_request_timeout(
+            Some(Duration::from_millis(20)),
+            send_via(never_connects, (), fast),
+        )));
         let seen = rt()
-            .block_on(send((), |request: tonic::Request<()>| async move {
+            .block_on(send_via(connected(), (), |_, request: tonic::Request<()>| async move {
                 // The deadline also travels to the server, as grpc-timeout.
                 assert!(request.metadata().get("grpc-timeout").is_some());
                 Ok(tonic::Response::new(42))

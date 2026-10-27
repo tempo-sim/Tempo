@@ -13,7 +13,7 @@ import pytest
 import tempo_sim
 import tempo_sim.tempo_core as tc
 import tempo_sim.tempo_world as tw
-from tempo_sim._tempo_context import run_async, tempo_context
+from tempo_sim._tempo_context import _resources_of_this_thread, run_async, tempo_context
 from tempo_sim.TempoCore import Time_pb2, Time_pb2_grpc
 from tempo_sim.TempoWorld import WorldState_pb2, WorldState_pb2_grpc
 
@@ -44,11 +44,12 @@ def slow_server():
     port = server.add_insecure_port("127.0.0.1:0")
     server.start()
     previous_target = tempo_context().target
+    previous_timeout = tempo_sim.request_timeout()
     tempo_sim.set_server("127.0.0.1", port)
     try:
         yield
     finally:
-        tempo_sim.set_request_timeout(None)
+        tempo_sim.set_request_timeout(previous_timeout)
         run_async(tempo_context()._set_target(previous_target))
         server.stop(0)
 
@@ -77,8 +78,14 @@ def test_an_override_wins_for_its_block(slow_server):
 
 def test_an_override_reaches_async_calls(slow_server):
     async def calls():
-        with tempo_sim.with_request_timeout(DEADLINE_S):
-            await tc.get_sim_time()
+        try:
+            with tempo_sim.with_request_timeout(DEADLINE_S):
+                await tc.get_sim_time()
+        finally:
+            # asyncio.run's loop closes with the run, so its connection must be closed within it.
+            connection = _resources_of_this_thread()["connections"].pop(asyncio.get_running_loop(), None)
+            if connection is not None:
+                await connection.channel.close()
 
     with pytest.raises(grpc.RpcError) as error:
         asyncio.run(calls())

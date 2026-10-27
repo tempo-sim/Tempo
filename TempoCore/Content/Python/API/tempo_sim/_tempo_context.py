@@ -193,26 +193,14 @@ def with_request_timeout(seconds):
     """
     Within this block, unary RPCs get `seconds` in place of the process-wide deadline: longer for a
     call known to be slow, shorter for one that must not stall, None for none. Follows the code
-    into the coroutines it awaits, sync or async, but not into a task it starts.
+    into the coroutines it awaits, sync or async. A task started inside the block (asyncio copies
+    the context into it) keeps the override for its whole life, even after the block exits.
     """
     token = _request_timeout_override.set(seconds)
     try:
         yield
     finally:
         _request_timeout_override.reset(token)
-
-
-class _RequestTimeoutInterceptor(grpc.aio.UnaryUnaryClientInterceptor):
-    """
-    Puts the current deadline on every unary-unary call that does not name its own. Unary-unary
-    only, so streams never see one.
-    """
-
-    async def intercept_unary_unary(self, continuation, client_call_details, request):
-        timeout = request_timeout()
-        if client_call_details.timeout is None and timeout is not None:
-            client_call_details = client_call_details._replace(timeout=timeout)
-        return await continuation(client_call_details, request)
 
 
 class _Connection(object):
@@ -227,8 +215,7 @@ class _Connection(object):
         self.channel = grpc.aio.insecure_channel(target,
                                                  options=[
                                                      ('grpc.max_receive_message_length', 1000000000), # 1Gb
-                                                 ],
-                                                 interceptors=[_RequestTimeoutInterceptor()],
+                                                 ]
                                                  )
 
 
