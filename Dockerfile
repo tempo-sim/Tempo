@@ -9,8 +9,9 @@ FROM ${ENGINE_BASE_IMAGE}
 ENV UNREAL_ENGINE_PATH='/home/ue4/UnrealEngine'
 
 # Install dependencies. cmake is required for TEMPO_GEN_CPP_API=1 (needs >= 3.20;
-# Ubuntu 22.04 ships 3.22, 24.04 ships 3.28).
-RUN sudo apt-get update && sudo apt-get install -y jq rsync cmake curl
+# Ubuntu 22.04 ships 3.22, 24.04 ships 3.28), and so are clang and libc++: on Linux the C++ client
+# is compiled against libc++, the standard library the shared tempogrpc library is built with.
+RUN sudo apt-get update && sudo apt-get install -y jq rsync cmake curl clang libc++-dev libc++abi-dev
 
 # Install Rust toolchain (cargo) so TEMPO_GEN_RUST_API=1 works. rustup installs
 # under the ue4 user's home; add ~/.cargo/bin to PATH for all subsequent shells.

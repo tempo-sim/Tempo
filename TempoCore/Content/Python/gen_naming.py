@@ -120,6 +120,21 @@ def host_platform_name() -> str:
     raise RuntimeError(f"Unsupported host platform for C++ API build: {system}")
 
 
+def cpp_compiler_args():
+    """CMake arguments choosing the compiler every C++ client build here uses.
+
+    On Linux the shared tempogrpc library is built the way Unreal builds a module, by clang against
+    libc++, and its API passes `std::string` and the rest of the standard library, whose libstdc++
+    layout is a different ABI. So everything linked with it is compiled against libc++ too, which
+    g++ cannot do: clang, given `-stdlib=libc++` by the CMake projects themselves. A CXX in the
+    environment is left to choose. Named on the command line rather than left to the environment,
+    which CMake reads only for a new build directory: one configured with g++ before would keep it.
+    """
+    if platform.system() == "Linux":
+        return ["-DCMAKE_CXX_COMPILER=" + (os.environ.get("CXX") or "clang++")]
+    return []
+
+
 def build_jobs(gigabytes_per_job=2):
     """How many compilers a C++ build may run at once: one per core, as memory allows.
 

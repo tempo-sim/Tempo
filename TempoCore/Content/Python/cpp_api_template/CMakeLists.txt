@@ -51,6 +51,19 @@ target_compile_definitions(tempo PUBLIC
     PROTOBUF_USE_DLLS
     ABSL_CONSUME_DLL)
 
+# On Linux the shared tempogrpc library is built as Unreal builds a module, by clang against libc++,
+# and its API passes std::string, so libtempo has to be compiled against libc++ too. libstdc++'s
+# string is a different ABI, and what links against it finds none of those symbols.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "On Linux the Tempo C++ client is compiled with clang against libc++, the "
+            "standard library tempogrpc is built with. Install clang, libc++-dev and libc++abi-dev and "
+            "configure with -DCMAKE_CXX_COMPILER=clang++ (found ${CMAKE_CXX_COMPILER_ID}).")
+    endif()
+    # A consumer gets the same flag from TempoConfig.cmake's tempo::grpc.
+    target_compile_options(tempo PRIVATE -stdlib=libc++)
+endif()
+
 if(MSVC)
     # /GR- disables RTTI, matching how the vendored protobuf was built. The
     # rebadged "protobuf_tempo" base classes don't ship typeinfo, so any TU

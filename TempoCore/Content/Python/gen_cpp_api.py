@@ -21,7 +21,7 @@ from pathlib import Path
 import google.protobuf.descriptor as gpd
 import jinja2
 
-from gen_naming import build_jobs, host_platform_name
+from gen_naming import build_jobs, cpp_compiler_args, host_platform_name
 from gen_common import (
     INFRA_PACKAGE,
     gather_enums,
@@ -813,7 +813,7 @@ class CppApiGenerator:
             "-B", str(self.cmake_build_dir),
             f"-DTEMPO_GRPC_DIR={self.grpc_third_party}",
             "-DCMAKE_BUILD_TYPE=Release",
-        ]
+        ] + cpp_compiler_args()
         # Prefer Ninja on Windows when available so we get a single-config build
         # (otherwise CMake defaults to Visual Studio's multi-config generator).
         if platform.system() == "Windows" and shutil.which("ninja"):

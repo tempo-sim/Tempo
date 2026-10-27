@@ -8,7 +8,9 @@
 #   2. for sim-requiring groups, launches the packaged sim headless and waits for its gRPC endpoint,
 #   3. runs the group's executable and tears the sim down.
 #
-# Requires cmake and a C++20 compiler on PATH. Builds nothing of the sim -- package first.
+# Requires cmake and a C++20 compiler on PATH -- on Linux clang, with libc++ (libc++-dev and
+# libc++abi-dev), the standard library the shared tempogrpc library is built with. Builds nothing of
+# the sim -- package first.
 #
 # Usage:
 #   Scripts/TestCppAPI.sh contract         # links, conversions, the typed hierarchy (no sim)
@@ -41,6 +43,23 @@ if ! command -v cmake >/dev/null 2>&1; then
   exit 1
 fi
 
+# The compiler gen_naming.cpp_compiler_args chooses for every other C++ client build: on Linux,
+# clang, since the client is compiled against libc++ there. A CXX already set is left to choose.
+if [ "$(uname -s)" = "Linux" ] && [ -z "${CXX:-}" ]; then
+  if ! command -v clang++ >/dev/null 2>&1; then
+    echo "FAILED: clang++ not on PATH. On Linux the C++ client is compiled with clang against libc++" 1>&2
+    echo "  (install clang, libc++-dev and libc++abi-dev), or set CXX." 1>&2
+    exit 1
+  fi
+  CXX=clang++
+fi
+# Passed explicitly rather than through the environment, which CMake reads only for a new build
+# directory: one configured with g++ before would keep it.
+COMPILER_ARG=()
+if [ -n "${CXX:-}" ]; then
+  COMPILER_ARG=(-DCMAKE_CXX_COMPILER="$CXX")
+fi
+
 PACKAGED_DIR="${TEMPO_PACKAGED_DIR:-}"
 if [ -z "$PACKAGED_DIR" ]; then
   if PROJECT_ROOT=$("$SCRIPT_DIR"/FindProjectRoot.sh 2>/dev/null); then
@@ -70,7 +89,7 @@ fi
 
 echo "Building Tests/Cpp against $CPP_DIR ..."
 cmake -S "$TEMPO_ROOT/Tests/Cpp" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DTempo_DIR="$CPP_DIR" \
-  > "$REPORT_DIR/cmake-configure.log" 2>&1 || { tail -40 "$REPORT_DIR/cmake-configure.log" 1>&2; exit 1; }
+  "${COMPILER_ARG[@]}" > "$REPORT_DIR/cmake-configure.log" 2>&1 || { tail -40 "$REPORT_DIR/cmake-configure.log" 1>&2; exit 1; }
 cmake --build "$BUILD_DIR" --config Release --parallel "$JOBS" --target "$GROUP" \
   > "$REPORT_DIR/cmake-build.log" 2>&1 || { tail -60 "$REPORT_DIR/cmake-build.log" 1>&2; exit 1; }
 EXECUTABLE=$(find "$BUILD_DIR" -maxdepth 2 \( -name "$GROUP" -o -name "$GROUP.exe" \) -type f | head -1)

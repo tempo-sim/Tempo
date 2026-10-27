@@ -195,7 +195,10 @@ fails under Pyright instead of at runtime. See `TYPED_WORLD_API_PLAN.md`.
   C++'s reserved words) but uses real inheritance. Every C++
   build here is capped by `gen_naming.build_jobs()` -- a bare `cmake --build --parallel` is `make -j`
   under the Makefile generator, which started three hundred compiles at once and ran a 64 GB
-  machine out of memory. `Package.sh` ships `Packaged/API/Cpp` self-contained: headers, both
+  machine out of memory. On Linux every one is clang with `-stdlib=libc++`
+  (`gen_naming.cpp_compiler_args`, and each CMake project adds the flag), because the Linux
+  `tempogrpc` is built against Unreal's libc++ and exports a `std::__1` API that a g++/libstdc++
+  build cannot link. `Package.sh` ships `Packaged/API/Cpp` self-contained: headers, both
   archives, the vendored gRPC headers and the shared `tempogrpc` library (never the static archives),
   with `TempoConfig.cmake` for `find_package(Tempo)`. See `TYPED_WORLD_API_PLAN.md` §23.
 - **Rerooting.** `filter_schema.py` points a class whose superclass the build lacks at its
