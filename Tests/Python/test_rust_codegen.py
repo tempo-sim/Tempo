@@ -148,6 +148,10 @@ def workspace(tmp_path_factory):
     """The fixture's types in a host crate."""
     if cargo_executable() is None:
         pytest.skip("cargo is not installed")
+    if not os.path.exists(os.path.join(RUST_API, "src", "lib.rs")):
+        pytest.skip("tempo-sim's generated Rust sources are not in the tree: build with "
+                    "TEMPO_GEN_RUST_API=1, or run Scripts/TestPythonAPI.sh codegen against a "
+                    "package that has the crate, which takes them from it")
     return make_workspace(tmp_path_factory.mktemp("rust"), tempo_sim_copy("plain"))
 
 

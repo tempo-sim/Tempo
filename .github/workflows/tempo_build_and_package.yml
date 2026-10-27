@@ -86,6 +86,9 @@ jobs:
       # The Rust half of the codegen group compiles what the Rust generator emits, and skips
       # without cargo; the other groups have no use for it.
       setup_rust: ${{ matrix.group == 'codegen' }}
+      # Its C++ half compiles and links against the packaged C++ client, which on Linux takes clang
+      # and libc++ (cpp_api_template/TempoConfig.cmake).
+      apt_packages: ${{ matrix.group == 'codegen' && 'clang libc++-dev libc++abi-dev' || '' }}
       checkout_path: TempoSample/Plugins/Tempo
       allow_unsafe_pr_checkout: true
       # Gate fork PRs behind manual approval, same as the build job (this job runs PR code).
@@ -163,7 +166,10 @@ jobs:
       test_command: Scripts/TestCppAPI.sh ${{ matrix.group }}
       unreal_version: ${{ matrix.unreal_version }}
       runner: ubuntu-24.04
-      python_version: ''     # C++ groups need only cmake and a compiler, both in the runner image
+      python_version: ''     # C++ groups need only cmake and a compiler
+      # On Linux the C++ client is compiled with clang against libc++, the standard library the
+      # shared tempogrpc library is built with.
+      apt_packages: clang libc++-dev libc++abi-dev
       checkout_path: TempoSample/Plugins/Tempo
       allow_unsafe_pr_checkout: true
       environment: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository && 'fork-pr-environment' || '' }}

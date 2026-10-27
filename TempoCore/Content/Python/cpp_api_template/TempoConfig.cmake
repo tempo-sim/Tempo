@@ -13,6 +13,12 @@
 # gRPC, protobuf and abseil come from the one shared library, tempogrpc, never the static archives
 # beside it, for the reason Tempo's own modules link it that way: one copy of their global state.
 # It carries OpenSSL and zlib inside it. On Windows, copy tempogrpc.dll next to the executable.
+#
+# On Linux that library is built as Unreal builds a module, by clang against libc++, and its API
+# passes std::string, so a client is compiled with clang against libc++ as well: install clang,
+# libc++-dev and libc++abi-dev and configure with -DCMAKE_CXX_COMPILER=clang++. tempo::grpc adds
+# -stdlib=libc++ itself. g++'s libstdc++ is a different ABI, and links fail on every symbol that
+# takes a string.
 
 get_filename_component(_TEMPO_ROOT "${CMAKE_CURRENT_LIST_DIR}" ABSOLUTE)
 
@@ -62,6 +68,17 @@ if(NOT TARGET tempo::grpc)
     set_target_properties(tempo::grpc PROPERTIES
         INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_TEMPO_GRPC_INCLUDE}"
         INTERFACE_INCLUDE_DIRECTORIES "${_TEMPO_GRPC_INCLUDE}")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+            message(FATAL_ERROR "On Linux the Tempo C++ client is compiled with clang against libc++, "
+                "the standard library tempogrpc is built with. Install clang, libc++-dev and "
+                "libc++abi-dev and configure with -DCMAKE_CXX_COMPILER=clang++ "
+                "(found ${CMAKE_CXX_COMPILER_ID}).")
+        endif()
+        set_target_properties(tempo::grpc PROPERTIES
+            INTERFACE_COMPILE_OPTIONS -stdlib=libc++
+            INTERFACE_LINK_OPTIONS -stdlib=libc++)
+    endif()
 endif()
 
 if(NOT TARGET tempo::tempo)

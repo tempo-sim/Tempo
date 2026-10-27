@@ -55,6 +55,10 @@ on:
         type: boolean
         description: Install a stable Rust toolchain (for the Rust groups).
         default: false
+      apt_packages:
+        type: string
+        description: Space-separated Ubuntu packages to install before the tests (Linux runners), e.g. "clang libc++-dev libc++abi-dev" for the C++ client. Empty installs nothing.
+        default: ''
       render:
         type: boolean
         description: Run the sim with off-screen rendering (TEMPO_SIM_RENDER=1) instead of -nullrhi. Needs a GPU runner. For sensor-data groups.
@@ -164,6 +168,15 @@ jobs:
     - name: Set up Rust
       if: ${{ inputs.setup_rust }}
       uses: dtolnay/rust-toolchain@stable
+    - name: Install System Packages
+      if: ${{ inputs.apt_packages != '' && runner.os == 'Linux' }}
+      env:
+        APT_PACKAGES: ${{ inputs.apt_packages }}
+      run: |
+        sudo apt-get update
+        # Word splitting is the point: the input is a list.
+        # shellcheck disable=SC2086
+        sudo apt-get install -y --no-install-recommends $APT_PACKAGES
     - name: Run Tests
       working-directory: ${{ github.workspace }}/${{ inputs.checkout_path }}
       env:

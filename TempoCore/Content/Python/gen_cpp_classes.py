@@ -1040,6 +1040,15 @@ target_compile_definitions(tempo_reflected PUBLIC
     PROTOBUF_USE_DLLS
     ABSL_CONSUME_DLL)
 
+# libc++ on Linux, as libtempo is and for the same reason (cpp_api_template/CMakeLists.txt).
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "On Linux the Tempo C++ client is compiled with clang against libc++; "
+            "configure with -DCMAKE_CXX_COMPILER=clang++ (found ${CMAKE_CXX_COMPILER_ID}).")
+    endif()
+    target_compile_options(tempo_reflected PRIVATE -stdlib=libc++)
+endif()
+
 if(MSVC)
     target_compile_options(tempo_reflected PRIVATE /GR- /W3 /bigobj /utf-8 /wd4146 /wd4244 /wd4251 /wd4267 /wd4800)
 else()

@@ -126,6 +126,11 @@ that this does not: the C++ client is synchronous throughout.
 - **CMake** 3.20 or later.
 - **A C++20 compiler** — clang 14+, gcc 11+, MSVC 19.30+. Required because the vendored absl
   headers depend on `std::weak_ordering`, and because the reflected API uses concepts.
+- **On Linux, clang and libc++** (`clang`, `libc++-dev`, `libc++abi-dev` on Ubuntu). The shared
+  `tempogrpc` library is built the way Unreal builds a module, against libc++, and its API passes
+  `std::string`, so a client is compiled against libc++ too; gcc's libstdc++ is a different ABI.
+  Configure with `-DCMAKE_CXX_COMPILER=clang++`; `TempoConfig.cmake` adds `-stdlib=libc++`, and
+  stops with an error under any other compiler.
 
 ## Example clients
 

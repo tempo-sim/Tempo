@@ -106,7 +106,9 @@ and a package carries its host's. Nothing here is committed: build or package on
 
 If you're regenerating with `TEMPO_GEN_CPP_API=1`:
 - `cmake` 3.20 or later on `PATH`.
-- A C++20-capable host compiler (clang 14+, gcc 11+, or MSVC 19.30+).
+- A C++20-capable host compiler (clang 14+, gcc 11+, or MSVC 19.30+). On Linux, clang with libc++
+  (`clang`, `libc++-dev`, `libc++abi-dev`), the standard library the shared `tempogrpc` library is
+  built with; consumers there compile against libc++ too, which `TempoConfig.cmake` arranges.
 - The Tempo Python venv (set up automatically by Tempo's prebuild).
 
 Consumers who link against `libtempo` must also build their code with C++20:

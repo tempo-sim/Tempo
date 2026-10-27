@@ -73,16 +73,16 @@ if [ "$GROUP" = "codegen" ]; then
   # A built tree has them. A clean checkout (CI's test jobs) does not, and takes them from the
   # packaged tempo-sim wheel: only the generated files, never the hand-written ones the tree is the
   # authority on.
+  PACKAGED_DIR="${TEMPO_PACKAGED_DIR:-}"
+  if [ -z "$PACKAGED_DIR" ]; then
+    if PROJECT_ROOT=$("$SCRIPT_DIR"/FindProjectRoot.sh 2>/dev/null); then
+      PACKAGED_DIR="$PROJECT_ROOT/Packaged"
+    fi
+  fi
   API_DIR="$TEMPO_ROOT/TempoCore/Content/Python/API"
   if [ -f "$API_DIR/tempo_sim/tempo_world.py" ] && [ -f "$API_DIR/tempo_sim/TempoWorld/WorldControl_pb2.py" ]; then
     echo "Using the generated client modules in the tree."
   else
-    PACKAGED_DIR="${TEMPO_PACKAGED_DIR:-}"
-    if [ -z "$PACKAGED_DIR" ]; then
-      if PROJECT_ROOT=$("$SCRIPT_DIR"/FindProjectRoot.sh 2>/dev/null); then
-        PACKAGED_DIR="$PROJECT_ROOT/Packaged"
-      fi
-    fi
     WHEEL=""
     if [ -n "$PACKAGED_DIR" ] && [ -d "$PACKAGED_DIR/API/Python" ]; then
       WHEEL=$(find "$PACKAGED_DIR/API/Python" -name "tempo_sim-*.whl" 2>/dev/null | head -1)
@@ -145,6 +145,51 @@ if not selected:
     sys.exit("{} holds no generated client modules".format(wheel))
 print("  {} generated files from {} proto module(s)".format(len(selected), len(proto_modules)))
 PY
+  fi
+
+  # The Rust generator's tests build the fixture's crate against tempo-sim's, whose generated half
+  # (lib.rs, the per-module wrappers, the prost modules) is likewise untracked. A clean checkout takes
+  # it from the packaged crate, again only the generated files. Rust is opt-in (TEMPO_GEN_RUST_API),
+  # so a package may have no crate; those tests then skip.
+  RUST_API_DIR="$TEMPO_ROOT/TempoCore/Content/Rust/API"
+  PACKAGED_CRATE="${PACKAGED_DIR:+$PACKAGED_DIR/API/Rust/tempo-sim}"
+  if [ -f "$RUST_API_DIR/src/lib.rs" ]; then
+    echo "Using the generated Rust sources in the tree."
+  elif [ -n "$PACKAGED_CRATE" ] && [ -f "$PACKAGED_CRATE/src/lib.rs" ]; then
+    echo "Taking the generated Rust sources from $PACKAGED_CRATE"
+    python - "$PACKAGED_CRATE" "$RUST_API_DIR" <<'PY'
+import os
+import shutil
+import sys
+
+crate, api_dir = sys.argv[1], sys.argv[2]
+
+# As for the wheel: the crate's .gitignore whitelists the hand-written sources, and the tree is the
+# authority on those.
+handwritten = set()
+with open(os.path.join(api_dir, ".gitignore")) as f:
+    for line in f:
+        line = line.strip()
+        if line.startswith("!/"):
+            handwritten.add(line[2:])
+
+copied = 0
+for root, _, names in os.walk(os.path.join(crate, "src")):
+    for name in names:
+        relative = os.path.relpath(os.path.join(root, name), crate).replace(os.sep, "/")
+        if not name.endswith(".rs") or relative in handwritten:
+            continue
+        destination = os.path.join(api_dir, relative)
+        os.makedirs(os.path.dirname(destination), exist_ok=True)
+        shutil.copy2(os.path.join(root, name), destination)
+        copied += 1
+if not copied:
+    sys.exit("{} holds no generated Rust sources".format(crate))
+print("  {} generated files".format(copied))
+PY
+  else
+    echo "Warning: the tree has no generated Rust sources and there is no packaged tempo-sim crate" 1>&2
+    echo "  to take them from; the Rust generator's tests will skip." 1>&2
   fi
 
   # The in-tree package, because these tests check the generator and runtime as they are in this

@@ -18,7 +18,7 @@ import shutil
 import subprocess
 import sys
 
-from gen_naming import build_jobs, host_platform_name
+from gen_naming import build_jobs, cpp_compiler_args, host_platform_name
 
 ARCHIVE_STEM = "tempo_reflected"
 
@@ -28,7 +28,7 @@ def build(generated, api_dir, grpc_dir):
     if os.path.exists(build_dir):
         shutil.rmtree(build_dir)
     configure = ["cmake", "-S", generated, "-B", build_dir, "-DCMAKE_BUILD_TYPE=Release",
-                 "-DTEMPO_API_DIR=" + api_dir, "-DTEMPO_GRPC_DIR=" + grpc_dir]
+                 "-DTEMPO_API_DIR=" + api_dir, "-DTEMPO_GRPC_DIR=" + grpc_dir] + cpp_compiler_args()
     if platform.system() == "Windows" and shutil.which("ninja"):
         configure += ["-G", "Ninja"]
     subprocess.run(configure, check=True)

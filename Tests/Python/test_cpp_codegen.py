@@ -39,7 +39,7 @@ FIXTURE = os.path.join(HERE, "fixtures", "mini_schema.json")
 pytestmark = pytest.mark.codegen
 
 sys.path.insert(0, PYTHON_DIR)
-from gen_naming import build_jobs, host_platform_name  # noqa: E402
+from gen_naming import build_jobs, cpp_compiler_args, host_platform_name  # noqa: E402
 
 DEFINES = ["GOOGLE_PROTOBUF_NO_RTTI=1", "GPR_FORBID_UNREACHABLE_CODE=1", "GRPC_ALLOW_EXCEPTIONS=0",
            "PROTOBUF_USE_DLLS", "ABSL_CONSUME_DLL"]
@@ -77,7 +77,15 @@ int main() { return body().ok() ? 0 : 1; }
 """
 
 
+# On Linux the C++ client is compiled with clang against libc++, the standard library the shared
+# tempogrpc library is built with (gen_naming.cpp_compiler_args).
+LINUX = host_platform_name() == "Linux"
+STDLIB_FLAGS = ["-stdlib=libc++"] if LINUX else []
+
+
 def compiler():
+    if LINUX:
+        return os.environ.get("CXX") or shutil.which("clang++")
     for name in ("c++", "clang++", "g++"):
         found = shutil.which(name)
         if found:
@@ -126,7 +134,8 @@ def client():
 def generated(tmp_path_factory):
     """The fixture schema as C++, after checking there is something to compile it against."""
     if compiler() is None:
-        pytest.skip("no C++ compiler on PATH")
+        pytest.skip("no clang++ on PATH, which the C++ client needs on Linux" if LINUX
+                    else "no C++ compiler on PATH")
     if client() is None:
         pytest.skip("no C++ client to compile against: neither this checkout's (a build with "
                     "TEMPO_GEN_CPP_API=1 makes it, beside the vendored gRPC Scripts/SyncDeps.sh "
@@ -140,7 +149,7 @@ def generated(tmp_path_factory):
 def flags(generated):
     built = client()
     # The working tree's runtime headers first, ahead of whatever copy a build installed.
-    return (["-std=c++20", "-fno-rtti", "-I" + str(generated / "include"),
+    return (["-std=c++20", "-fno-rtti"] + STDLIB_FLAGS + ["-I" + str(generated / "include"),
              "-I" + os.path.join(TEMPLATE, "include"), "-I" + built.include,
              "-I" + os.path.join(built.include, "proto"), "-isystem", built.grpc_include]
             + ["-D" + define for define in DEFINES])
@@ -165,6 +174,10 @@ project(cpp_codegen CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_compile_options(-stdlib=libc++)
+    add_link_options(-stdlib=libc++)
+endif()
 
 file(GLOB RUNTIME_SOURCES CONFIGURE_DEPENDS "${TEMPLATE}/src/*.cc")
 file(GLOB_RECURSE FIXTURE_SOURCES CONFIGURE_DEPENDS "${GENERATED}/src/*.cc")
@@ -212,7 +225,7 @@ def run(generated, source):
         ["cmake", "-S", WORKSPACE, "-B", build, "-DCMAKE_BUILD_TYPE=Release",
          "-DTEMPLATE=" + TEMPLATE, "-DGENERATED=" + fixture_copy, "-DCLIENT_INCLUDE=" + built.include,
          "-DGRPC_INCLUDE=" + built.grpc_include, "-DGRPC_LIB=" + built.grpc_lib,
-         "-DTEMPO_ARCHIVE=" + built.archive, "-DDEFINES=" + ";".join(DEFINES)],
+         "-DTEMPO_ARCHIVE=" + built.archive, "-DDEFINES=" + ";".join(DEFINES)] + cpp_compiler_args(),
         capture_output=True, text=True)
     assert configure.returncode == 0, configure.stdout + configure.stderr
     built = subprocess.run(["cmake", "--build", build, "--parallel", str(build_jobs())],
