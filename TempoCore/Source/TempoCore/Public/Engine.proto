@@ -1,0 +1,73 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+syntax = "proto3";
+
+import "TempoCore/Empty.proto";
+
+message SetConsoleVariableRequest {
+  // Name of the console variable, e.g. "r.ScreenPercentage".
+  string name = 1;
+  // The new value as text, as it would be typed into the console ("100", "0.5", "1", "SomeString").
+  // It is parsed according to the variable's own type; a numeric variable rejects a non-numeric value.
+  string value = 2;
+}
+
+message GetConsoleVariableRequest {
+  // Name of the console variable, e.g. "r.ScreenPercentage".
+  string name = 1;
+}
+
+message ConsoleVariableResponse {
+  // The variable's current value, as text, formatted as the console reports it.
+  string value = 1;
+}
+
+message ExecConsoleCommandRequest {
+  // A single console command with its arguments, as it would be typed into the console, e.g. "stat unit".
+  string command = 1;
+}
+
+message ExecConsoleCommandResponse {
+  // Whatever the command wrote to the console, possibly empty. Some commands write only to the log.
+  string output = 1;
+}
+
+message EngineInfoResponse {
+  // The engine's full version, e.g. "5.8.0-12345+++UE5+Release-5.8".
+  string engine_version = 1;
+  // Name of the project the sim was built from.
+  string project_name = 2;
+  // The build configuration: "Debug", "DebugGame", "Development", "Shipping" or "Test".
+  string build_configuration = 3;
+  // True in the editor (with or without a play session), false in a packaged build.
+  bool editor = 4;
+  // The platform the sim runs on, e.g. "Mac", "Windows", "Linux".
+  string platform = 5;
+  // False when the sim cannot render at all, e.g. when started with -nullrhi.
+  bool can_render = 6;
+  // Name of the graphics RHI in use, e.g. "Metal", "DirectX 12", "Vulkan". Empty when there is none.
+  string rhi = 7;
+}
+
+// Engine-wide operations, available whenever the server is: in the editor (with or without a play
+// session) and in a packaged build alike.
+service EngineService {
+  // Sets a console variable with the priority of a value typed into the console. That outranks
+  // scalability, device profiles, ini files and the command line, but it is not exclusive: anything else
+  // that sets at console priority (the console itself, Blueprint's Execute Console Command, C++ passing
+  // ECVF_SetByConsole) ranks equally, and among equals the last write wins. C++ that writes the variable
+  // a cvar is bound to bypasses priority altogether. Read-only variables are refused, as are cheat
+  // variables in a build that has disabled them (Shipping). Responds with the variable's value after
+  // the change.
+  rpc SetConsoleVariable(SetConsoleVariableRequest) returns (ConsoleVariableResponse);
+
+  rpc GetConsoleVariable(GetConsoleVariableRequest) returns (ConsoleVariableResponse);
+
+  // Runs a console command as if it were typed into the console. During play (in a packaged build or a
+  // play-in-editor session) it is offered to the local player first, so player, game and viewport
+  // commands are reached; in the editor outside of a play session, to the editor. Fails with NOT_FOUND
+  // if nothing handled the command. Any command can be run, including ones that quit or load a level.
+  rpc ExecConsoleCommand(ExecConsoleCommandRequest) returns (ExecConsoleCommandResponse);
+
+  rpc GetEngineInfo(TempoCore.Empty) returns (EngineInfoResponse);
+}

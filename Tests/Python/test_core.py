@@ -2,6 +2,7 @@
 
 """Integration tests for the TempoCore time/control API against a packaged sim."""
 
+import grpc
 import pytest
 
 import tempo_sim.tempo_core as tc
@@ -51,3 +52,65 @@ def test_paused_sim_does_not_advance(fixed_step):
     t0 = tc.get_sim_time().sim_time
     t1 = tc.get_sim_time().sim_time
     assert t1 == pytest.approx(t0, abs=1e-9)
+
+
+# An engine variable every build registers, that is neither read-only nor a cheat.
+WRITABLE_CVAR = "t.MaxFPS"
+# A read-only variable RenderCore registers in every build.
+READ_ONLY_CVAR = "r.ForwardShading"
+
+
+def test_set_console_variable_round_trips(sim_server):
+    original = tc.get_console_variable(name=WRITABLE_CVAR).value
+    try:
+        resp = tc.set_console_variable(name=WRITABLE_CVAR, value="42")
+        assert float(resp.value) == pytest.approx(42.0)
+        assert float(tc.get_console_variable(name=WRITABLE_CVAR).value) == pytest.approx(42.0)
+    finally:
+        tc.set_console_variable(name=WRITABLE_CVAR, value=original)
+
+
+def test_unknown_console_variable_is_not_found(sim_server):
+    with pytest.raises(grpc.RpcError) as excinfo:
+        tc.set_console_variable(name="tempo.NoSuchVariable", value="1")
+    assert excinfo.value.code() == grpc.StatusCode.NOT_FOUND
+
+
+def test_read_only_console_variable_is_refused(sim_server):
+    with pytest.raises(grpc.RpcError) as excinfo:
+        tc.set_console_variable(name=READ_ONLY_CVAR, value="1")
+    assert excinfo.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+
+
+def test_non_numeric_value_for_numeric_console_variable_is_refused(sim_server):
+    original = tc.get_console_variable(name=WRITABLE_CVAR).value
+    with pytest.raises(grpc.RpcError) as excinfo:
+        tc.set_console_variable(name=WRITABLE_CVAR, value="fast")
+    assert excinfo.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+    assert tc.get_console_variable(name=WRITABLE_CVAR).value == original
+
+
+def test_exec_console_command_runs_and_reports_output(sim_server):
+    original = tc.get_console_variable(name=WRITABLE_CVAR).value
+    try:
+        # A console variable typed as a command is the one command every build handles the same way.
+        resp = tc.exec_console_command(command=f"{WRITABLE_CVAR} 24")
+        assert WRITABLE_CVAR in resp.output
+        assert float(tc.get_console_variable(name=WRITABLE_CVAR).value) == pytest.approx(24.0)
+    finally:
+        tc.set_console_variable(name=WRITABLE_CVAR, value=original)
+
+
+def test_unknown_console_command_is_not_found(sim_server):
+    with pytest.raises(grpc.RpcError) as excinfo:
+        tc.exec_console_command(command="tempo.NoSuchCommand")
+    assert excinfo.value.code() == grpc.StatusCode.NOT_FOUND
+
+
+def test_engine_info_describes_a_packaged_build(sim_server):
+    info = tc.get_engine_info()
+    assert info.engine_version.startswith("5.")
+    assert info.project_name
+    assert info.build_configuration in ("Debug", "DebugGame", "Development", "Shipping", "Test")
+    assert info.platform
+    assert not info.editor
