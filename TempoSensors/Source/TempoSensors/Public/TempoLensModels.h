@@ -95,6 +95,21 @@ inline FVector2D OpticalCenterPixels(const FIntPoint& SizeXY, const FVector2D& P
 	return FVector2D(SizeXY.X * (0.5 + PrincipalPoint.X), SizeXY.Y * (0.5 + PrincipalPoint.Y));
 }
 
+// The principal point in a calibration's pixel coordinates, OpenCV's and ROS's convention, which
+// puts pixel centers on integers: a centered principal point is ((W-1)/2, (H-1)/2), half a pixel
+// before OpticalCenterPixels' continuous W/2.
+inline FVector2D PrincipalPointToPixels(const FIntPoint& SizeXY, const FVector2D& PrincipalPoint)
+{
+	return OpticalCenterPixels(SizeXY, PrincipalPoint) - FVector2D(0.5, 0.5);
+}
+
+// Inverse of PrincipalPointToPixels: a calibration's principal point in pixels (OpenCV convention)
+// to the normalized offset from the image center that FTempoLensParameters stores.
+inline FVector2D PrincipalPointFromPixels(const FIntPoint& SizeXY, const FVector2D& PrincipalPointPixels)
+{
+	return FVector2D((PrincipalPointPixels.X + 0.5) / SizeXY.X - 0.5, (PrincipalPointPixels.Y + 0.5) / SizeXY.Y - 0.5);
+}
+
 // Configuration for the perspective render needed to produce a distorted output image.
 struct TEMPOSENSORS_API FDistortionRenderConfig
 {
@@ -493,6 +508,7 @@ struct TEMPOSENSORS_API FDoubleSphereDistortion : FLensModel
 
 	// Forward DS for a radially-symmetric ray at angle theta from the optical axis:
 	// r_d = sin(theta) / (alpha*sqrt(1 + 2*xi*cos(theta) + xi^2) + (1-alpha)*(xi + cos(theta))).
+	// Returns -1 when the denominator is zero, where the ray has no projection.
 	static double RadialProject(double Theta, double Xi, double Alpha);
 };
 
@@ -551,3 +567,25 @@ TEMPOSENSORS_API TUniquePtr<FLensModel> CreateLensModel(
 	double PitchDegrees,
 	double AxisShiftXRd = 0.0,
 	double AxisShiftYRd = 0.0);
+
+// A reason a camera can't render a lens at a horizontal FOV cleanly. Key identifies the rule, so a
+// caller can de-duplicate repeated reports of the same problem.
+struct FTempoFOVProblem
+{
+	int32 Key = 0;
+	FString Message;
+};
+
+// Every rule a camera with these lens parameters, image size and horizontal FOV (degrees) breaks:
+// the model's maximum FOV, the FOV past which a barrel lens folds back, the fisheye corner's
+// physical branch, the Double Sphere parameter ranges and the principal point range. Empty when
+// the camera renders it cleanly.
+TEMPOSENSORS_API TArray<FTempoFOVProblem> FindFOVProblems(const FTempoLensParameters& LensParameters,
+	const FIntPoint& SizeXY, double FOVAngle);
+
+// The horizontal FOV (degrees) at which the lens model's own ComputeFOutputForFullImage gives
+// FocalLength (pixels) for an image SizeXY wide. Only the lens's physical branch is searched: the
+// FOVs from zero up to where the focal length stops falling or FindFOVProblems reports a problem.
+// Returns false when no FOV on that branch realizes FocalLength.
+TEMPOSENSORS_API bool SolveFOVForFocalLength(const FTempoLensParameters& LensParameters,
+	const FIntPoint& SizeXY, double FocalLength, double& OutFOVAngle);

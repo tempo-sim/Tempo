@@ -375,11 +375,11 @@ namespace
 		return FMath::Exp2(FMath::Abs(LogDiff) > StartDistance ? LogLinear : LogExponential);
 	}
 }
-FTempoCameraIntrinsics::FTempoCameraIntrinsics(const FIntPoint& SizeXY, float HorizontalFOV, const FVector2D& PrincipalPoint)
-	: Fx(SizeXY.X / 2.0 / FMath::Tan(FMath::DegreesToRadians(HorizontalFOV) / 2.0)),
+FTempoCameraIntrinsics::FTempoCameraIntrinsics(const FIntPoint& SizeXY, double FocalLength, const FVector2D& PrincipalPoint)
+	: Fx(FocalLength > 0.0 ? FocalLength : 0.0),
 	  Fy(Fx),
-	  Cx(OpticalCenterPixels(SizeXY, PrincipalPoint).X),
-	  Cy(OpticalCenterPixels(SizeXY, PrincipalPoint).Y),
+	  Cx(PrincipalPointToPixels(SizeXY, PrincipalPoint).X),
+	  Cy(PrincipalPointToPixels(SizeXY, PrincipalPoint).Y),
 	  Width(SizeXY.X),
 	  Height(SizeXY.Y) {}
 
@@ -962,10 +962,12 @@ void UTempoCamera::RequestMeasurement(const TempoSensors::VideoRequest& Request,
 
 FTempoCameraIntrinsics UTempoCamera::GetIntrinsics() const
 {
-	// Every model now realizes the principal point — single-capture via the distortion map's
-	// optical center, fisheye via the per-tile aim/axis-shift geometry — so (Cx, Cy) reflects it.
-	// Use the clamped value so reported intrinsics match the (clamped) geometry actually rendered.
-	return FTempoCameraIntrinsics(SizeXY, FOVAngle, LensParameters.GetClampedPrincipalPoint());
+	// The focal length the lens model renders with, which for a distorting lens differs from the
+	// pinhole W/2/tan(FOV/2). Every model now realizes the principal point — single-capture via the
+	// distortion map's optical center, fisheye via the per-tile aim/axis-shift geometry — so (Cx, Cy)
+	// reflects it. Use the clamped value so reported intrinsics match the (clamped) geometry actually rendered.
+	const double FocalLength = CreateLensModel(LensParameters, 0.0, 0.0)->ComputeFOutputForFullImage(SizeXY, FOVAngle);
+	return FTempoCameraIntrinsics(SizeXY, FocalLength, LensParameters.GetClampedPrincipalPoint());
 }
 
 bool UTempoCamera::SetCalibratedIntrinsics(const FIntPoint& InSizeXY, double FocalLength, const FVector2D& PrincipalPoint, const FTempoLensParameters& InLensParameters)
@@ -976,41 +978,26 @@ bool UTempoCamera::SetCalibratedIntrinsics(const FIntPoint& InSizeXY, double Foc
 		return false;
 	}
 
-	// The FOV is found by inverting the model's own ComputeFOutputForFullImage, which is how the camera turns an
-	// FOV back into a focal length, so the two cannot disagree. The output focal length falls as the FOV grows,
-	// so bisect over the FOVs the camera accepts.
-	const TUniquePtr<FLensModel> Model = CreateLensModel(InLensParameters, 0.0, 0.0);
-	const double MaxFOVDeg = InLensParameters.IsSingleCapture() ? 179.9 : 240.0;
-	double Low = 1e-3;
-	double High = MaxFOVDeg;
-	const double FocalAtHigh = Model->ComputeFOutputForFullImage(InSizeXY, High);
-	const double FocalAtLow = Model->ComputeFOutputForFullImage(InSizeXY, Low);
-	if (FocalAtLow <= 0.0 || FocalLength > FocalAtLow || (FocalAtHigh > 0.0 && FocalLength < FocalAtHigh))
+	FTempoLensParameters NewLensParameters = InLensParameters;
+	NewLensParameters.PrincipalPoint = PrincipalPointFromPixels(InSizeXY, PrincipalPoint);
+	if (FMath::Abs(NewLensParameters.PrincipalPoint.X) >= 0.5 || FMath::Abs(NewLensParameters.PrincipalPoint.Y) >= 0.5)
 	{
-		UE_LOG(LogTempoSensors, Error, TEXT("SetCalibratedIntrinsics: no FOV up to %.1f degrees gives a %d pixel wide image a focal length of %f with this lens"),
-			MaxFOVDeg, InSizeXY.X, FocalLength);
+		UE_LOG(LogTempoSensors, Error, TEXT("SetCalibratedIntrinsics: principal point (%f, %f) is outside a %d x %d image"),
+			PrincipalPoint.X, PrincipalPoint.Y, InSizeXY.X, InSizeXY.Y);
 		return false;
 	}
-	for (int32 Iteration = 0; Iteration < 100 && High - Low > 1e-9; ++Iteration)
+
+	double NewFOVAngle = 0.0;
+	if (!SolveFOVForFocalLength(NewLensParameters, InSizeXY, FocalLength, NewFOVAngle))
 	{
-		const double Mid = 0.5 * (Low + High);
-		const double FocalAtMid = Model->ComputeFOutputForFullImage(InSizeXY, Mid);
-		// A model's projection can end before MaxFOVDeg (a lens that folds back), where it reports no focal length.
-		if (FocalAtMid > 0.0 && FocalAtMid >= FocalLength)
-		{
-			Low = Mid;
-		}
-		else
-		{
-			High = Mid;
-		}
+		UE_LOG(LogTempoSensors, Error, TEXT("SetCalibratedIntrinsics: no FOV this lens renders cleanly gives a %d pixel wide image a focal length of %f"),
+			InSizeXY.X, FocalLength);
+		return false;
 	}
 
-	LensParameters = InLensParameters;
-	// A normalized offset from the image center, X right / Y down, which every lens model honors.
-	LensParameters.PrincipalPoint = FVector2D(PrincipalPoint.X / InSizeXY.X - 0.5, PrincipalPoint.Y / InSizeXY.Y - 0.5);
+	LensParameters = NewLensParameters;
 	SizeXY = InSizeXY;
-	FOVAngle = 0.5 * (Low + High);
+	FOVAngle = NewFOVAngle;
 	return true;
 }
 
@@ -1912,123 +1899,14 @@ void UTempoCamera::RenderCapture()
 
 void UTempoCamera::ValidateFOV() const
 {
-	auto Report = [this](int32 KeySalt, const FString& Message)
+	for (const FTempoFOVProblem& Problem : FindFOVProblems(LensParameters, SizeXY, FOVAngle))
 	{
-		UE_LOG(LogTempoSensors, Error, TEXT("%s"), *Message);
+		UE_LOG(LogTempoSensors, Error, TEXT("%s"), *Problem.Message);
 		if (GEngine)
 		{
-			const uint64 Key = (static_cast<uint64>(GetUniqueID()) << 8) | static_cast<uint64>(KeySalt);
-			GEngine->AddOnScreenDebugMessage(static_cast<int32>(Key), 5.0f, FColor::Red, Message);
+			const uint64 Key = (static_cast<uint64>(GetUniqueID()) << 8) | static_cast<uint64>(Problem.Key);
+			GEngine->AddOnScreenDebugMessage(static_cast<int32>(Key), 5.0f, FColor::Red, Problem.Message);
 		}
-	};
-
-	if (LensParameters.LensModel == ETempoLensModel::Pinhole ||
-		LensParameters.LensModel == ETempoLensModel::BrownConrady ||
-		LensParameters.LensModel == ETempoLensModel::Rational)
-	{
-		const TCHAR* ModelName = TEXT("Pinhole");
-		if (LensParameters.LensModel == ETempoLensModel::Rational) ModelName = TEXT("Rational");
-		else if (LensParameters.LensModel == ETempoLensModel::BrownConrady) ModelName = TEXT("BrownConrady");
-
-		if (FOVAngle > 170.0f)
-		{
-			Report(0, FString::Printf(TEXT("%s FOVAngle %.2f exceeds max 170 degrees."), ModelName, FOVAngle));
-		}
-
-		// Barrel distortion peaks at a critical source radius beyond which forward distortion is
-		// non-monotonic and the inverse Newton-Raphson solve cannot converge. Translate that
-		// source-side limit (along the diagonal — the longest axis through the image plane) back
-		// into a maximum representable horizontal FOV.
-		double MaxRenderRad = -1.0;
-		if (LensParameters.LensModel == ETempoLensModel::BrownConrady)
-		{
-			MaxRenderRad = FBrownConradyDistortion::ComputeMaxRenderRadius(
-				LensParameters.K1, LensParameters.K2, LensParameters.K3);
-		}
-		else if (LensParameters.LensModel == ETempoLensModel::Rational)
-		{
-			MaxRenderRad = FRationalDistortion::ComputeMaxRenderRadius(
-				LensParameters.K1, LensParameters.K2, LensParameters.K3,
-				LensParameters.K4, LensParameters.K5, LensParameters.K6);
-		}
-		if (MaxRenderRad > 0.0 && SizeXY.X > 0 && SizeXY.Y > 0)
-		{
-			const double AspectRatio = static_cast<double>(SizeXY.X) / static_cast<double>(SizeXY.Y);
-			const double DiagOverHoriz = FMath::Sqrt(1.0 + 1.0 / (AspectRatio * AspectRatio));
-			const double MaxHorizSourceRad = MaxRenderRad / DiagOverHoriz;
-			const double MaxFOVDeg = 2.0 * FMath::RadiansToDegrees(FMath::Atan(MaxHorizSourceRad));
-			if (FOVAngle > MaxFOVDeg)
-			{
-				Report(7, FString::Printf(TEXT("%s FOVAngle %.2f exceeds parameter-implied max %.2f. Inverse distortion (Newton-Raphson) cannot converge for some pixels with the current K coefficients."), ModelName, FOVAngle, MaxFOVDeg));
-			}
-		}
-	}
-	else if (LensParameters.LensModel == ETempoLensModel::DoubleSphere)
-	{
-		const double VerticalFOV = FOVAngle * static_cast<double>(SizeXY.Y) / static_cast<double>(SizeXY.X);
-		if (FOVAngle > 240.0f)
-		{
-			Report(1, FString::Printf(TEXT("DoubleSphere FOVAngle %.2f exceeds max 240 degrees."), FOVAngle));
-		}
-		if (VerticalFOV > 240.0)
-		{
-			Report(2, FString::Printf(TEXT("DoubleSphere VerticalFOV %.2f (derived) exceeds max 240 degrees."), VerticalFOV));
-		}
-		if (LensParameters.Alpha < 0.0f || LensParameters.Alpha > 1.0f)
-		{
-			Report(3, FString::Printf(TEXT("DoubleSphere Alpha %.3f outside [0, 1]."), LensParameters.Alpha));
-		}
-		if (LensParameters.Xi < -1.0f || LensParameters.Xi > 1.0f)
-		{
-			Report(4, FString::Printf(TEXT("DoubleSphere Xi %.3f outside [-1, 1]."), LensParameters.Xi));
-		}
-	}
-	else
-	{
-		const double VerticalFOV = FOVAngle * static_cast<double>(SizeXY.Y) / static_cast<double>(SizeXY.X);
-		if (FOVAngle > 240.0f)
-		{
-			Report(5, FString::Printf(TEXT("Equidistant FOVAngle %.2f exceeds max 240 degrees."), FOVAngle));
-		}
-		if (VerticalFOV > 240.0)
-		{
-			Report(6, FString::Printf(TEXT("Equidistant VerticalFOV %.2f (derived) exceeds max 240 degrees."), VerticalFOV));
-		}
-
-		// The farthest image corner must stay on the polynomial's physical branch; pixels beyond
-		// ThetaDMax have no physical inverse and render as out-of-domain. The branch ends either
-		// where K1-K4 bend the polynomial over (ThetaMax < PI) or at the 180-degree cap.
-		const FKannalaBrandtDistortion Model(LensParameters.K1, LensParameters.K2, LensParameters.K3, LensParameters.K4, 0.0, 0.0);
-		const double FOutput = Model.ComputeFOutputForFullImage(SizeXY, FOVAngle);
-		if (FOutput > 0.0 && SizeXY.Y > 0)
-		{
-			const FVector2D OpticalCenter = OpticalCenterPixels(SizeXY, LensParameters.GetClampedPrincipalPoint());
-			const double FarX = FMath::Max(OpticalCenter.X, SizeXY.X - OpticalCenter.X);
-			const double FarY = FMath::Max(OpticalCenter.Y, SizeXY.Y - OpticalCenter.Y);
-			const double CornerThetaD = FMath::Sqrt(FarX * FarX + FarY * FarY) / FOutput;
-			if (CornerThetaD >= Model.ThetaDMax)
-			{
-				if (Model.ThetaMax < UE_DOUBLE_PI)
-				{
-					Report(9, FString::Printf(TEXT("Equidistant K1-K4 peak at theta_d %.4f (theta %.4f rad), inside the image (farthest corner theta_d %.4f). Pixels beyond the peak have no physical inverse and render as out-of-domain."),
-						Model.ThetaDMax, Model.ThetaMax, CornerThetaD));
-				}
-				else
-				{
-					Report(9, FString::Printf(TEXT("Equidistant FOVAngle %.2f at %dx%d puts the farthest image corner at theta_d %.4f, past the 180-degree limit (theta_d %.4f). Pixels beyond it render as out-of-domain; reduce FOVAngle or the aspect ratio."),
-						FOVAngle, SizeXY.X, SizeXY.Y, CornerThetaD, Model.ThetaDMax));
-				}
-			}
-		}
-	}
-
-	// PrincipalPoint is a normalized offset from the image center; |offset| >= 0.5 places the
-	// optical axis at or outside the image edge, which is non-physical and breaks frustum sizing.
-	// Applies to every model (single-capture and fisheye).
-	if (FMath::Abs(LensParameters.PrincipalPoint.X) >= 0.5 || FMath::Abs(LensParameters.PrincipalPoint.Y) >= 0.5)
-	{
-		Report(8, FString::Printf(TEXT("PrincipalPoint (%.3f, %.3f) is out of range; each component must be within (-0.5, 0.5) (normalized offset from image center)."),
-			LensParameters.PrincipalPoint.X, LensParameters.PrincipalPoint.Y));
 	}
 }
 

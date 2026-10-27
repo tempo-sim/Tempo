@@ -432,4 +432,121 @@ bool FTempoLensDoubleSphereTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoLensSolveFOVTest,
+	"Tempo.Sensors.LensModels.SolveFOVForFocalLength", TempoLensTestFlags)
+bool FTempoLensSolveFOVTest::RunTest(const FString& Parameters)
+{
+	const FIntPoint SizeXY(1920, 1080);
+	auto Lens = [](ETempoLensModel Model)
+	{
+		FTempoLensParameters Params;
+		Params.LensModel = Model;
+		return Params;
+	};
+	auto Focal = [&SizeXY](const FTempoLensParameters& Params, double FOV)
+	{
+		return CreateLensModel(Params, 0.0, 0.0)->ComputeFOutputForFullImage(SizeXY, FOV);
+	};
+
+	FTempoLensParameters BrownConrady = Lens(ETempoLensModel::BrownConrady);
+	BrownConrady.K1 = -0.05f;
+	BrownConrady.K2 = 0.01f;
+	FTempoLensParameters Rational = Lens(ETempoLensModel::Rational);
+	Rational.K1 = 0.1f;
+	Rational.K4 = 0.05f;
+	FTempoLensParameters KannalaBrandt = Lens(ETempoLensModel::KannalaBrandt);
+	KannalaBrandt.K1 = 0.02f;
+	KannalaBrandt.K2 = -0.005f;
+	FTempoLensParameters DoubleSphere = Lens(ETempoLensModel::DoubleSphere);
+	DoubleSphere.Xi = -0.2f;
+	DoubleSphere.Alpha = 0.6f;
+	FTempoLensParameters Barrel = Lens(ETempoLensModel::BrownConrady);
+	Barrel.K1 = -0.3f;
+	// A unit sphere: r_d = sin(theta), so the focal length falls to 180 degrees, then rises again.
+	FTempoLensParameters UnitSphere = Lens(ETempoLensModel::DoubleSphere);
+	UnitSphere.Xi = 0.0f;
+	UnitSphere.Alpha = 1.0f;
+
+	// Every solution realizes the focal length, renders cleanly, and lies where the focal length still falls.
+	auto CheckSolution = [&](const TCHAR* Name, const FTempoLensParameters& Params, double FocalLength, double FOV)
+	{
+		const double Solved = Focal(Params, FOV);
+		if (!FMath::IsNearlyEqual(Solved, FocalLength, FocalLength * 1e-5))
+		{
+			AddError(FString::Printf(TEXT("%s: FOV %.6f gives focal %.6f, not %.6f"), Name, FOV, Solved, FocalLength));
+		}
+		if (!FindFOVProblems(Params, SizeXY, FOV).IsEmpty())
+		{
+			AddError(FString::Printf(TEXT("%s: FOV %.6f for focal %.6f doesn't render cleanly"), Name, FOV, FocalLength));
+		}
+		if (!(Focal(Params, FOV - 1e-3) > Solved))
+		{
+			AddError(FString::Printf(TEXT("%s: FOV %.6f for focal %.6f is past the physical branch"), Name, FOV, FocalLength));
+		}
+	};
+
+	for (const TPair<const TCHAR*, FTempoLensParameters>& Case : TArray<TPair<const TCHAR*, FTempoLensParameters>>{
+		{ TEXT("Pinhole"), Lens(ETempoLensModel::Pinhole) }, { TEXT("BrownConrady"), BrownConrady },
+		{ TEXT("Rational"), Rational }, { TEXT("KannalaBrandt"), KannalaBrandt }, { TEXT("DoubleSphere"), DoubleSphere },
+		{ TEXT("Barrel"), Barrel }, { TEXT("UnitSphere"), UnitSphere } })
+	{
+		// Round trip from FOVs every lens renders cleanly.
+		for (const double FOV : { 30.0, 60.0 })
+		{
+			const double FocalLength = Focal(Case.Value, FOV);
+			double Solved = 0.0;
+			if (!SolveFOVForFocalLength(Case.Value, SizeXY, FocalLength, Solved))
+			{
+				AddError(FString::Printf(TEXT("%s: no FOV found for the focal length of FOV %.1f"), Case.Key, FOV));
+				continue;
+			}
+			TestNearlyEqual(*FString::Printf(TEXT("%s FOV %.1f round trip"), Case.Key, FOV), Solved, FOV, 1e-3);
+			CheckSolution(Case.Key, Case.Value, FocalLength, Solved);
+		}
+		// Any focal length the lens produces at any FOV, on or off its physical branch, either solves
+		// onto the branch or is rejected.
+		for (double FOV = 1.0; FOV < 240.0; FOV += 1.0)
+		{
+			const double FocalLength = Focal(Case.Value, FOV);
+			double Solved = 0.0;
+			if (FocalLength > 0.0 && SolveFOVForFocalLength(Case.Value, SizeXY, FocalLength, Solved))
+			{
+				CheckSolution(Case.Key, Case.Value, FocalLength, Solved);
+			}
+		}
+	}
+
+	double Solved = 0.0;
+	// K1 = -0.3 renders cleanly only to about 85 degrees, and its focal length bottoms out near 93
+	// before rising again. A focal length the lens reaches only between those has no answer.
+	TestFalse(TEXT("Barrel: focal length only reachable at the fold"), SolveFOVForFocalLength(Barrel, SizeXY, Focal(Barrel, 95.0), Solved));
+	TestFalse(TEXT("Barrel: focal length below the clean branch"), SolveFOVForFocalLength(Barrel, SizeXY, 0.99 * Focal(Barrel, 85.0), Solved));
+	TestTrue(TEXT("Barrel: focal length reachable on both branches solves"), SolveFOVForFocalLength(Barrel, SizeXY, Focal(Barrel, 115.0), Solved));
+	TestTrue(TEXT("Barrel: focal length reachable on both branches solves below the fold"), Solved < 85.0);
+
+	// The unit sphere's focal length at 240 degrees is also its focal length at 120, on the physical branch.
+	TestTrue(TEXT("UnitSphere: focal length of 240 degrees solves"), SolveFOVForFocalLength(UnitSphere, SizeXY, Focal(UnitSphere, 240.0), Solved));
+	TestNearlyEqual(TEXT("UnitSphere: focal length of 240 degrees solves to 120"), Solved, 120.0, 1e-3);
+	TestFalse(TEXT("UnitSphere: focal length below its minimum"), SolveFOVForFocalLength(UnitSphere, SizeXY, 0.99 * Focal(UnitSphere, 180.0), Solved));
+
+	// Double Sphere with alpha = 0 and xi = -0.5 has no projection at 60 degrees off axis: no focal length there.
+	FTempoLensParameters Singular = Lens(ETempoLensModel::DoubleSphere);
+	Singular.Xi = -0.5f;
+	Singular.Alpha = 0.0f;
+	TestTrue(TEXT("DoubleSphere: no focal length where the projection is singular"), Focal(Singular, 120.0) <= 0.0);
+
+	// The principal point must lie inside the image.
+	FTempoLensParameters OffCenter = Lens(ETempoLensModel::Pinhole);
+	OffCenter.PrincipalPoint = FVector2D(0.6, 0.0);
+	TestFalse(TEXT("Principal point outside the image"), SolveFOVForFocalLength(OffCenter, SizeXY, Focal(OffCenter, 60.0), Solved));
+
+	// OpenCV's pixel convention: a centered principal point is ((W-1)/2, (H-1)/2).
+	TestTrue(TEXT("PrincipalPointToPixels centered"),
+		PrincipalPointToPixels(SizeXY, FVector2D::ZeroVector).Equals(FVector2D(959.5, 539.5), 1e-9));
+	TestTrue(TEXT("PrincipalPointFromPixels inverts PrincipalPointToPixels"),
+		PrincipalPointFromPixels(SizeXY, PrincipalPointToPixels(SizeXY, FVector2D(0.1, -0.2))).Equals(FVector2D(0.1, -0.2), 1e-9));
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

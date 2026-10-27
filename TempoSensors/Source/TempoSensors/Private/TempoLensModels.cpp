@@ -4,6 +4,8 @@
 
 #include "TempoSensors.h"
 
+#include <cmath>
+
 TUniquePtr<FLensModel> CreateLensModel(const FTempoLensParameters& LensParameters, double YawDegrees, double PitchDegrees,
 	double AxisShiftXRd, double AxisShiftYRd)
 {
@@ -927,7 +929,7 @@ double FDoubleSphereDistortion::RadialProject(double Theta, double Xi, double Al
 	const double Denom = Alpha * D2 + (1.0 - Alpha) * (Xi + CosT);
 	if (FMath::Abs(Denom) < 1e-12)
 	{
-		return 1e6;
+		return -1.0;
 	}
 	return SinT / Denom;
 }
@@ -1191,4 +1193,191 @@ FDistortionRenderConfig FDoubleSphereDistortion::ComputeRenderConfig(const FIntP
 	Config.RenderFOVAngle = FMath::Clamp(FMath::RadiansToDegrees(FMath::Atan(RequiredRenderHorizRadius)) * 2.0, 1.0, 170.0);
 
 	return Config;
+}
+
+// ----------------------------------------------------------------------------------------
+// FOV validation and calibration
+// ----------------------------------------------------------------------------------------
+
+TArray<FTempoFOVProblem> FindFOVProblems(const FTempoLensParameters& LensParameters, const FIntPoint& SizeXY, double FOVAngle)
+{
+	TArray<FTempoFOVProblem> Problems;
+	auto Report = [&Problems](int32 Key, FString&& Message)
+	{
+		Problems.Add(FTempoFOVProblem{ Key, MoveTemp(Message) });
+	};
+
+	if (LensParameters.IsSingleCapture())
+	{
+		const TCHAR* ModelName = TEXT("Pinhole");
+		if (LensParameters.LensModel == ETempoLensModel::Rational) ModelName = TEXT("Rational");
+		else if (LensParameters.LensModel == ETempoLensModel::BrownConrady) ModelName = TEXT("BrownConrady");
+
+		if (FOVAngle > 170.0)
+		{
+			Report(0, FString::Printf(TEXT("%s FOVAngle %.2f exceeds max 170 degrees."), ModelName, FOVAngle));
+		}
+
+		// Barrel distortion peaks at a critical source radius beyond which forward distortion is
+		// non-monotonic and the inverse Newton-Raphson solve cannot converge. Translate that
+		// source-side limit (along the diagonal — the longest axis through the image plane) back
+		// into a maximum representable horizontal FOV.
+		double MaxRenderRad = -1.0;
+		if (LensParameters.LensModel == ETempoLensModel::BrownConrady)
+		{
+			MaxRenderRad = FBrownConradyDistortion::ComputeMaxRenderRadius(
+				LensParameters.K1, LensParameters.K2, LensParameters.K3);
+		}
+		else if (LensParameters.LensModel == ETempoLensModel::Rational)
+		{
+			MaxRenderRad = FRationalDistortion::ComputeMaxRenderRadius(
+				LensParameters.K1, LensParameters.K2, LensParameters.K3,
+				LensParameters.K4, LensParameters.K5, LensParameters.K6);
+		}
+		if (MaxRenderRad > 0.0 && SizeXY.X > 0 && SizeXY.Y > 0)
+		{
+			const double AspectRatio = static_cast<double>(SizeXY.X) / static_cast<double>(SizeXY.Y);
+			const double DiagOverHoriz = FMath::Sqrt(1.0 + 1.0 / (AspectRatio * AspectRatio));
+			const double MaxHorizSourceRad = MaxRenderRad / DiagOverHoriz;
+			const double MaxFOVDeg = 2.0 * FMath::RadiansToDegrees(FMath::Atan(MaxHorizSourceRad));
+			if (FOVAngle > MaxFOVDeg)
+			{
+				Report(7, FString::Printf(TEXT("%s FOVAngle %.2f exceeds parameter-implied max %.2f. Inverse distortion (Newton-Raphson) cannot converge for some pixels with the current K coefficients."), ModelName, FOVAngle, MaxFOVDeg));
+			}
+		}
+	}
+	else if (LensParameters.LensModel == ETempoLensModel::DoubleSphere)
+	{
+		const double VerticalFOV = FOVAngle * static_cast<double>(SizeXY.Y) / static_cast<double>(SizeXY.X);
+		if (FOVAngle > 240.0)
+		{
+			Report(1, FString::Printf(TEXT("DoubleSphere FOVAngle %.2f exceeds max 240 degrees."), FOVAngle));
+		}
+		if (VerticalFOV > 240.0)
+		{
+			Report(2, FString::Printf(TEXT("DoubleSphere VerticalFOV %.2f (derived) exceeds max 240 degrees."), VerticalFOV));
+		}
+		if (LensParameters.Alpha < 0.0f || LensParameters.Alpha > 1.0f)
+		{
+			Report(3, FString::Printf(TEXT("DoubleSphere Alpha %.3f outside [0, 1]."), LensParameters.Alpha));
+		}
+		if (LensParameters.Xi < -1.0f || LensParameters.Xi > 1.0f)
+		{
+			Report(4, FString::Printf(TEXT("DoubleSphere Xi %.3f outside [-1, 1]."), LensParameters.Xi));
+		}
+	}
+	else
+	{
+		const double VerticalFOV = FOVAngle * static_cast<double>(SizeXY.Y) / static_cast<double>(SizeXY.X);
+		if (FOVAngle > 240.0)
+		{
+			Report(5, FString::Printf(TEXT("Equidistant FOVAngle %.2f exceeds max 240 degrees."), FOVAngle));
+		}
+		if (VerticalFOV > 240.0)
+		{
+			Report(6, FString::Printf(TEXT("Equidistant VerticalFOV %.2f (derived) exceeds max 240 degrees."), VerticalFOV));
+		}
+
+		// The farthest image corner must stay on the polynomial's physical branch; pixels beyond
+		// ThetaDMax have no physical inverse and render as out-of-domain. The branch ends either
+		// where K1-K4 bend the polynomial over (ThetaMax < PI) or at the 180-degree cap.
+		const FKannalaBrandtDistortion Model(LensParameters.K1, LensParameters.K2, LensParameters.K3, LensParameters.K4, 0.0, 0.0);
+		const double FOutput = Model.ComputeFOutputForFullImage(SizeXY, FOVAngle);
+		if (FOutput > 0.0 && SizeXY.Y > 0)
+		{
+			const FVector2D OpticalCenter = OpticalCenterPixels(SizeXY, LensParameters.GetClampedPrincipalPoint());
+			const double FarX = FMath::Max(OpticalCenter.X, SizeXY.X - OpticalCenter.X);
+			const double FarY = FMath::Max(OpticalCenter.Y, SizeXY.Y - OpticalCenter.Y);
+			const double CornerThetaD = FMath::Sqrt(FarX * FarX + FarY * FarY) / FOutput;
+			if (CornerThetaD >= Model.ThetaDMax)
+			{
+				if (Model.ThetaMax < UE_DOUBLE_PI)
+				{
+					Report(9, FString::Printf(TEXT("Equidistant K1-K4 peak at theta_d %.4f (theta %.4f rad), inside the image (farthest corner theta_d %.4f). Pixels beyond the peak have no physical inverse and render as out-of-domain."),
+						Model.ThetaDMax, Model.ThetaMax, CornerThetaD));
+				}
+				else
+				{
+					Report(9, FString::Printf(TEXT("Equidistant FOVAngle %.2f at %dx%d puts the farthest image corner at theta_d %.4f, past the 180-degree limit (theta_d %.4f). Pixels beyond it render as out-of-domain; reduce FOVAngle or the aspect ratio."),
+						FOVAngle, SizeXY.X, SizeXY.Y, CornerThetaD, Model.ThetaDMax));
+				}
+			}
+		}
+	}
+
+	// PrincipalPoint is a normalized offset from the image center; |offset| >= 0.5 places the
+	// optical axis at or outside the image edge, which is non-physical and breaks frustum sizing.
+	// Applies to every model (single-capture and fisheye).
+	if (FMath::Abs(LensParameters.PrincipalPoint.X) >= 0.5 || FMath::Abs(LensParameters.PrincipalPoint.Y) >= 0.5)
+	{
+		Report(8, FString::Printf(TEXT("PrincipalPoint (%.3f, %.3f) is out of range; each component must be within (-0.5, 0.5) (normalized offset from image center)."),
+			LensParameters.PrincipalPoint.X, LensParameters.PrincipalPoint.Y));
+	}
+
+	return Problems;
+}
+
+bool SolveFOVForFocalLength(const FTempoLensParameters& LensParameters, const FIntPoint& SizeXY, double FocalLength, double& OutFOVAngle)
+{
+	if (SizeXY.X <= 0 || SizeXY.Y <= 0 || !(FocalLength > 0.0))
+	{
+		return false;
+	}
+
+	const TUniquePtr<FLensModel> Model = CreateLensModel(LensParameters, 0.0, 0.0);
+	auto Focal = [&Model, &SizeXY](double FOV) { return Model->ComputeFOutputForFullImage(SizeXY, FOV); };
+	// The physical branch is where the focal length still falls as the FOV grows and the camera
+	// renders cleanly. Past it a barrel lens folds back and Double Sphere's projection turns down, so
+	// the same focal length recurs at a FOV that renders the wrong image.
+	constexpr double SlopeStepDeg = 1e-4;
+	auto OnBranch = [&](double FOV)
+	{
+		const double F = Focal(FOV);
+		return F > 0.0 && Focal(FOV + SlopeStepDeg) < F && FindFOVProblems(LensParameters, SizeXY, FOV).IsEmpty();
+	};
+	// Stop once the FOV no longer changes as a float, the precision the camera stores it at.
+	auto Bisect = [](double Low, double High, auto&& IsLow)
+	{
+		for (int32 Iteration = 0; Iteration < 100 && static_cast<float>(Low) != static_cast<float>(High); ++Iteration)
+		{
+			const double Mid = 0.5 * (Low + High);
+			(IsLow(Mid) ? Low : High) = Mid;
+		}
+		return Low;
+	};
+
+	constexpr double MinFOVDeg = 1e-3;
+	const double MaxFOVDeg = LensParameters.IsSingleCapture() ? 170.0 : 240.0;
+	if (!OnBranch(MinFOVDeg) || FocalLength > Focal(MinFOVDeg))
+	{
+		return false;
+	}
+
+	// Scan for the first FOV off the branch, then bisect for the branch's end.
+	constexpr int32 ScanSteps = 512;
+	double BranchEnd = MaxFOVDeg;
+	double PrevFOV = MinFOVDeg;
+	for (int32 Step = 1; Step <= ScanSteps; ++Step)
+	{
+		const double FOV = MinFOVDeg + (MaxFOVDeg - MinFOVDeg) * Step / ScanSteps;
+		if (!OnBranch(FOV))
+		{
+			BranchEnd = Bisect(PrevFOV, FOV, OnBranch);
+			break;
+		}
+		PrevFOV = FOV;
+	}
+	if (FocalLength < Focal(BranchEnd))
+	{
+		return false;
+	}
+
+	// The camera stores the FOV as a float, which can round past the branch's end.
+	float FOVAngle = static_cast<float>(Bisect(MinFOVDeg, BranchEnd, [&](double FOV) { return Focal(FOV) >= FocalLength; }));
+	if (FOVAngle > BranchEnd)
+	{
+		FOVAngle = std::nextafter(FOVAngle, 0.0f);
+	}
+	OutFOVAngle = FOVAngle;
+	return true;
 }
