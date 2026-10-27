@@ -1,6 +1,8 @@
 # Copyright Tempo Simulation, LLC. All Rights Reserved
 
 import asyncio
+import contextlib
+import contextvars
 from curio.meta import awaitable
 import grpc
 import os
@@ -157,6 +159,48 @@ def set_socket(path=""):
 @awaitable(set_socket)
 async def set_socket(path=""):
     await tempo_context().set_socket(path)
+
+
+# A deadline on every unary RPC, so a wedged server fails a call instead of hanging it. Never on a
+# server stream: a gRPC deadline bounds the whole call, and a stream is meant to outlive any one
+# request -- a camera stream for the length of a run, a horn stream through long silences.
+_request_timeout = None
+_request_timeout_override = contextvars.ContextVar("tempo_request_timeout_override")
+
+
+def set_request_timeout(seconds=None):
+    """
+    Give every unary RPC a deadline of this many seconds, or none (the default). Process-wide, like
+    the connection.
+    """
+    global _request_timeout
+    _request_timeout = seconds
+
+
+def request_timeout():
+    """
+    The deadline, in seconds, a unary RPC made here and now gets: the innermost
+    with_request_timeout's, else the process-wide one.
+    """
+    try:
+        return _request_timeout_override.get()
+    except LookupError:
+        return _request_timeout
+
+
+@contextlib.contextmanager
+def with_request_timeout(seconds):
+    """
+    Within this block, unary RPCs get `seconds` in place of the process-wide deadline: longer for a
+    call known to be slow, shorter for one that must not stall, None for none. Follows the code
+    into the coroutines it awaits, sync or async. A task started inside the block (asyncio copies
+    the context into it) keeps the override for its whole life, even after the block exits.
+    """
+    token = _request_timeout_override.set(seconds)
+    try:
+        yield
+    finally:
+        _request_timeout_override.reset(token)
 
 
 class _Connection(object):

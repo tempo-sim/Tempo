@@ -221,7 +221,7 @@ def generate_rust_api(module_dirs, tempo_root_dir, project_root_dir, module_owne
     # Each wrapper takes its request message whole, so a field added to a request does not change
     # the wrapper's signature. One whose request is TempoCore.Empty takes nothing.
     request_param_fragment = '''{% if takes_request %}request: {{ request_short_type }}{% endif %}'''
-    request_build_fragment = '''{% if not takes_request %}
+    request_build_fragment = '''{%- if not takes_request %}
     let request = {{ request_rust_type }}::default();{% endif %}'''
     call_arg_fragment = '''{% if takes_request %}request{% endif %}'''
     deprecated_fragment = '''{% if deprecated %}
@@ -233,13 +233,14 @@ def generate_rust_api(module_dirs, tempo_root_dir, project_root_dir, module_owne
     unary_rpc_template = '''
 /// {{ rpc.name }}''' + deprecated_fragment + '''
 pub async fn {{ name }}_async(''' + request_param_fragment + ''') -> Result<{{ response_rust_type }}, {{ infra }}::TempoError> {
-    let channel = {{ infra }}::context::connected_channel().await?;
-    let mut client = {{ client_type }}::new(channel)
-        .max_decoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE)
-        .max_encoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE);''' + request_build_fragment + '''
-
-    ''' + allow_deprecated_fragment + '''let response = client.{{ method_name }}(request).await?;
-    Ok(response.into_inner())
+''' + request_build_fragment + '''
+    ''' + allow_deprecated_fragment + '''let response = {{ infra }}::context::send(request, |channel, request| async move {
+        let mut client = {{ client_type }}::new(channel)
+            .max_decoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE)
+            .max_encoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE);
+        client.{{ method_name }}(request).await
+    }).await?;
+    Ok(response)
 }
 
 /// Synchronous version of {{ name }}''' + deprecated_fragment + '''
@@ -321,14 +322,13 @@ impl Batch {
     pub async fn execute_async(
         self,
     ) -> Result<{{ response_rust_type }}, {{ infra }}::TempoError> {
-        let channel = {{ infra }}::context::connected_channel().await?;
-        let mut client = {{ client_type }}::new(channel)
-            .max_decoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE)
-            .max_encoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE);
-
         let request = {{ request_rust_type }} { ops: self.ops };
-        let response = client.set_properties(request).await?;
-        Ok(response.into_inner())
+        {{ infra }}::context::send(request, |channel, request| async move {
+            let mut client = {{ client_type }}::new(channel)
+                .max_decoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE)
+                .max_encoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE);
+            client.set_properties(request).await
+        }).await
     }
 
     pub fn execute(
@@ -419,11 +419,6 @@ impl Call {
     pub async fn execute_async(
         self,
     ) -> Result<{{ response_rust_type }}, {{ infra }}::TempoError> {
-        let channel = {{ infra }}::context::connected_channel().await?;
-        let mut client = {{ client_type }}::new(channel)
-            .max_decoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE)
-            .max_encoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE);
-
         let request = {{ request_rust_type }} {
             actor: self.actor,
             component: self.component,
@@ -431,8 +426,12 @@ impl Call {
             args: self.args,
             subsystem: self.subsystem,
         };
-        let response = client.call_function(request).await?;
-        Ok(response.into_inner())
+        {{ infra }}::context::send(request, |channel, request| async move {
+            let mut client = {{ client_type }}::new(channel)
+                .max_decoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE)
+                .max_encoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE);
+            client.call_function(request).await
+        }).await
     }
 
     pub fn execute(
@@ -809,7 +808,10 @@ pub mod unreal;
 pub mod world;
 
 // Re-export commonly used items
-pub use context::{set_server, set_server_async, set_socket, set_socket_async, tempo_context, TempoContext};
+pub use context::{
+    request_timeout, set_request_timeout, set_server, set_server_async, set_socket, set_socket_async,
+    tempo_context, with_request_timeout, with_request_timeout_sync, TempoContext,
+};
 pub use error::TempoError;
 pub use streaming::SyncStreamIterator;
 
