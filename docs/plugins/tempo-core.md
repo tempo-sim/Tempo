@@ -50,7 +50,7 @@ tc.quit()
 |---|---|
 | `set_main_viewport_render_enabled` | Turn the main viewport's rendering off to save GPU when only sensors matter. |
 | `set_engine_scalability` | Change Unreal's scalability settings at runtime. |
-| `set_console_variable` / `get_console_variable` | Set or read any console variable (`r.ScreenPercentage`, `t.MaxFPS`, …) by name, with the value as text. A value set this way has the console's priority, so later scalability changes don't override it. |
+| `set_console_variable` / `get_console_variable` | Set or read any console variable (`r.ScreenPercentage`, `t.MaxFPS`, …) by name, with the value as text. A value set this way has the console's priority, so scalability, device profiles, ini files and the command line don't override it. Anything else that sets at console priority, such as the console or Blueprint's **Execute Console Command**, ranks equally, and the last write wins. |
 | `exec_console_command` | Run any console command (`stat unit`, `ShowFlag.PostProcessing 0`, …) as if typed into the console, and get back what it printed. |
 | `get_engine_info` | Describe the running sim: engine version, project, build configuration, editor or packaged, platform and graphics RHI. |
 | `set_control_mode` | Switch the control mode. |

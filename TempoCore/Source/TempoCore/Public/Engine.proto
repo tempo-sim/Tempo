@@ -52,10 +52,13 @@ message EngineInfoResponse {
 // Engine-wide operations, available whenever the server is: in the editor (with or without a play
 // session) and in a packaged build alike.
 service EngineService {
-  // Sets a console variable with the priority of a value typed into the console, the highest there is,
-  // so it holds against scalability, device profiles, ini files and the command line until it is set
-  // again. Read-only variables are refused, as are cheat variables in a build that has disabled them
-  // (Shipping). Responds with the variable's value after the change.
+  // Sets a console variable with the priority of a value typed into the console. That outranks
+  // scalability, device profiles, ini files and the command line, but it is not exclusive: anything else
+  // that sets at console priority (the console itself, Blueprint's Execute Console Command, C++ passing
+  // ECVF_SetByConsole) ranks equally, and among equals the last write wins. C++ that writes the variable
+  // a cvar is bound to bypasses priority altogether. Read-only variables are refused, as are cheat
+  // variables in a build that has disabled them (Shipping). Responds with the variable's value after
+  // the change.
   rpc SetConsoleVariable(SetConsoleVariableRequest) returns (ConsoleVariableResponse);
 
   rpc GetConsoleVariable(GetConsoleVariableRequest) returns (ConsoleVariableResponse);
