@@ -50,6 +50,7 @@ tc.quit()
 |---|---|
 | `set_main_viewport_render_enabled` | Turn the main viewport's rendering off to save GPU when only sensors matter. |
 | `set_engine_scalability` | Change Unreal's scalability settings at runtime. |
+| `set_console_variable` / `get_console_variable` | Set or read any console variable (`r.ScreenPercentage`, `t.MaxFPS`, …) by name, with the value as text. Works in the editor, with or without a play session, and in a packaged build. A value set this way has the console's priority, so it also overrides later scalability changes. |
 | `set_control_mode` | Switch the control mode. |
 | `get_sim_time` | Read the current simulation time, in seconds. |
 

@@ -20,6 +20,7 @@ EXPECTED_SURFACE = {
     "tempo_sim.tempo_core": [
         "set_time_mode", "set_sim_steps_per_second", "advance_steps",
         "play", "pause", "step", "get_sim_time", "get_current_level_name",
+        "set_console_variable", "get_console_variable",
     ],
     "tempo_sim.tempo_world": [
         "spawn_actor", "destroy_actor", "get_all_actors", "get_current_actor_state",
