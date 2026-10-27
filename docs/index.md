@@ -101,13 +101,14 @@ Everything below is a client talking to a running Unreal Editor or packaged bina
     import tempo_sim.tempo_core as tc
     import tempo_sim.tempo_world as tw
     import tempo_sim.TempoCore.Time_pb2 as Time
+    from tempo_sim.TempoWorld.WorldControl_pb2 import Value
 
     tc.set_time_mode(Time.TM_FIXED_STEP)      # deterministic, reproducible time
     tc.set_sim_steps_per_second(10)
 
     rig = tw.spawn_actor(actor_type="BP_SensorRig")
-    tw.set_float_property(actor=rig.name, component="TempoCamera",
-                          property="FOVAngle", value=60.0)
+    tw.set_property(actor=rig.name, component="TempoCamera",
+                    property="FOVAngle", value=Value(float_value=60.0))
 
     for _ in range(100):
         tc.step()                              # advance exactly 0.1 s
@@ -120,7 +121,10 @@ Everything below is a client talking to a running Unreal Editor or packaged bina
 
     fn main() -> Result<(), tempo_sim::TempoError> {
         set_server("localhost", 10001);
-        let rig = tempo_world::spawn_actor("BP_SensorRig".into(), /* … */)?;
+        let rig = tempo_world::spawn_actor(tempo_world::SpawnActorRequest {
+            actor_type: "BP_SensorRig".into(),
+            ..Default::default()
+        })?;
         tempo_core::step()?;
         Ok(())
     }
@@ -133,7 +137,7 @@ Everything below is a client talking to a running Unreal Editor or packaged bina
 
     int main() {
         tempo::set_server("localhost", 10001);
-        auto rig = tempo::tempo_world::spawn_actor("BP_SensorRig");
+        auto rig = tempo::tempo_world::spawn_actor({.actor_type = "BP_SensorRig"});
         tempo::tempo_core::step();
     }
     ```

@@ -89,17 +89,135 @@ Reference implementations: `UTempoTimeServiceSubsystem`, `UTempoCoreServiceSubsy
 `TempoCore/Content/Python/API/tempo_sim/`, `TempoCore/Content/Rust/`).
 
 - `TempoCore/Content/Python/gen_protos.py` — discovers all protos across plugins (respecting
-  module deps), validates naming, runs `protoc` → C++ `.pb.{h,cc}` + Python `_pb2`/`_pb2_grpc`,
-  and re-exports protos for the C++/Rust generators.
+  module deps), validates naming, runs `protoc` → C++ `.pb.{h,cc}` + Python `_pb2`/`_pb2_grpc`
+  and the `_pb2.pyi` stubs (without which every message type is `Unknown` to a type checker), and
+  re-exports protos for the C++/Rust generators.
 - `TempoCore/Content/Python/gen_api.py` — introspects proto descriptors, uses Jinja2 to emit
   ergonomic per-module wrappers with sync + async variants (`tempo_sim.tempo_core`, etc.).
 - Rust (`gen_rust_api.py`, opt-in `TEMPO_GEN_RUST_API=1`) and C++ (`gen_cpp_api.py`) generators.
 - `TempoCore/Scripts/GenAPI.sh` builds/refreshes the `TempoEnv` venv and installs the Python pkg.
-- A `.tempo_prebuild_cache.json` skips unnecessary regeneration.
+- A `.tempo_prebuild_cache.json` skips unnecessary regeneration. Its key does not include the target, so
+  `gen_protos.py` always generates for the project's **editor** target's modules, whatever is being built:
+  a game-target pass that ran uncached would otherwise prune the editor modules' clients as stale,
+  and what a package ships would depend on cache state.
 
-**Direction in flight** (see `PYTHON_API_SPLIT_PLAN.md`): splitting the Python API into a
-canonical `tempo-sim` distribution + per-project `tempo-sample`, and namespacing protos under
-the package (`import tempo_sim.TempoSensors`).
+The Python API ships as **two distributions**: the canonical `tempo-sim` (this plugin's
+`TempoCore/Content/Python/API`) and one named after the host project (`tempo-sample`, from the
+project's own `Content/Python/API`), which carries that project's own services. Protos are
+namespaced under their distribution, so clients import `tempo_sim.TempoSensors` and
+`tempo_sample.<Module>`. `gen_naming.py` derives both names and classifies each module's owner.
+
+### The reflected API (a second, separate pipeline)
+
+`.proto` files are the source of truth for the *services*. Unreal's **reflection** is the source of
+truth for a second, independent pipeline, the **reflected API**, that generates a typed class per
+Unreal class (Python, Rust and C++), so a
+scenario writes `truck.MaxSpeed = 1200.0` instead of
+`set_property(actor=..., property="MaxSpeed", value=...)`. Its purpose is **drift detection**: when a
+release regenerates it, a scenario using a property that was removed, retyped or made read-only
+fails under Pyright instead of at runtime. See `TYPED_WORLD_API_PLAN.md`.
+
+- **One classifier.** `TempoWorldReflection` decides what an `FProperty` or `UFunction` is — kind,
+  accepted `Value` variants, writability, accessors, or unsupported-with-a-reason. Everything derives
+  from it: the type string `GetProperties` reports, what `SetProperty` accepts, the typed getter, and
+  the schema. Before it existed those had already drifted. **Do not add a fifth opinion.**
+- **`TempoWorldSchemaWalk`** (runtime module) walks the classes; `TempoWorldEditor`'s
+  `TempoWorldSchema` serializes `tempo_schema.json`; `DescribeClasses` serves the same walk over
+  gRPC. One walk, so the generated stubs and a running sim cannot disagree.
+- **Generation runs in the editor**, because metadata is editor-only (`WITH_METADATA` is
+  `WITH_EDITORONLY_DATA`) and a cooked build cannot report a property's `BlueprintSetter` — 306 of
+  them in TempoSample, each one a property the reflected API must write through its accessor rather than
+  straight into memory.
+- **…and is then filtered against the packaged build**, which is the authority on what ships — both
+  halves of it. An editor has ~46% more classes than a packaged game (whole editor-only modules),
+  and a stub for one of those type-checks and then fails at runtime. It also has **members a
+  packaged class does not**: `AActor` declares seven `WITH_EDITORONLY_DATA` properties and eleven
+  editor-only functions, and it is the root of two thousand classes. So the build reports its whole
+  declared surface and `filter_schema.py` narrows to it, dropping what the build lacks and taking
+  signatures, parameter names and flags from the build — a `CallFunction` argument is matched by
+  name and a cooked build cases some differently. The invariant is that **the generated package
+  declares nothing the build lacks**, which is what makes a build-sourced hash honest; a test
+  asserts it. `Scripts/GenReflectedAPI.sh` runs the whole chain: walk → ask the build → filter →
+  generate. `Package.sh` calls it (`TEMPO_SKIP_REFLECTED_API` / `TEMPO_REQUIRE_REFLECTED_API`).
+- **Only the project generates it, never tempo-sim.** The classes go into the project's own client
+  package and crate, as `tempo_sample.reflected` and `tempo_sample::reflected` (default-on
+  `reflected` feature), beside the wrappers its protos generate, and into the C++ client as
+  `tempo::reflected`; all generated and git-ignored. tempo-sim ships only the runtime. So the
+  classes are exact for the build — its engine version down to the hotfix, its plugins, its
+  Blueprints — and a project has none until it has packaged. (A published subset inside tempo-sim
+  was built and reverted: it could describe only one engine version, the latest, for every
+  project. `TYPED_WORLD_API_PLAN.md` §16 records it.)
+- **The two halves of the project package are generated at different times** (wrappers at build
+  time, types at package time, since the types need the packaged build), so `gen_project_package.py`
+  owns everything in the package that is not generated code — manifest, `__init__`/`lib.rs`,
+  `.gitignore` — derives it from what is on disk, and either side may be first; a project with no
+  protos gets a package holding only types. The RPC generators count a package subdirectory as a
+  proto module only if it holds `_pb2` files, which is what keeps `reflected` out of them.
+- **`gen_py_classes.py`** emits three files per module: `.py` (class identity only), `.pyi` (the type
+  surface, never imported) and `.meta.json` (what the runtime needs to build a request). Plus
+  `py.typed`, without which a type checker ignores an installed package's stubs entirely.
+- **`gen_rust_classes.py`** emits one file per module, off the same schema, behind
+  `TEMPO_GEN_RUST_API` as the Rust RPC generator is. One file and not three because a generated Rust
+  method already knows its property's type, its `Value` variant and its `BlueprintSetter` — the
+  lookups the Python runtime does per access happen at generation time, so there is no metadata
+  table to keep in step. Unreal's single inheritance is emitted as a chain of `Deref`, which is what
+  makes an inherited member resolve and a derived handle coerce where a base one is wanted; names
+  are snake_case there, which is the one deliberate divergence from Python's verbatim ones. See
+  `TYPED_WORLD_API_PLAN.md` §15.
+- **`tempo_sim.unreal`** is the hand-written runtime -- the handle base, Unreal's value types,
+  `AssetRef`, the registry: everything in Unreal's own units -- and `tempo_sim.world` has the entry points
+  (`get_actors`, `get_actor`, `spawn_actor`, `spawn_actor_deferred`, `batch`, `check_schema`) and
+  is otherwise **the reflected API's mirror of `tempo_world`**, in SI as it is: the same functions, names and SI arguments,
+  with handles where `tempo_world` takes names (`destroy_actor`, `add_component`,
+  `set_actor_location`, `get_component_transform`, `stream_actor_state`, `raycast`, …). Keep it
+  mirroring: a new actor- or component-addressed TempoWorld RPC gets a `world` twin in all three
+  clients, and an `_async` twin in Python and Rust. Python's `world` writes each function once, as
+  the async one, and derives the blocking one (`_blocking`); attribute access itself stays
+  synchronous, so a coroutine writes in `async with world.batch()` and reads with
+  `await world.get_async(lambda: ...)`, and a blocking call made inside a coroutine raises rather
+  than deadlocking its own loop. The batch, capture and snapshot state is `contextvars`, not
+  thread-local -- two tasks share a thread. Rust's async batch is `world::batch_async`, whose
+  closure is synchronous because it only queues. A generated Rust crate registers its class table
+  before `main` (`hierarchy.rs`, a static-initializer entry), so `check_schema` can come first.
+  `tempo_sim::unreal` / `tempo_sim::world` are the Rust mirrors, hand-written in the same
+  `Content/Rust/API/src` the generator otherwise owns (whitelisted in its `.gitignore`, as
+  `context.rs` is). The reflected Rust API has two `unsafe` reinterpretations, both of a
+  `#[repr(transparent)]` newtype: `unreal::upcast`, behind an `unsafe trait Class` whose "I am a
+  newtype over `ObjectRef`" contract only the generator satisfies, and `AssetRef`'s `Deref` to its
+  superclass's `AssetRef`, sound because the class is only a `PhantomData`. Generated Rust contains
+  no `unsafe` block; its one `unsafe` is the `unsafe impl Class` each class carries, which states
+  that newtype contract.
+- **`gen_cpp_classes.py`** emits the reflected C++ API for the C++ client, behind
+  `TEMPO_GEN_CPP_API`: a header per class (including its superclass, forward-declaring the rest), a
+  header per module, enums, structs, assets and the hierarchy, with every definition out of line;
+  `build_cpp_classes.py` compiles them into `libtempo_reflected` and installs it beside `libtempo`.
+  The C++ surface mirrors Rust's (same `snake_case` names, `gen_classes_common.snake_case` with
+  C++'s reserved words) but uses real inheritance. Every C++
+  build here is capped by `gen_naming.build_jobs()` -- a bare `cmake --build --parallel` is `make -j`
+  under the Makefile generator, which started three hundred compiles at once and ran a 64 GB
+  machine out of memory. `Package.sh` ships `Packaged/API/Cpp` self-contained: headers, both
+  archives, the vendored gRPC headers and the shared `tempogrpc` library (never the static archives),
+  with `TempoConfig.cmake` for `find_package(Tempo)`. See `TYPED_WORLD_API_PLAN.md` §23.
+- **Rerooting.** `filter_schema.py` points a class whose superclass the build lacks at its
+  nearest kept ancestor, because both generators read a dangling superclass as "this class is a
+  root", silently stripping every inherited member while the stubs still type-check.
+- **The asset catalog comes from the packaged build alone.** `query_packaged_classes.py` asks the
+  sim for every cooked asset and `filter_schema.py` writes them into the filtered schema's
+  `assets`, less redirectors, Blueprints and World Partition's generated packages; both generators
+  emit an `assets` module per mount point, with `AssetRef` typed by class. An editor's registry
+  lists what the cook dropped, so a schema not narrowed against a build has no catalog at all.
+- **A subsystem is addressed by its class.** The reflected API's requests carry `subsystem` as an alternative
+  to `actor`/`component`, resolved in `GetObjectForName` by the kind of subsystem (world, game
+  instance, engine, first local player); the clients' entry point is `world.get_subsystem`.
+- **`diff_schema.py`** reports release-to-release drift and exits non-zero on anything breaking.
+- **Drift is checked per entry, not per build.** Each class, struct and enum carries its own hash
+  (`HashClass`/`HashStruct`/`HashEnum`; the header's whole-walk number is those folded together), and
+  `check_schema` compares entry by entry over what the installed package has, so the report says
+  *what* moved rather than only that something did. An entry the sim has and the package does not is
+  deliberately not a finding: nothing written against the package can address it.
+- **Both class registries hold a list.** Nothing stops a client installing more than one generated
+  package, so neither `register_classes` may overwrite, and the metadata walk and Rust's `is_a`
+  search every registration.
 
 ---
 
@@ -162,9 +280,20 @@ committed; fetched.
   subsystems are `U<Domain>ServiceSubsystem`.
 - **Units / frames at the API boundary**: internally Unreal is cm, degrees, left-handed.
   Proto APIs are **meters, radians, right-handed**. Conversions go through
-  `TempoConversion.h` (`QuantityConverter<CM2M, L2R>`, etc.). Note the documented exception:
-  scalar `set_float_property` / vector `set_*_property` do **not** auto-convert (only
-  transforms do) — they take Unreal-native units.
+  `TempoConversion.h` (`QuantityConverter<CM2M, L2R>`, etc.). The documented exception: the
+  RPCs that carry a `Value` (`SetProperty`, `GetProperty(ies)`, `StreamProperty`, `CallFunction`,
+  `RunBatch`) are always Unreal-native and convert nothing. The 38 typed `Set*Property` RPCs and
+  `SetProperties`, deprecated in v0.4.0, keep their old mixed rule (rotators, quats and transforms
+  converted, scalars and vectors raw) by converting at their entry point into the native path.
+- **Transforms carry their scale**: `TempoCore.Transform.scale` is unset-means-(1,1,1) on input, and
+  every transform the server reports sets it. The separate `scale` fields on
+  `SetActorTransformRequest` / `SetComponentTransformRequest` / `GetTransformResponse` are
+  deprecated.
+- **Client wrappers must survive a new proto field.** Python wrappers take keyword arguments; Rust
+  wrappers take the request message (build it with `..Default::default()`); C++ wrappers take a
+  generated `<Name>Args` aggregate (designated initializers). Never generate one positional
+  parameter per field: that made every appended field a breaking change. RPCs with
+  `option deprecated = true` get a language-level deprecation in all three.
 - **Actor identity over RPC**: use `UTempoCoreUtils::GetActorIdentifier`, *not*
   `GetActorNameOrLabel` (editor label race adds/drops `_C`). See `actor_identifier_rpc_naming`
   memory.
@@ -177,6 +306,35 @@ committed; fetched.
   short per-user directory, mirrored by all three clients), the `sun_path` length limit, and the
   liveness probe that refuses to displace a running server — gRPC unlinks a socket file before
   binding, so a bind alone would not fail the way a taken port does.
+- **Units in the reflected API**: the one place in Tempo that is **Unreal-native** — centimetres,
+  degrees, left-handed. Raw `UPROPERTY` values carry no semantic tagging, so converting them is
+  guesswork. That is why the property and function RPCs convert nothing, and
+  why the runtime's value types are Unreal's own, named and shaped as Unreal's are (`FVector`,
+  `FRotator` in pitch-yaw-roll order, `FTransform` with its quaternion and scale, `FColor` with
+  alpha, `FLinearColor` in float) — never `Vector`, which is `TempoCore.Geometry_pb2.Vector`, metres
+  and right-handed. A transform travels as `native_transform_value` and an `FLinearColor` as
+  `linear_color_value`; `world` mirrors `tempo_world` and speaks SI, re-exporting its types.
+  `tempo_sim.conversion` / `tempo_sim::conversion` convert between the two (`ue_to_si`,
+  `si_to_ue`, overloaded on the type) with the server's own `TempoConversion.h` rules; a vector
+  is taken to be a length, and a direction has its own handedness-only pair; an `FQuat` converts
+  exactly to a `Quat`, and a transform's scale passes through. Don't re-derive the rule anywhere
+  else in the clients. (There is no scalar-angle or angular-velocity conversion: the sign of an
+  angle depends on its axis.)
+- **Blueprint exposure is how a Tempo class declares its public scenario API.** The reflected API
+  is walked with `bBlueprintAccessibleOnly`, so a property reaches it only when it is
+  declared `BlueprintReadWrite` (writable) or `BlueprintReadOnly` (read-only); `VisibleAnywhere` or
+  `EditAnywhere` alone leaves it absent (neither sets `CPF_BlueprintVisible`), and a function needs
+  `BlueprintCallable`/`BlueprintPure`. Add the specifier when a property is meant to be configured
+  or observed from a scenario; leave a `UPROPERTY(Transient)` that exists for the garbage collector
+  alone. The string-keyed API still
+  reaches everything either way -- the specifier buys the drift guarantee, not the access. Note the
+  asymmetry this implies: `FTypeInfo::IsWritable()` means "writable *through the reflected API*", and
+  `SetProperty` accepts more than that.
+- **No catch-all a type checker can see.** `tempo_sim.unreal.Object` defines `__getattr__` and
+  `__setattr__` — attribute access *is* the reflected API — but `unreal.pyi` omits them deliberately. A
+  visible catch-all makes every attribute legal on every generated subclass and silently voids the
+  drift detection. The escape hatch is the separate `DynamicObject`. A test asserts this
+  (`Tempo.Python codegen`, "undeclared attribute").
 - **Config**: `UTempoCoreSettings` (`UDeveloperSettings`), stored under `Config/` with
   command-line overrides. Plugin-owned config (incl. CoreRedirects) belongs in the **plugin's**
   Config, not the project's (`plugin_config_scope` memory).
@@ -237,11 +395,32 @@ sim (not the editor). They cover the client-facing API contract and behavior ove
 
 - **Python — `Tests/Python/`:** `conftest.py` (sim lifecycle fixtures), `pytest.ini` (markers),
   `test_*.py`. Groups = pytest markers: `contract` (wheel-only, no sim — package imports + API
-  surface), `core` (time control), `world` (spawn/query/move/destroy + coordinate round trips),
-  `movement` (commandable pawns; skips if the map has none), `sensors` (camera frame — needs a GPU,
-  **default-off**). Run: `Scripts/TestPythonAPI.sh [group]`.
+  surface), `core` (time control), `world` (spawn/query/move/destroy + coordinate round trips, and
+  the reflected API), `movement` (commandable pawns; skips if the map has none), `sensors` (camera
+  frame — needs a GPU, **default-off**), `codegen` (the reflected API generators, their runtime, and the
+  schema filter and diff — **no sim**: it runs the in-tree source against a fixture schema. It needs the
+  generated proto modules, which a local build leaves in the tree and which the runner otherwise
+  extracts from the packaged wheel (the only thing it takes from a package), and `pyright`, which
+  `pip install pyright` brings with its own Node; the Rust and C++ halves of the same group need
+  `cargo` and a C++ compiler and are skipped without them). Run:
+  `Scripts/TestPythonAPI.sh [group]`.
+- **The `codegen` group tests behavior, not text.** A golden-output test would notice that the
+  emitted stubs changed; what matters is whether Pyright *rejects* what it must. So each case
+  generates from `Tests/Python/fixtures/mini_schema.json` and asserts Pyright's verdict on a
+  snippet — one per drift case. The fixture deliberately contains a class named `Object`, because a
+  name collision there once rooted the whole hierarchy in `Unknown`, at which point a checker allows
+  every attribute and the guarantee is gone with no visible symptom.
+- **C++ — `Tests/Cpp/`:** a CMake project against the packaged client (`find_package(Tempo)`), one
+  executable per group -- `contract` (no sim), `integration` (the RPC client) and `typed` (the reflected
+  API, on engine and Tempo classes every build has) -- with a header-only harness of its own.
+  Run: `Scripts/TestCppAPI.sh <group>` (needs a package built with `TEMPO_GEN_CPP_API=1`). The
+  `codegen` group's `test_cpp_codegen.py` checks the generator against the fixture with the host
+  compiler, and skips where the C++ client or the vendored gRPC has not been built.
 - **Rust — `Tests/Rust/`:** a `cargo` crate; `tests/*.rs` files are the groups (`cargo test --test
-  <group>`): `contract` (compile/surface check, no sim) and `integration` (live sim). The crate
+  <group>`): `contract` (compile/surface check, no sim), `integration` (live sim) and `typed`
+  (the reflected API against a live sim, in its own crate under `Tests/Rust/typed/` — it needs
+  the project's own crate, named after the host project, which the runner vendors as
+  `project`). The crate
   under test is the packaged `tempo-sim` crate, vendored in by the script. Run: `Scripts/TestRustAPI.sh
   [group]`.
 - **Sim lifecycle:** Python's session-scoped `sim_server` fixture (and `TestRustAPI.sh` for Rust)
@@ -256,7 +435,7 @@ sim (not the editor). They cover the client-facing API contract and behavior ove
   → `TEMPO_TEST_REPORT_DIR` (default `Saved/{Python,Rust}TestReport`). **Package first**
   (`Scripts/Package.sh`; Rust needs `TEMPO_GEN_RUST_API=1`).
 - **CI (fan-out):** `tempo_build_and_package.yml` sets `upload_artifact: true` (package built &
-  uploaded once), then `test_packaged_python_api` and `test_packaged_rust_api` matrix jobs (Unreal
+  uploaded once), then `test_packaged_python_api`, `test_packaged_rust_api` and `test_packaged_cpp_api` matrix jobs (Unreal
   version × group) both call the **generic, reusable** `test_packaged.yml`. Each job downloads the
   same artifact and runs one group in parallel — build once, test many.
   `test_packaged_socket_transport` re-runs the Python `core` group with the sim on a Unix domain
@@ -286,6 +465,30 @@ matrix entry in `tempo_build_and_package.yml` (and, for Python, a line in `pytes
 - Quote the engine path (it contains a space).
 - Changing a `.proto` is a client-facing API change: it regenerates Python/Rust/C++ clients
   and may need CoreRedirects (in the plugin's Config) for renamed assets/classes.
+- **Run the `codegen` group through `Scripts/TestPythonAPI.sh codegen`, not `pytest` directly.**
+  The runner reinstalls the in-tree `tempo_sim` into `.tempo_codegen_venv` on every invocation,
+  which is what keeps the installed copy and the tree identical. Invoking `pytest` yourself skips
+  that, and after a `.proto` change the stale installed `*_pb2` and the tree's differ — at which
+  point `AddSerializedFile` raises `duplicate file name ... WorldControl.proto` and two dozen tests
+  error in a way that looks nothing like the cause. (Identical bytes are tolerated, which is why it
+  only appears after a proto change.)
+- **The repo-side `codegen` group can silently test an installed wheel instead of the working
+  tree.** `Tests/Python/conftest.py` imports `tempo_sim` at collection time to decide
+  `collect_ignore`, so on a machine that has packaged the project the wheel's modules are already
+  in `sys.modules` and no later `sys.path` insertion displaces them. In clean CI there is no wheel
+  and the tree wins, which is why this hides. `test_typed_runtime.py`'s `classes` fixture sets the
+  imported modules aside and asserts it loaded from the tree; anything new that exercises
+  `tempo_sim` from the tree must do the same. A defect in the `BlueprintSetter` write path shipped
+  behind this.
+- **A `CallFunction` arg must be named**, and the name is matched against the function's own
+  parameters, so writing a property through its `BlueprintSetter` means knowing what that setter
+  calls its argument. `gen_classes_common.resolve_setters` joins the two halves the schema keeps
+  apart; do not resolve it per consumer, or the stub and the runtime will disagree about which
+  properties are writable.
+- **A proto `map<>` field does not link.** Protobuf's map internals call Abseil logging symbols that
+  the shared `tempogrpc` library does not export, so the module using one fails at link time with
+  undefined `absl_tempo::...::log_internal` symbols. Use a `repeated` name/value message (as
+  `StructValue.fields` does), or add the exports in TempoThirdParty's `exports.def`.
 - `MIGRATION_v0.1.0.md` documents the previous → v0.1.0 module consolidation (e.g. TempoCamera+TempoLidar →
   TempoSensors); proto packages were renamed, so old external clients must regenerate.
 - Half-pixel offset: the distortion-map UV loop in `TempoCamera.cpp` must use `U + 0.5`
@@ -306,5 +509,7 @@ matrix entry in `tempo_build_and_package.yml` (and, for Python, a line in `pytes
   `TempoTiledSceneCaptureComponent`, `TempoLensModels`, `TempoSensorInterface`).
 - Build/deps → `Scripts/`, `*.Build.cs`.
 - Client examples → `ExampleClients/`.
-- Project status & direction → `PROGRESS.md`, `MIGRATION_v0.1.0.md`, `PYTHON_API_SPLIT_PLAN.md`,
-  and each plugin's `README.md`.
+- Project history → `MIGRATION_v0.1.0.md`, `MIGRATION_v0.3.0.md`, and `docs/migration/`.
+- Work in flight → the top-level `*_PLAN.md` docs (`TYPED_WORLD_API_PLAN.md`).
+- Published documentation → `docs/` (start at `docs/index.md`); `docs/guides/documentation.md`
+  explains how it is built.

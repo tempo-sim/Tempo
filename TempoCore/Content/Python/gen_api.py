@@ -4,13 +4,12 @@ import copy
 import google.protobuf.descriptor as gpd
 import importlib
 import jinja2
-import json
 import os
-import re
 import sys
 from pathlib import Path
 from typing import List
 
+from gen_project_package import PYTHON_METADATA_FILE, write_python_package
 from prebuild_cache import PrebuildCache, find_files_filtered
 
 from gen_common import (
@@ -25,12 +24,20 @@ from gen_common import (
 
 # Non-generated files that live alongside the generated wrappers in each package
 # dir and must be preserved by the stale-file sweep. The tempo_sim package also
-# carries the hand-written infra; the project package only owns its __init__.py.
+# carries the hand-written infra; the project package only owns its __init__.py and py.typed.
 TEMPO_SIM_KEEP = {
-    ".gitignore", "_tempo_context.py", "TempoImageUtils.py",
-    "TempoLidarUtils.py", "__init__.py",
+    ".gitignore", "_tempo_context.py", "_tempo_context.pyi", "TempoImageUtils.py",
+    "TempoLidarUtils.py", "unreal.py", "unreal.pyi", "world.py", "conversion.py", "py.typed",
+    "__init__.py",
 }
-PROJECT_PKG_KEEP = {".gitignore", "__init__.py"}
+PROJECT_PKG_KEEP = {".gitignore", "__init__.py", "py.typed"}
+
+MIGRATION_URL = "https://tempo-sim.readthedocs.io/en/latest/migration/v0.4.0/"
+
+
+def deprecation_message(name):
+    """The warning a deprecated wrapper raises, and its docstring's note."""
+    return "{} is deprecated; see {}".format(name, MIGRATION_URL)
 
 
 def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
@@ -52,6 +59,8 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
     all_enums = {}
     all_messages = {}
     all_services = {}
+    # (service full name, RPC name) of every RPC whose method options mark it deprecated.
+    deprecated_rpcs = set()
 
     # (package dir, namespace, non-generated files to keep) per distribution.
     roots = [(tempo_sim_dir, INFRA_PACKAGE, TEMPO_SIM_KEEP)]
@@ -102,6 +111,10 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
                                                         f"This is not allowed! Please rename one.")
                                     module_rpcs.add(rpc_name)
                             all_services = all_services | services
+                            for service_descriptor in module_descriptor.services_by_name.values():
+                                for method in service_descriptor.methods:
+                                    if method.GetOptions().deprecated:
+                                        deprecated_rpcs.add((service_descriptor.full_name, method.name))
             if contains_services:
                 output_file = f"{pascal_to_snake(module_dir_name)}.py"
                 potentially_stale[namespace].discard(output_file)
@@ -111,6 +124,8 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
                     f.write(f"from {INFRA_PACKAGE} import run_async\n")
                     f.write("from curio.meta import awaitable\n")
                     f.write("import asyncio\n")
+                    f.write("import typing\n")
+                    f.write("import warnings\n")
                     f.write("\n\n")
 
     for root_dir, namespace, _ in roots:
@@ -124,6 +139,9 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         tempo_message_descriptor.resolve_names(all_messages | all_enums)
 
     # Every RPC gets sync and async versions. The correct one will automatically be chosen by context.
+    # A deprecated one warns on every call. The blocking form is reached through curio's @awaitable
+    # wrapper, one frame more than the async form, whose body runs in the awaiting coroutine; a stream
+    # runs in whatever iterates it. Each stacklevel names the caller's own line.
     simple_rpc_template = \
         "import " \
         "{% for import in imports %}" \
@@ -148,6 +166,10 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "    {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
         ") -> {{ response.full_name }}:\n" \
+        "{% if deprecated %}" \
+        "    \"\"\"{{ deprecated }}\"\"\"\n" \
+        "    warnings.warn(\"{{ deprecated }}\", DeprecationWarning, stacklevel=3)\n" \
+        "{% endif %}" \
         "    return run_async(_{{ name }}(\n" \
         "{% for field in request.fields %}" \
         "        {{ field.name }}={{ field.name }}{% if not loop.last %},{% endif %}\n" \
@@ -160,6 +182,10 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "    {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
         ") -> {{ response.full_name }}:\n" \
+        "{% if deprecated %}" \
+        "    \"\"\"{{ deprecated }}\"\"\"\n" \
+        "    warnings.warn(\"{{ deprecated }}\", DeprecationWarning, stacklevel=2)\n" \
+        "{% endif %}" \
         "    return await _{{ name }}(\n" \
         "{% for field in request.fields %}" \
         "        {{ field.name }}={{ field.name }}{% if not loop.last %},{% endif %}\n" \
@@ -167,6 +193,9 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "    )\n" \
         "\n\n" \
 
+    # Every form of a stream is annotated AsyncIterator, the blocking generator included. curio's
+    # @awaitable refuses a pair whose signatures differ, return annotation and all, and the async
+    # form is the one bound to the name -- the one a type checker sees -- so it is that one's type.
     streaming_rpc_template = \
         "import " \
         "{% for import in imports %}" \
@@ -177,7 +206,7 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "{% for field in request.fields %}" \
         "    {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
-        ") -> {{ response.full_name }}:\n" \
+        ") -> typing.AsyncIterator[{{ response.full_name }}]:\n" \
         "    stub = await tempo_context().get_stub({{ service.module_name }}_grpc.{{ service.object_name }}Stub)\n" \
         "    request = {{ request.full_name }}(\n" \
         "{% for field in request.fields %}" \
@@ -191,7 +220,11 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "{% for field in request.fields %}" \
         "    {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
-        ") -> {{ response.full_name }}:\n" \
+        ") -> typing.AsyncIterator[{{ response.full_name }}]:\n" \
+        "{% if deprecated %}" \
+        "    \"\"\"{{ deprecated }}\"\"\"\n" \
+        "    warnings.warn(\"{{ deprecated }}\", DeprecationWarning, stacklevel=2)\n" \
+        "{% endif %}" \
         "    async_gen = _{{ name }}(\n" \
         "{% for field in request.fields %}" \
         "        {{ field.name }}={{ field.name }}{% if not loop.last %},{% endif %}\n" \
@@ -208,7 +241,11 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "{% for field in request.fields %}" \
         "    {{ field.name }}: {{ field.py_annotation }} = {{ field.py_default }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
-        ") -> {{ response.full_name }}:\n" \
+        ") -> typing.AsyncIterator[{{ response.full_name }}]:\n" \
+        "{% if deprecated %}" \
+        "    \"\"\"{{ deprecated }}\"\"\"\n" \
+        "    warnings.warn(\"{{ deprecated }}\", DeprecationWarning, stacklevel=2)\n" \
+        "{% endif %}" \
         "    async for response in _{{ name }}(\n" \
         "{% for field in request.fields %}" \
         "        {{ field.name }}={{ field.name }}{% if not loop.last %},{% endif %}\n" \
@@ -233,9 +270,17 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "    Methods mirror the singular ``set_*_property`` free functions; each appends an op\n" \
         "    to the batch and returns ``self`` for fluent chaining. Call :meth:`execute` (sync)\n" \
         "    or ``await`` :meth:`execute_async` to send.\n" \
+        "{% if deprecated %}" \
+        "\n" \
+        "    {{ deprecated }}\n" \
+        "{% endif %}" \
         '    """\n' \
         "\n" \
-        "    def __init__(self):\n" \
+        "    def __init__(self{% if deprecated %}, *, _warn=True{% endif %}):\n" \
+        "{% if deprecated %}" \
+        "        if _warn:\n" \
+        "            warnings.warn(\"{{ deprecated }}\", DeprecationWarning, stacklevel=2)\n" \
+        "{% endif %}" \
         "        self._ops = []\n" \
         "\n" \
         "{% for method in methods %}" \
@@ -268,7 +313,13 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "\n\n" \
         "def batch() -> Batch:\n" \
         '    """Create a new property-set batch builder."""\n' \
+        "{% if deprecated %}" \
+        "    # Warns here, so the warning names the caller's line rather than this one.\n" \
+        "    warnings.warn(\"{{ deprecated }}\", DeprecationWarning, stacklevel=2)\n" \
+        "    return Batch(_warn=False)\n" \
+        "{% else %}" \
         "    return Batch()\n" \
+        "{% endif %}" \
         "\n\n"
 
     # Template for a Call class that stages typed CallFunction arguments. One method per
@@ -357,8 +408,12 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
                 for field in tempo_request_descriptor.fields:
                     if field.module_name:
                         imports.add(field.module_name)
+                deprecated = None
+                if (service_name, rpc_descriptor.name) in deprecated_rpcs:
+                    deprecated = deprecation_message(pascal_to_snake(rpc_descriptor.name))
                 for template in templates:
                     f.write(template.render(
+                        deprecated=deprecated,
                         name=pascal_to_snake(rpc_descriptor.name),
                         rpc=rpc_descriptor,
                         service=tempo_service_descriptor,
@@ -379,11 +434,13 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         # Find the service in the same proto module that exposes SetProperties.
         proto_package = proto_full_name.rsplit(".", 1)[0]
         owning_service = None
-        for service in all_services.values():
+        owning_service_name = None
+        for service_name, service in all_services.items():
             if service.module_name.split(".")[:2] != set_property_op_desc.module_name.split(".")[:2]:
                 continue
             if any(rpc.name == "SetProperties" for rpc in service.rpcs):
                 owning_service = service
+                owning_service_name = service_name
                 break
         if owning_service is None:
             continue
@@ -413,6 +470,8 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         output_file = os.path.join(ns_dir[namespace], f"{pascal_to_snake(tempo_module_name)}.py")
         with open(output_file, 'a') as f:
             f.write(j2_environment.from_string(batch_template).render(
+                deprecated=(deprecation_message("Batch")
+                            if (owning_service_name, "SetProperties") in deprecated_rpcs else None),
                 methods=methods,
                 pb2=pb2_module,
                 pb2_grpc=pb2_grpc_module,
@@ -492,18 +551,14 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
             ))
 
 
-# Filename of the project-owned publish-metadata override (mirror of the Rust
-# crate's crate_info.json). Lives in the project's Content/Python/API dir.
-PROJECT_METADATA_FILE = "project_info.json"
-
-
 def collect_input_files(project_root: Path, script_path: Path) -> List[Path]:
     """Collect all files that affect API generation."""
     files = [script_path]  # gen_api.py itself
     files.append((script_path.parent / "gen_common.py").resolve())
+    files.append((script_path.parent / "gen_project_package.py").resolve())
     files.extend(find_files_filtered(project_root, {'.proto', '.Build.cs'}))
     # The project metadata file drives the generated pyproject.toml.
-    metadata = project_root / "Content" / "Python" / "API" / PROJECT_METADATA_FILE
+    metadata = project_root / "Content" / "Python" / "API" / PYTHON_METADATA_FILE
     if metadata.exists():
         files.append(metadata)
     return files
@@ -534,152 +589,6 @@ def collect_output_files(package_dirs, project_api_dir=None, project_pkg_dir=Non
                   project_api_dir / ".gitignore",
                   project_pkg_dir / "__init__.py"]
     return files
-
-
-def read_project_metadata(project_api_dir: Path) -> dict:
-    """Read project-owned publish metadata from project_info.json, if present.
-
-    Mirror of gen_rust_api's read_project_metadata: the project's hook for
-    setting the generated pyproject.toml's publish fields (version, license,
-    urls, extra dependencies) WITHOUT editing this Tempo-owned script or the
-    generated pyproject.toml — both overwritten every run. Every field is
-    optional; an absent file returns {} and the generator falls back to
-    placeholders.
-    """
-    path = project_api_dir / PROJECT_METADATA_FILE
-    if not path.exists():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"Invalid JSON in {path}: {e}") from e
-    if not isinstance(data, dict):
-        raise RuntimeError(f"{path} must contain a JSON object, got {type(data).__name__}")
-    return data
-
-
-def _read_package_version(pyproject_path: Path) -> str:
-    """Pull the project.version out of tempo-sim's pyproject.toml (no TOML dep)."""
-    text = pyproject_path.read_text(encoding="utf-8")
-    match = re.search(r'^\s*version\s*=\s*"([^"]+)"', text, re.MULTILINE)
-    if not match:
-        raise RuntimeError(f"Could not find project version in {pyproject_path}")
-    return match.group(1)
-
-
-def _toml_str(value) -> str:
-    """Render a Python value as a TOML basic string, escaping backslashes/quotes."""
-    return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
-
-
-def write_project_pyproject(project_api_dir: Path, dist_name: str, import_name: str,
-                            tempo_sim_version: str, metadata: dict):
-    """Write the project package's pyproject.toml.
-
-    Always overwritten — it's a generated artifact, like the Rust crate's
-    Cargo.toml. `tempo-sim==<version>` is pinned to the single-sourced tempo-sim
-    version so the project package always matches the plugin it was generated
-    against. Publish metadata (version, license, urls, extra deps) comes from
-    project_info.json; absent keys fall back to placeholders.
-    """
-    metadata = metadata or {}
-    version = metadata.get("version", "0.1.0")
-    description = metadata.get(
-        "description",
-        "Project-specific Tempo client API; layers project protos on top of tempo-sim.")
-
-    deps = [f"tempo-sim=={tempo_sim_version}"]
-    extra_deps = metadata.get("dependencies", [])
-    if not isinstance(extra_deps, list):
-        raise RuntimeError(f'{PROJECT_METADATA_FILE} "dependencies" must be a JSON array')
-    deps.extend(extra_deps)
-
-    lines = [
-        "# Auto-generated by Tempo's gen_api.py. Do not edit.",
-        f"# Publish metadata (license, urls, extra deps) comes from {PROJECT_METADATA_FILE}",
-        "# in this directory — edit that file, not this one.",
-        "",
-        "[build-system]",
-        # setuptools>=77 for the PEP 639 SPDX `license` string below (builds run under pip's
-        # default build isolation, which fetches a current setuptools regardless of UE's bundled one).
-        'requires = ["setuptools>=77.0"]',
-        'build-backend = "setuptools.build_meta"',
-        "",
-        "[project]",
-        f"name = {_toml_str(dist_name)}",
-        f"version = {_toml_str(version)}",
-        f"description = {_toml_str(description)}",
-        'requires-python = ">=3.9"',
-    ]
-
-    # PEP 639 SPDX expression (string form). The deprecated `{ text = ... }` table form is avoided
-    # since setuptools>=77 (always used via build isolation) warns on it. A project's license value
-    # in project_info.json should be a valid SPDX identifier (e.g. "Apache-2.0", "MIT").
-    if "license" in metadata:
-        lines.append(f"license = {_toml_str(metadata['license'])}")
-    else:
-        lines += [
-            f"# TODO: set \"license\" in {PROJECT_METADATA_FILE} before publishing — \"Apache-2.0\"",
-            "# is a placeholder so the build is quiet; replace it with this project's actual SPDX license.",
-            'license = "Apache-2.0"',
-        ]
-    if "readme" in metadata:
-        lines.append(f"readme = {_toml_str(metadata['readme'])}")
-
-    lines.append("dependencies = [")
-    lines += [f"    {_toml_str(d)}," for d in deps]
-    lines.append("]")
-
-    # Optional project URLs from metadata (repository, homepage, documentation).
-    url_keys = [k for k in ("homepage", "repository", "documentation") if k in metadata]
-    if url_keys:
-        lines += ["", "[project.urls]"]
-        label = {"homepage": "Homepage", "repository": "Repository",
-                 "documentation": "Documentation"}
-        for k in url_keys:
-            lines.append(f"{label[k]} = {_toml_str(metadata[k])}")
-
-    lines += [
-        "",
-        "[tool.setuptools.packages.find]",
-        f'include = [{_toml_str(import_name)}, {_toml_str(import_name + ".*")}]',
-    ]
-
-    (project_api_dir / "pyproject.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def write_project_init(project_pkg_dir: Path):
-    """Write the project package's __init__.py.
-
-    The project package has no infra of its own — it re-exports tempo-sim's
-    runtime helpers so consumers can `from <project> import set_server` without
-    separately importing tempo_sim (mirror of the Rust project crate's lib.rs
-    re-export). Satisfied at runtime by the `tempo-sim` install dependency.
-    """
-    (project_pkg_dir / "__init__.py").write_text(
-        "# Warning: Autogenerated code do not edit\n\n"
-        f"from {INFRA_PACKAGE} import set_server, set_socket, run_async  # noqa: F401\n",
-        encoding="utf-8",
-    )
-
-
-def write_project_gitignore(project_api_dir: Path, import_name: str):
-    """Write the project package's .gitignore.
-
-    The whole package dir is generated (pb2 + wrappers + __init__), so it stays
-    out of git; consumers regenerate it locally. The generated pyproject.toml and
-    the user's project_info.json are tracked.
-    """
-    (project_api_dir / ".gitignore").write_text(
-        "# Build artifacts\n"
-        "/build/\n"
-        "/dist/\n"
-        "*.egg-info/\n"
-        "\n"
-        "# Generated Python package (pb2 + wrappers, populated by gen_protos.py / gen_api.py)\n"
-        f"/{import_name}/\n",
-        encoding="utf-8",
-    )
 
 
 if __name__ == "__main__":
@@ -737,12 +646,7 @@ if __name__ == "__main__":
     )
 
     if has_project_pkg:
-        tempo_sim_version = _read_package_version(api_dir / "pyproject.toml")
-        project_metadata = read_project_metadata(project_api_dir)
-        write_project_pyproject(project_api_dir, project_package_name(project_root),
-                                project_import_name, tempo_sim_version, project_metadata)
-        write_project_init(project_pkg_dir)
-        write_project_gitignore(project_api_dir, project_import_name)
+        write_python_package(project_root)
 
     # Update cache after successful generation
     output_files = collect_output_files(package_dirs, cache_project_api_dir, cache_project_pkg_dir)

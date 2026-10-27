@@ -13,28 +13,28 @@ interactive prompts.
 
 ## Prerequisites
 
-1. **Generate and build the Tempo C++ API** by running a Tempo build with
-   `TEMPO_GEN_CPP_API=1`. This produces:
-   - Headers: `Plugins/Tempo/TempoCore/Content/Cpp/API/include/`
-   - Static archive: `Plugins/Tempo/TempoCore/Content/Cpp/API/lib/<Platform>/libtempo.{a,lib}`
+1. **The Tempo C++ client**, from a Tempo build with `TEMPO_GEN_CPP_API=1` (into
+   `Plugins/Tempo/TempoCore/Content/Cpp/API/`), or a packaged one (`Packaged/API/Cpp/`, which
+   `Scripts/Package.sh` writes with the same variable set).
 2. **CMake** 3.20 or later.
-3. **OpenSSL 1.1** and **zlib**. The vendored gRPC was compiled against
-   OpenSSL 1.x and references `SSL_get_peer_certificate`, which OpenSSL 3.x
-   replaced with `SSL_get1_peer_certificate`. On macOS:
-   `brew install openssl@1.1`.
-4. A **C++20** compiler (clang 14+, gcc 11+, MSVC 19.30+). Required because
-   the vendored absl headers depend on `std::weak_ordering`.
+3. A **C++20** compiler (clang 14+, gcc 11+, MSVC 19.30+). Required because the vendored absl
+   headers depend on `std::weak_ordering`.
+
+Nothing else: the client links the shared `tempogrpc` library, which carries gRPC, protobuf,
+abseil, OpenSSL and zlib inside it. On Windows, copy `tempogrpc.dll` next to the executables.
 
 ## Build
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-    -DOPENSSL_ROOT_DIR=/opt/homebrew/opt/openssl@1.1
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ```
 
-On Linux, point `OPENSSL_ROOT_DIR` at an OpenSSL 1.1 install (or rebuild gRPC
-against your system OpenSSL).
+Against a packaged client instead of the one in this checkout:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DTempo_DIR=<project>/Packaged/API/Cpp
+```
 
 ## Run
 

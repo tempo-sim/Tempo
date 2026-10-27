@@ -13,6 +13,16 @@ Python side. `Scripts/TestRustAPI.sh <group>` runs `cargo test --test <group>`.
 |---|---|---|
 | `contract` | no (compile only) | the generated crate compiles and exposes the expected modules, functions, and proto types — a renamed/dropped symbol breaks the build |
 | `integration` | yes | level name + spawn/query/destroy + coordinate round trip against a live sim |
+| `typed` | yes | the reflected API: inherited members through `Deref`, a `BlueprintSetter` write, batching, components, discovery by type, `is_a`, `check_schema`, and the `_async` twins |
+
+## The `typed` group is its own crate
+
+`typed/` has its own `Cargo.toml`, because it needs a second path dependency — the project's own
+crate, which carries this build's generated classes as its `reflected` module — whose package is
+named after the host project (`tempo-sample`). A dependency has to be named at compile time, so
+`Scripts/TestRustAPI.sh` vendors it as `project`, rewriting the one `name =` line, and the tests
+refer to `project::reflected`. They address only engine classes and Tempo's own, so the file is not
+specific to TempoSample.
 
 ## How the crate dependency resolves
 
@@ -32,8 +42,9 @@ Scripts/TestRustAPI.sh integration    # against a live sim (the script launches/
 ```
 
 `TestRustAPI.sh` launches the packaged sim headless for sim-requiring groups, waits for its gRPC
-endpoint, runs the tests single-threaded (they share the client's global connection context), and
-writes the cargo log to `Saved/RustTestReport/` (override with `TEMPO_TEST_REPORT_DIR`).
+endpoint, runs those groups single-threaded (`--test-threads=1`: they share the client's global
+connection context and drive the one sim; `contract` has no such constraint), and writes the cargo
+log to `Saved/RustTestReport/` (override with `TEMPO_TEST_REPORT_DIR`).
 
 `TEMPO_SERVER_PORT` picks the port. `TEMPO_SERVER_SOCKET=run-a.sock` runs the sim on a Unix domain
 socket instead (Linux/macOS), so several test runs can share a machine without each claiming a

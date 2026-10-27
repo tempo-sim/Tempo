@@ -8,5 +8,8 @@ Cargo.lock
 # Generated API modules (populated by gen_rust_api.py)
 /src/**
 !/src/context.rs
+!/src/conversion.rs
 !/src/error.rs
 !/src/streaming.rs
+!/src/unreal.rs
+!/src/world.rs

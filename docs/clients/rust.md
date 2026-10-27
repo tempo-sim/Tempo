@@ -28,12 +28,17 @@ it.
 
 ## Consuming it
 
-From another Rust project, depend on it by path or git ref:
+From another Rust project, depend on `tempo-sim` from crates.io, and on your project's crate, if
+it has one, from its packaged build:
 
 ```toml
 [dependencies]
-tempo-sim = { path = "<plugin_root>/TempoCore/Content/Rust/API" }
+tempo-sim = "0.4"
+tempo-sample = { path = "<project_root>/Packaged/API/Rust/tempo-sample" }
 ```
+
+The packaged project crate depends on the `tempo-sim` version it was generated against, from
+crates.io, so the two resolve to one copy.
 
 ## The shape of the API
 
@@ -47,7 +52,10 @@ use tempo_sim::{set_server_async, tempo_world};
 #[tokio::main]
 async fn main() -> Result<(), tempo_sim::TempoError> {
     set_server_async("localhost", 10001).await;
-    let response = tempo_world::get_current_actor_state_async("MyActor".into()).await?;
+    let response = tempo_world::get_current_actor_state_async(tempo_world::ActorStateRequest {
+        actor: "MyActor".into(),
+        ..Default::default()
+    }).await?;
     Ok(())
 }
 ```
@@ -56,18 +64,17 @@ The asynchronous form carries an `_async` suffix; the synchronous one has the ba
 blocks on a [tokio](https://crates.io/crates/tokio) runtime internally. The crate is built on
 [tonic](https://crates.io/crates/tonic) and [prost](https://crates.io/crates/prost).
 
-Arguments are **positional** and follow the request message's field order. Fluent builders
-(`batch()`, `call()`) work the same as in Python — see
-[TempoWorld](../plugins/tempo-world.md#batching-property-sets).
+Each function takes its **request message**, which each module re-exports
+(`tempo_world::ActorStateRequest`). Set the fields you need and fill the rest with
+`..Default::default()`: a field added in a later release then takes its default rather than
+breaking the call. An RPC whose request is `TempoCore.Empty` takes no argument, and a deprecated
+RPC's function is marked `#[deprecated]`. The fluent `call()` builder is the exception: it takes
+`call(actor, component, function)` and then one `*_arg` method per argument, as in Python — see
+[TempoWorld](../plugins/tempo-world.md#calling-functions).
 
 Re-exported at the crate root: `set_server`, `set_server_async`, `set_socket`, `set_socket_async`,
 `tempo_context`, `TempoContext`,
 `TempoError`, `SyncStreamIterator`.
-
-!!! note "Optional message fields"
-
-    Generated wrappers take optional message-typed fields as `impl Into<Option<T>>`, so you can
-    pass either the value or `None` without wrapping at the call site.
 
 ## Publishing your own crate
 
@@ -95,7 +102,7 @@ or an Unreal build at all:
 
 ```toml
 [dependencies]
-tempo-sim = "0.1"
+tempo-sim = "0.4"
 ```
 
 Full generated API documentation for the published crate is on
@@ -103,13 +110,35 @@ Full generated API documentation for the published crate is on
 
 !!! warning
 
-    As with Python, the published `tempo-sim` crate contains only Tempo's built-in services, not
-    custom RPCs you define. If your project has its own services, generate and use your project
-    crate — it depends on `tempo-sim` and adds your modules.
+    As with Python, the published `tempo-sim` crate contains only Tempo's built-in services and
+    the reflected API's runtime (`unreal`, `world`, `conversion`), not custom RPCs you define or
+    any project's reflected classes. If your project has its own services, or you use the
+    reflected API, generate and use your project crate — it depends on `tempo-sim` and adds your
+    modules.
 
-    By default the generated project crate references `tempo-sim` by **local path**. Set
-    `"tempo_sim_source": "registry"` in `crate_info.json` to depend on the published crates.io
-    crate instead.
+    The project crate in the source tree references `tempo-sim` by local path as well as version,
+    so a build there uses the plugin's own copy; the copy in `Packaged/API/Rust` references the
+    version alone, on crates.io. Set `"tempo_sim_source": "registry"` in `crate_info.json` to make
+    the source tree's crate use crates.io too.
+
+## Reflected API
+
+Everything above addresses properties by string. The generated **reflected API** removes the
+strings, so a renamed or removed property fails `cargo build` instead of failing mid-simulation:
+
+```rust
+use tempo_sample::reflected::classes::game::vehicles::BP_Truck_C;
+use tempo_sim::world;
+
+for truck in world::get_actors::<BP_Truck_C>()? {
+    truck.set_max_speed(1200.0)?;
+}
+```
+
+The crate is generated from the build it describes and ships beside this one, under the same
+`TEMPO_GEN_RUST_API` opt-in.
+
+[:octicons-arrow-right-24: Reflected API](reflected-api.md)
 
 ## Example clients
 

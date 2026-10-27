@@ -1,0 +1,508 @@
+# Copyright Tempo Simulation, LLC. All Rights Reserved
+"""Tests for the generated reflected API.
+
+These test the guarantee rather than the text. A golden-output test would notice that the emitted
+bytes changed; what matters is whether a type checker rejects the things it has to reject, because
+that -- not readability -- is why the stubs exist. So each case generates from a fixture schema and
+asserts what Pyright says about a snippet.
+
+Needs neither a packaged sim nor a wheel: `pip install pyright` brings its own Node. Skipped, not
+failed, when Pyright is absent, since the rest of the suite should still run without it.
+
+    Scripts/TestPythonAPI.sh codegen        (once wired into the runner)
+    pytest -m codegen Tests/Python
+"""
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+
+import pytest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+PLUGIN_ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
+GENERATOR = os.path.join(PLUGIN_ROOT, "TempoCore", "Content", "Python", "gen_py_classes.py")
+RUNTIME_API = os.path.join(PLUGIN_ROOT, "TempoCore", "Content", "Python", "API")
+FIXTURE = os.path.join(HERE, "fixtures", "mini_schema.json")
+
+pytestmark = pytest.mark.codegen
+
+DIST = "fixture_classes"
+
+
+def pyright_executable():
+    """Pyright, from PATH or from a venv beside the interpreter running the tests."""
+    found = shutil.which("pyright")
+    if found:
+        return found
+    candidate = os.path.join(os.path.dirname(sys.executable), "pyright")
+    return candidate if os.path.exists(candidate) else None
+
+
+@pytest.fixture(scope="module")
+def generated(tmp_path_factory):
+    """The fixture schema, generated into an importable package."""
+    out = tmp_path_factory.mktemp("generated")
+    package = out / DIST
+    subprocess.run([sys.executable, GENERATOR, FIXTURE, str(package)], check=True,
+                   capture_output=True, text=True)
+    return out
+
+
+def check(generated, source, tmp_path):
+    """Run Pyright over one snippet. Returns its error diagnostics for that file."""
+    pyright = pyright_executable()
+    if pyright is None:
+        pytest.skip("pyright is not installed (pip install pyright)")
+
+    snippet = tmp_path / "snippet.py"
+    snippet.write_text(source)
+    config = tmp_path / "pyrightconfig.json"
+    config.write_text(json.dumps({
+        "extraPaths": [str(generated), RUNTIME_API],
+        "typeCheckingMode": "standard",
+    }))
+
+    result = subprocess.run([pyright, "--project", str(tmp_path), "--outputjson", str(snippet)],
+                            capture_output=True, text=True)
+    report = json.loads(result.stdout)
+    return [d for d in report["generalDiagnostics"]
+            if d["severity"] == "error" and d["file"].endswith("snippet.py")]
+
+
+def test_generates_the_expected_files(generated):
+    package = generated / DIST
+    # Three files per module: identity, types, and the metadata the runtime builds requests from.
+    for name in ("Engine.py", "Engine.pyi", "Engine.meta.json", "enums.py", "structs.py"):
+        assert (package / name).exists(), "{} was not generated".format(name)
+
+    metadata = json.loads((package / "Engine.meta.json").read_text())
+    widget = metadata["/Script/Engine.Widget"]
+    assert widget["super"] == "/Script/CoreUObject.Object", "inheritance must be recoverable"
+    # The runtime cannot infer a Value variant from a Python type -- a str could be six things --
+    # so the metadata has to name it.
+    assert widget["properties"]["bEnabled"]["variant"] == "bool_value"
+    assert widget["properties"]["Tags"]["variant"] == "string_array_value"
+    assert widget["properties"]["bEnabled"]["writable"] is True
+    assert widget["properties"]["Offset"]["writable"] is False
+
+
+def test_metadata_says_what_a_reference_or_enum_reads_back_as(generated):
+    """A reference travels as a name and an enum as its spelling. The stub types them as a handle of
+    the declared class and as the generated member; the runtime can only build those if the
+    metadata says which class and which enum -- for a property, a return value and an out parameter
+    alike. A stub saying `MeshThing` over a runtime handing back `str` is the drift check voided."""
+    metadata = json.loads((generated / DIST / "Engine.meta.json").read_text())
+    widget = metadata["/Script/Engine.Widget"]
+    assert widget["properties"]["Target"]["class"] == "/Script/Engine.MeshThing"
+    assert widget["properties"]["Mode"]["enum"] == "EWidgetMode"
+    assert "class" not in widget["properties"]["bEnabled"] and "enum" not in widget["properties"]["Tags"]
+    outsider = metadata["/Script/Engine.DeepBridged"]["properties"]["Outsider"]
+    assert outsider["class"] == "/Script/SomePlugin.PluginBase", "a class outside the module too"
+
+    assert widget["functions"]["Resize"]["returns"]["variant"] == "bool_value"
+    assert widget["functions"]["Refresh"]["returns"] is None
+    assert widget["functions"]["Configure"]["inputs"] == [
+        {"name": "NewSettings", "variant": "struct_value", "struct": "FWidgetSettings"}]
+    measure = widget["functions"]["Measure"]
+    assert measure["outputs"] == {"Measured": {"variant": "struct_value", "struct": "FWidgetSettings"}}, \
+        "an out parameter that cannot travel is not a result"
+
+    structs = json.loads((generated / DIST / "structs.meta.json").read_text())
+    assert structs["FWidgetSettings"]["Inner"] == {"variant": "struct_value", "struct": "FWidgetTrim",
+                                                   "writable": True}
+
+
+def test_identity_file_has_no_annotations(generated):
+    """The .py carries class identity only. Annotations there would cost a dict per class."""
+    identity = (generated / DIST / "Engine.py").read_text()
+    assert "__tempo_class__" in identity
+    assert "bEnabled" not in identity, "the identity file must not carry members"
+
+
+def test_components_are_typed_as_their_own_class(generated, tmp_path):
+    errors = check(generated, """
+import fixture_classes.Engine as E
+
+def ok(w: E.Widget) -> None:
+    w.Mesh.Visible = True
+""", tmp_path)
+    assert errors == [], "a component's own members should type-check: {}".format(errors)
+
+
+def test_a_reference_is_typed_as_the_class_it_points_at(generated, tmp_path):
+    """A property holding an actor, asset, component or class is typed as that class.
+
+    The schema calls the key `class`; the proto calls the same thing `class_path`, and the
+    generator read the proto's name. The lookup therefore never matched and the "pointee is
+    outside this walk" fallback always won, so all 4,977 reference-valued members and parameters in
+    TempoSample were typed as a bare `Object`. Nothing failed -- the stub was merely useless, which
+    is the failure mode §9 exists to catch, so it is asserted on the type rather than on the text.
+    """
+    stub = (generated / DIST / "Engine.pyi").read_text()
+    assert "Target: MeshThing" in stub, "a reference should name its class, not Object: {}".format(
+        [line for line in stub.splitlines() if "Target" in line])
+
+    errors = check(generated, """
+import fixture_classes.Engine as E
+
+def ok(w: E.Widget) -> None:
+    w.Target.Visible = True
+""", tmp_path)
+    assert errors == [], "a reference's own members should type-check: {}".format(errors)
+
+    errors = check(generated, """
+import fixture_classes.Engine as E
+
+def bad(w: E.Widget) -> None:
+    w.Target.Nope = True
+""", tmp_path)
+    assert errors, "a member the pointee does not have must still be an error"
+
+
+def test_a_component_is_declared_once(generated):
+    """A Blueprint component variable is both a component template and the property holding it.
+
+    Emitting both puts the name in the class body twice, and the second declaration is the one a
+    type checker believes -- so the typed handle would lose to a bare Object, making correct code
+    an error. The runtime looks for a property first, so it would answer the read with the
+    component's name as a string rather than a handle. The component accessor has to be the only
+    declaration, in the stub and in the metadata alike.
+    """
+    package = generated / DIST
+    stub = (package / "Engine.pyi").read_text()
+    assert stub.count("def Mesh(") == 1, "Mesh should be declared once"
+    assert "Mesh: " not in stub, "Mesh must not also be declared as a plain attribute"
+
+    widget = json.loads((package / "Engine.meta.json").read_text())["/Script/Engine.Widget"]
+    assert widget["components"]["Mesh"] == "/Script/Engine.MeshThing"
+    assert "Mesh" not in widget["properties"], "the runtime would serve the property instead"
+
+
+@pytest.mark.parametrize("case,source", [
+    ("assigning to a component", "w.Mesh = None"),
+    ("a component whose class is absent", "w.Gone.Visible = True"),
+    ("an unnameable component", "w.Has_Space.Visible = True"),
+    ("a member the component does not have", "w.Mesh.NoSuchThing = True"),
+])
+def test_component_misuse_is_a_type_error(generated, tmp_path, case, source):
+    errors = check(generated, """
+import fixture_classes.Engine as E
+
+def drift(w: E.Widget) -> None:
+    {}
+""".format(source), tmp_path)
+    assert errors, "{} should be a type error".format(case)
+
+
+def test_valid_usage_type_checks(generated, tmp_path):
+    errors = check(generated, """
+import fixture_classes.Engine as E
+import fixture_classes.enums as enums
+
+def ok(w: E.Widget) -> None:
+    w.bEnabled = True
+    w.Mode = enums.EWidgetMode.Advanced
+    w.Tags = ["a", "b"]
+    print(w.Offset.X, w.Settings.Scale)
+    if w.Resize(4):
+        w.Refresh()
+""", tmp_path)
+    assert errors == [], "valid usage should type-check cleanly: {}".format(errors)
+
+
+def test_every_enumerator_has_a_member(generated):
+    """Symbol-only enumerators are numbered, and names that mangle alike are all kept."""
+    import importlib.util
+    path = str(generated / DIST / "enums.py")
+    spec = importlib.util.spec_from_file_location("fixture_enums", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert {member.name: member.value for member in module.EWidgetComparison} == {
+        "Enumerator0": "==",
+        "Enumerator1": "<",
+        "Enumerator1_2": "Enumerator1",
+        "Less_Than": "Less Than",
+        "Less_Than_4": "Less_Than",
+        "Greater": "Greater",
+    }
+
+
+def test_struct_values_type_check(generated, tmp_path):
+    errors = check(generated, """
+import fixture_classes.Engine as E
+import fixture_classes.structs as structs
+import tempo_sim.unreal as _unreal
+
+def ok(w: E.Widget) -> None:
+    w.Settings = structs.FWidgetSettings(
+        Scale=2.0, Inner=structs.FWidgetTrim(Offset=_unreal.FVector()))
+    w.Settings.Scale = 3.0
+    result: structs.FWidgetSettings = w.Configure(structs.FWidgetSettings(Scale=1.0))
+    print(result.Scale, result.Label)
+    w.History = [structs.FWidgetSettings()]
+    w.Configure(w.Settings)
+    copy: structs.FWidgetSettings = _unreal.value_of(w.Settings)
+    print(copy.Inner.Offset.X, w.Limits.Floor)
+""", tmp_path)
+    assert errors == [], "struct values should type-check cleanly: {}".format(errors)
+
+
+def test_the_asset_catalog_type_checks(generated, tmp_path):
+    errors = check(generated, """
+import fixture_classes.Engine as E
+from fixture_classes.assets import Engine, Game
+from tempo_sim.unreal import AssetRef
+
+def ok(w: E.Widget) -> None:
+    w.Skin = Game.Widgets.W_Main
+    # Covariant: a MeshThing asset is an Object asset.
+    w.AnyAsset = Game.Widgets.W_Main
+    w.Reskin(Game.Maps.Showroom_.Lighting)
+    current: AssetRef[E.MeshThing] = w.Skin
+    print(current.path, Engine.Basic._9Grid.path, Game.Maps.Showroom.path)
+    # The escape hatch, for a path that comes from data: untyped, and visibly so.
+    w.Skin = AssetRef("/Game/FromAConfigFile")
+""", tmp_path)
+    assert errors == [], "the catalog should type-check cleanly: {}".format(errors)
+
+
+@pytest.mark.parametrize("case,source", [
+    ("an asset that was renamed", "w.Skin = Game.Widgets.W_Mian"),
+    ("an asset of the wrong class", "w.Skin = Game.Widgets.Trims.T_Gold"),
+    ("an asset as a function argument of the wrong class", "w.Reskin(Game.Widgets.Trims.T_Gold)"),
+    ("a bare path", 'w.Skin = "/Game/Widgets/W_Main"'),
+    ("two assets that collide, both left out", "print(Game.Widgets.Dup_One)"),
+    ("a folder renamed beside its asset is not the asset", "w.Skin = Game.Maps.Showroom_"),
+    ("a catalog entry cannot be reassigned", "Game.Widgets.W_Main = Game.Widgets.W_Main"),
+])
+def test_asset_drift_is_a_type_error(generated, tmp_path, case, source):
+    errors = check(generated, """
+import fixture_classes.Engine as E
+from fixture_classes.assets import Engine, Game
+
+def drift(w: E.Widget) -> None:
+    {}
+""".format(source), tmp_path)
+    assert errors, "{} should be a type error, but Pyright accepted it".format(case)
+
+
+def test_a_deferred_read_is_typed_by_what_it_reads(generated, tmp_path):
+    errors = check(generated, """
+import fixture_classes.Engine as E
+from tempo_sim import world
+
+def ok(w: E.Widget) -> None:
+    with world.batch() as b:
+        enabled = b.get(lambda: w.bEnabled)
+        grown = b.call(lambda: w.Resize(4))
+    flag: bool = enabled.value
+    resized: bool = grown.value
+""", tmp_path)
+    assert errors == [], "a deferred read should carry its type: {}".format(errors)
+
+    for source in ("s: str = b.get(lambda: w.bEnabled).value", "b.get(lambda: w.bEnabledd)"):
+        errors = check(generated, """
+import fixture_classes.Engine as E
+from tempo_sim import world
+
+def drift(w: E.Widget) -> None:
+    with world.batch() as b:
+        {}
+""".format(source), tmp_path)
+        assert errors, "{} should be a type error".format(source)
+
+
+def test_the_async_forms_are_typed_as_the_blocking_ones(generated, tmp_path):
+    """Each blocking function is derived from its `_async` twin, and must keep its types doing so:
+    a checker that saw a coroutine there, as it does for tempo_world's dual-mode names, or saw
+    `Any`, would pass every misuse."""
+    errors = check(generated, """
+from typing import List
+import fixture_classes.Engine as E
+from tempo_sim import world
+
+def blocking() -> None:
+    found: List[E.Widget] = world.get_actors(E.Widget)
+    one: E.Widget = world.get_actor("A", E.Widget)
+    world.destroy_actor(found[0])
+
+async def awaited(w: E.Widget) -> None:
+    found: List[E.Widget] = await world.get_actors_async(E.Widget)
+    one: E.Widget = await world.get_actor_async("A", E.Widget)
+    await world.destroy_actor_async(one)
+    flag: bool = await world.get_async(lambda: w.bEnabled)
+    resized: bool = await world.call_async(lambda: w.Resize(4))
+    async with world.batch() as b:
+        w.bEnabled = True
+        later = b.get(lambda: w.bEnabled)
+    also: bool = later.value
+    async with w.snapshot_async("bEnabled"):
+        print(w.bEnabled)
+    async for state in world.stream_actor_state_async(w):
+        print(state)
+""", tmp_path)
+    assert errors == [], "the async forms should type-check: {}".format(errors)
+
+    for source in ("s: str = world.get_actors(E.Widget)",
+                   "world.destroy_actor(\"A\")",
+                   "s: str = await world.get_async(lambda: w.bEnabled)",
+                   "await world.get_async(lambda: w.bEnabledd)",
+                   "found: str = await world.get_actors_async(E.Widget)",
+                   "world.destroy_actor_async(w).name"):
+        errors = check(generated, """
+import fixture_classes.Engine as E
+from tempo_sim import world
+
+async def drift(w: E.Widget) -> None:
+    {}
+""".format(source), tmp_path)
+        assert errors, "{} should be a type error".format(source)
+
+
+def test_out_parameters_are_typed_by_name(generated, tmp_path):
+    """With out parameters a method returns every result keyed by name, and the stub has to say so.
+
+    It used to say only the return value -- `-> bool` -- while the runtime handed back a dict, so a
+    caller doing what the stub said got a dict where a bool was promised.
+    """
+    errors = check(generated, """
+import fixture_classes.Engine as E
+
+def ok(w: E.Widget) -> None:
+    results = w.Measure()
+    moved: bool = results["ReturnValue"]
+    scale = results["Measured"].Scale
+""", tmp_path)
+    assert errors == [], "named results should type-check: {}".format(errors)
+
+    for source in ('w.Measure()["Tally"]', "b: bool = w.Measure()"):
+        errors = check(generated, """
+import fixture_classes.Engine as E
+
+def drift(w: E.Widget) -> None:
+    {}
+""".format(source), tmp_path)
+        assert errors, "{} should be a type error".format(source)
+
+
+@pytest.mark.parametrize("case,source", [
+    ("a member the struct lacks", "structs.FWidgetSettings(Scal=1.0)"),
+    ("a positional member", "structs.FWidgetSettings(1.0)"),
+    ("a read-only member in the constructor", 'structs.FWidgetSettings(Label="x")'),
+    ("a member of the wrong type", 'structs.FWidgetSettings(Scale="big")'),
+    ("the wrong struct as an argument", "w.Configure(structs.FWidgetTrim())"),
+    ("assigning a struct that cannot travel", "w.Limits = structs.FWidgetLimits()"),
+    ("a function returning a struct that cannot travel", "w.GetLimits()"),
+    ("a function taking a struct that cannot travel", "w.ApplyLimits(structs.FWidgetLimits())"),
+    ("a member nothing can read", "print(w.Waypoints)"),
+])
+def test_struct_drift_is_a_type_error(generated, tmp_path, case, source):
+    errors = check(generated, """
+import fixture_classes.Engine as E
+import fixture_classes.structs as structs
+
+def drift(w: E.Widget) -> None:
+    {}
+""".format(source), tmp_path)
+    assert errors, "{} should be a type error, but Pyright accepted it".format(case)
+
+
+@pytest.mark.parametrize("case,source", [
+    # A property removed in a new release.
+    ("removed property", "w.bEnabledd = True"),
+    # A property that became read-only. This is why read-only members are emitted as setter-less
+    # properties rather than plain annotations: a plain annotation is writable.
+    ("read-only property", "w.Offset = _unreal.FVector()"),
+    # A property whose type changed.
+    ("wrong type", 'w.bEnabled = "yes"'),
+    # A function removed, or its signature changed.
+    ("removed function", "w.Refreshh()"),
+    ("wrong argument type", 'w.Resize("four")'),
+    # A type the API cannot carry must be absent, never typed Any -- Any would pass silently.
+    ("unsupported property is absent", "w.Doomed = 1"),
+    # A name Python cannot spell is likewise absent rather than quietly mangled.
+    ("unnameable property is absent", "setattr(w, 'Has Spaces', True); w.Has_Spaces = True"),
+    # A function the server will not invoke is not offered.
+    ("uncallable function is absent", "w.Latent()"),
+    # Any undeclared attribute at all. This guards the whole guarantee: a catch-all anywhere in the
+    # visible hierarchy, or a base that resolves to Unknown, makes every one of these pass.
+    ("undeclared attribute", "w.AnythingAtAll = 1"),
+])
+def test_drift_is_a_type_error(generated, tmp_path, case, source):
+    errors = check(generated, """
+import fixture_classes.Engine as E
+import tempo_sim.unreal as _unreal
+
+def drift(w: E.Widget) -> None:
+    {}
+""".format(source), tmp_path)
+    assert errors, "{} should be a type error, but Pyright accepted it".format(case)
+
+
+def test_enum_members_are_checked(generated, tmp_path):
+    errors = check(generated, """
+import fixture_classes.enums as enums
+
+def gone() -> enums.EWidgetMode:
+    return enums.EWidgetMode.Removed
+""", tmp_path)
+    assert errors, "a removed enumerator should be a type error"
+
+
+def test_conversions_are_typed_by_what_they_convert(generated, tmp_path):
+    # Leans on the _pb2 stubs: without them every message type is Unknown, the first overload of
+    # si_to_ue matches anything, and a Rotation converts to a type-checked float.
+    errors = check(generated, """
+import tempo_sim.TempoCore.Geometry_pb2 as Geometry
+import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+from tempo_sim.conversion import (rotator_of, si_direction_to_ue, si_to_ue, ue_direction_to_si,
+                                  ue_to_si)
+from tempo_sim.unreal import FQuat, FRotator, FTransform, FVector, FVector2D
+
+def ok() -> None:
+    meters: float = ue_to_si(250.0)
+    v: Geometry.Vector = ue_to_si(FVector())
+    v2: Geometry.Vector2D = ue_to_si(FVector2D())
+    r: Geometry.Rotation = ue_to_si(FRotator())
+    q: WorldControl.Quat = ue_to_si(FQuat())
+    qr: Geometry.Rotation = ue_to_si(rotator_of(FQuat()))
+    t: Geometry.Transform = ue_to_si(FTransform())
+    d: Geometry.Vector = ue_direction_to_si(FVector())
+    centimeters: float = si_to_ue(2.5)
+    uv: FVector = si_to_ue(Geometry.Vector())
+    uv2: FVector2D = si_to_ue(Geometry.Vector2D())
+    ur: FRotator = si_to_ue(Geometry.Rotation())
+    uq: FQuat = si_to_ue(WorldControl.Quat())
+    ut: FTransform = si_to_ue(Geometry.Transform())
+    ud: FVector = si_direction_to_ue(Geometry.Vector())
+""", tmp_path)
+    assert not errors, errors
+
+
+@pytest.mark.parametrize("case,source", [
+    ("a conversion typed as another quantity",
+     "v: FVector = si_to_ue(Geometry.Rotation())"),
+    ("an SI result typed as Unreal", "v: FVector = ue_to_si(FVector())"),
+    ("a quaternion taken for a rotation", "r: Geometry.Rotation = ue_to_si(FQuat())"),
+    ("converting an Unreal value the wrong way", "si_to_ue(FVector())"),
+    ("converting an SI value the wrong way", "ue_to_si(Geometry.Vector())"),
+    ("a value with no SI counterpart", "ue_to_si(FColor())"),
+    ("a direction that is not a vector", "ue_direction_to_si(FRotator())"),
+    ("a transform in the old shape", "FTransform(Location=FVector())"),
+    # The names this module once had, and the TempoCore one it must never be confused with.
+    ("the old prefixed name", "from tempo_sim.unreal import UnrealVector"),
+    ("the old unprefixed name", "from tempo_sim.unreal import Vector"),
+])
+def test_conversion_misuse_is_a_type_error(generated, tmp_path, case, source):
+    errors = check(generated, """
+import tempo_sim.TempoCore.Geometry_pb2 as Geometry
+from tempo_sim.conversion import si_to_ue, ue_direction_to_si, ue_to_si
+from tempo_sim.unreal import FColor, FQuat, FRotator, FTransform, FVector
+
+def drift() -> None:
+    {}
+""".format(source), tmp_path)
+    assert errors, "{} should be a type error, but Pyright accepted it".format(case)

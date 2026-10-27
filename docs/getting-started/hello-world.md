@@ -92,8 +92,10 @@ Use it to list the available sensors and start streaming color images from the `
 Back in the Python REPL:
 
 ```python
-tw.set_float_property(actor="BP_SensorRig", component="TempoCamera",
-                      property="FOVAngle", value=60.0)
+from tempo_sim.TempoWorld.WorldControl_pb2 import Value
+
+tw.set_property(actor="BP_SensorRig", component="TempoCamera",
+                property="FOVAngle", value=Value(float_value=60.0))
 ```
 
 The field of view of your streaming images should narrow immediately. `FOVAngle` is not a

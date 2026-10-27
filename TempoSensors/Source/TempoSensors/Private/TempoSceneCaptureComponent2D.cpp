@@ -146,6 +146,11 @@ void FTextureRead::ExtractMeasurementHeader(float TransmissionTime, TempoSensors
 	MeasurementHeaderOut->mutable_capture_transform()->mutable_rotation()->set_p(SensorRotation.Pitch);
 	MeasurementHeaderOut->mutable_capture_transform()->mutable_rotation()->set_r(SensorRotation.Roll);
 	MeasurementHeaderOut->mutable_capture_transform()->mutable_rotation()->set_y(SensorRotation.Yaw);
+	// Unitless, so unconverted.
+	const FVector SensorScale = SensorTransform.GetScale3D();
+	MeasurementHeaderOut->mutable_capture_transform()->mutable_scale()->set_x(SensorScale.X);
+	MeasurementHeaderOut->mutable_capture_transform()->mutable_scale()->set_y(SensorScale.Y);
+	MeasurementHeaderOut->mutable_capture_transform()->mutable_scale()->set_z(SensorScale.Z);
 }
 
 UTempoSceneCaptureComponent2D::UTempoSceneCaptureComponent2D()

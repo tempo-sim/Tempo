@@ -17,7 +17,11 @@ class TEMPOMOVEMENT_API UTempoChaosWheeledVehicleMovementComponent : public UCha
 public:
 	UTempoChaosWheeledVehicleMovementComponent();
 
-	virtual FVector GetAngularVelocity() const override { return VehicleState.VehicleWorldAngularVelocity; }
+	// Chaos keeps VehicleWorldAngularVelocity in radians/s.
+	virtual FVector GetAngularVelocity() const override
+	{
+		return FMath::RadiansToDegrees(VehicleState.VehicleWorldAngularVelocity);
+	}
 
 	bool GetReverseEnabled() const { return bReverseEnabled; }
 

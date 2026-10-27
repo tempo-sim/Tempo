@@ -13,6 +13,9 @@ public class TempoWorld : TempoModuleRules
 			{
 				// Unreal
 				"Core",
+				// Public in this module because TempoWorldReflection.h is a public header that
+				// names FProperty, so consumers of it need CoreUObject's include paths too.
+				"CoreUObject",
 				// Tempo
 				"TempoCore",
 			}
@@ -22,7 +25,6 @@ public class TempoWorld : TempoModuleRules
 			new string[]
 			{
 				// Unreal
-				"CoreUObject",
 				"Engine",
 				"MassActors",
 				"MassEntity",

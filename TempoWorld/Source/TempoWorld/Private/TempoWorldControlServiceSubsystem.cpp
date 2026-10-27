@@ -7,10 +7,25 @@
 #include "TempoConversion.h"
 #include "TempoCoreUtils.h"
 #include "TempoWorldUtils.h"
+#include "TempoWorldReflection.h"
+#include "TempoWorldPropertyValues.h"
+#include "TempoWorldTransforms.h"
+
+#include "AssetRegistry/ARFilter.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "TempoWorldSchemaWalk.h"
+
+#include "Misc/EngineVersion.h"
 #include "TempoWorld.h"
 
 #include "EngineUtils.h"
 #include "Engine/EngineTypes.h"
+#include "Engine/GameInstance.h"
+#include "Engine/LocalPlayer.h"
+#include "Subsystems/EngineSubsystem.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "Subsystems/LocalPlayerSubsystem.h"
+#include "Subsystems/WorldSubsystem.h"
 #include "Engine/LatentActionManager.h"
 #include "Misc/ScopeExit.h"
 #if WITH_EDITOR
@@ -50,11 +65,20 @@ using GetScale3DResponse = TempoWorld::GetScale3DResponse;
 using ActivateComponentRequest = TempoWorld::ActivateComponentRequest;
 using DeactivateComponentRequest = TempoWorld::DeactivateComponentRequest;
 using GetAllActorsResponse = TempoWorld::GetAllActorsResponse;
+using GetActorsOfClassRequest = TempoWorld::GetActorsOfClassRequest;
+using GetAssetsRequest = TempoWorld::GetAssetsRequest;
+using GetAssetsResponse = TempoWorld::GetAssetsResponse;
 using GetAllComponentsRequest = TempoWorld::GetAllComponentsRequest;
 using GetAllComponentsResponse = TempoWorld::GetAllComponentsResponse;
 using GetActorPropertiesRequest = TempoWorld::GetActorPropertiesRequest;
 using GetComponentPropertiesRequest = TempoWorld::GetComponentPropertiesRequest;
 using GetPropertiesResponse = TempoWorld::GetPropertiesResponse;
+using GetPropertyRequest = TempoWorld::GetPropertyRequest;
+using GetPropertiesRequest = TempoWorld::GetPropertiesRequest;
+using GetPropertiesByNameResponse = TempoWorld::GetPropertiesByNameResponse;
+using DescribeClassesRequest = TempoWorld::DescribeClassesRequest;
+using DescribeClassesResponse = TempoWorld::DescribeClassesResponse;
+using NamedValue = TempoWorld::NamedValue;
 using GetActorFunctionsRequest = TempoWorld::GetActorFunctionsRequest;
 using GetComponentFunctionsRequest = TempoWorld::GetComponentFunctionsRequest;
 using GetFunctionsResponse = TempoWorld::GetFunctionsResponse;
@@ -108,6 +132,10 @@ using SetPropertyOp = TempoWorld::SetPropertyOp;
 using SetPropertyResult = TempoWorld::SetPropertyResult;
 using SetPropertiesRequest = TempoWorld::SetPropertiesRequest;
 using SetPropertiesResponse = TempoWorld::SetPropertiesResponse;
+using RunBatchRequest = TempoWorld::RunBatchRequest;
+using RunBatchResponse = TempoWorld::RunBatchResponse;
+using BatchOp = TempoWorld::BatchOp;
+using BatchOpResult = TempoWorld::BatchOpResult;
 
 FTempoWorldControlServiceActivated UTempoWorldControlServiceSubsystem::TempoWorldControlServiceActivated;
 FTempoWorldControlServiceDeactivated UTempoWorldControlServiceSubsystem::TempoWorldControlServiceDeactivated;
@@ -131,7 +159,8 @@ FVector ToUnrealScale(const TempoCore::Vector& Scale)
 
 FTransform ToUnrealTransform(const TempoCore::Transform& Transform)
 {
-	return FTransform(ToUnrealRotation(Transform.rotation()), ToUnrealLocation(Transform.location()));
+	return FTransform(ToUnrealRotation(Transform.rotation()), ToUnrealLocation(Transform.location()),
+		Transform.has_scale() ? ToUnrealScale(Transform.scale()) : FVector::OneVector);
 }
 
 TempoCore::Vector FromUnrealLocation(const FVector& Location)
@@ -169,6 +198,7 @@ TempoCore::Transform FromUnrealTransform(const FTransform& Transform)
 	TempoCore::Transform OutTransform;
 	*OutTransform.mutable_location() = FromUnrealLocation(Transform.GetLocation());
 	*OutTransform.mutable_rotation() = FromUnrealRotation(Transform.GetRotation().Rotator());
+	*OutTransform.mutable_scale() = FromUnrealScale(Transform.GetScale3D());
 	return OutTransform;
 }
 
@@ -189,8 +219,14 @@ void UTempoWorldControlServiceSubsystem::RegisterServices(FTempoServer& Server)
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetComponentRotation, &UTempoWorldControlServiceSubsystem::SetComponentRotation),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetComponentScale3D, &UTempoWorldControlServiceSubsystem::SetComponentScale3D),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetAllActors, &UTempoWorldControlServiceSubsystem::GetAllActors),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestGetActorsOfClass, &UTempoWorldControlServiceSubsystem::GetActorsOfClass),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestGetAssets, &UTempoWorldControlServiceSubsystem::GetAssets),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetAllComponents, &UTempoWorldControlServiceSubsystem::GetAllComponents),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetActorProperties, &UTempoWorldControlServiceSubsystem::GetActorProperties),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestGetProperty, &UTempoWorldControlServiceSubsystem::GetProperty),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestGetProperties, &UTempoWorldControlServiceSubsystem::GetProperties),
+		StreamingRequestHandler(&WorldControlAsyncService::RequestStreamProperty, &UTempoWorldControlServiceSubsystem::StreamProperty),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestDescribeClasses, &UTempoWorldControlServiceSubsystem::DescribeClasses),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetComponentProperties, &UTempoWorldControlServiceSubsystem::GetComponentProperties),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetActorFunctions, &UTempoWorldControlServiceSubsystem::GetActorFunctions),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestGetComponentFunctions, &UTempoWorldControlServiceSubsystem::GetComponentFunctions),
@@ -244,7 +280,8 @@ void UTempoWorldControlServiceSubsystem::RegisterServices(FTempoServer& Server)
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetComponentSetProperty, &UTempoWorldControlServiceSubsystem::SetProperty<SetComponentSetPropertyRequest>),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetProperties, &UTempoWorldControlServiceSubsystem::SetProperties),
 		SimpleRequestHandler(&WorldControlAsyncService::RequestSetProperty, &UTempoWorldControlServiceSubsystem::SetPropertyValue),
-		SimpleRequestHandler(&WorldControlAsyncService::RequestCallFunction, &UTempoWorldControlServiceSubsystem::CallObjectFunction)
+		SimpleRequestHandler(&WorldControlAsyncService::RequestCallFunction, &UTempoWorldControlServiceSubsystem::CallObjectFunction),
+		SimpleRequestHandler(&WorldControlAsyncService::RequestRunBatch, &UTempoWorldControlServiceSubsystem::RunBatch)
 	);
 }
 
@@ -313,8 +350,6 @@ void UTempoWorldControlServiceSubsystem::SpawnActor(const SpawnActorRequest& Req
 	}
 
 	FTransform SpawnTransform = ToUnrealTransform(Request.transform());
-	FVector SpawnLocation = SpawnTransform.GetLocation();
-	FRotator SpawnRotation = SpawnTransform.GetRotation().Rotator();
 
 	if (!Request.relative_to_actor().empty())
 	{
@@ -326,19 +361,24 @@ void UTempoWorldControlServiceSubsystem::SpawnActor(const SpawnActorRequest& Req
 			ResponseContinuation.ExecuteIfBound(SpawnActorResponse(), grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 			return;
 		}
+		// The scale is absolute, as SetActorTransform's is: composed with unit scale, so neither the
+		// frame's scale nor a negative requested one (which FTransform composes through a matrix)
+		// can disturb the composed location and rotation, then restored as given.
+		const FVector SpawnScale = SpawnTransform.GetScale3D();
+		SpawnTransform.SetScale3D(FVector::OneVector);
 		SpawnTransform = SpawnTransform * RelativeToActor->GetActorTransform();
-		SpawnLocation = SpawnTransform.GetLocation();
-		SpawnRotation = SpawnTransform.GetRotation().Rotator();
+		SpawnTransform.SetScale3D(SpawnScale);
 	}
 
 	FActorSpawnParameters SpawnParameters;
 	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 	const AActor* SpawnedActor = Request.deferred()
 		? World->SpawnActorDeferred<AActor>(Class, SpawnTransform, nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn)
-		: World->SpawnActor(Class, &SpawnLocation, &SpawnRotation, SpawnParameters);
+		: World->SpawnActor(Class, &SpawnTransform, SpawnParameters);
 
 	if (!SpawnedActor)
 	{
+		const FVector SpawnLocation = SpawnTransform.GetLocation();
 		const FString ErrorMsg = FString::Printf(TEXT("Failed to spawn actor of type '%s' at location (%f, %f, %f)"), *ActorTypeName, SpawnLocation.X, SpawnLocation.Y, SpawnLocation.Z);
 		ResponseContinuation.ExecuteIfBound(SpawnActorResponse(), grpc::Status(grpc::ABORTED, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
 		return;
@@ -842,6 +882,42 @@ namespace
 	}
 }
 
+namespace
+{
+	template <typename RequestType>
+	grpc::Status GetRequestedScaleImpl(const RequestType& Request, const TCHAR* RequestName, TOptional<FVector>& OutScale)
+	{
+PRAGMA_DISABLE_DEPRECATION_WARNINGS
+		const bool bHasDeprecatedScale = Request.has_scale();
+		const TempoCore::Vector& DeprecatedScale = Request.scale();
+PRAGMA_ENABLE_DEPRECATION_WARNINGS
+		if (Request.transform().has_scale() && bHasDeprecatedScale)
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("%s request sets both transform.scale and the deprecated scale; set only transform.scale"), RequestName);
+			return grpc::Status(grpc::INVALID_ARGUMENT, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+		if (Request.transform().has_scale())
+		{
+			OutScale = ToUnrealScale(Request.transform().scale());
+		}
+		else if (bHasDeprecatedScale)
+		{
+			OutScale = ToUnrealScale(DeprecatedScale);
+		}
+		return grpc::Status_OK;
+	}
+}
+
+grpc::Status GetRequestedScale(const SetActorTransformRequest& Request, TOptional<FVector>& OutScale)
+{
+	return GetRequestedScaleImpl(Request, TEXT("SetActorTransform"), OutScale);
+}
+
+grpc::Status GetRequestedScale(const SetComponentTransformRequest& Request, TOptional<FVector>& OutScale)
+{
+	return GetRequestedScaleImpl(Request, TEXT("SetComponentTransform"), OutScale);
+}
+
 void UTempoWorldControlServiceSubsystem::SetActorTransform(const TempoWorld::SetActorTransformRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const
 {
 	AActor* Actor = nullptr;
@@ -860,10 +936,19 @@ void UTempoWorldControlServiceSubsystem::SetActorTransform(const TempoWorld::Set
 		return;
 	}
 
+	TOptional<FVector> Scale;
+	const grpc::Status ScaleStatus = GetRequestedScale(Request, Scale);
+	if (!ScaleStatus.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), ScaleStatus);
+		return;
+	}
+
 	// Start from where the actor already is, then overlay only the members the request supplied.
 	// Members it left unset are identity in Requested, but they are never read, so composing them
-	// through the reference frame costs nothing.
-	const FTransform Requested = ToUnrealTransform(Request.transform()) * Frame;
+	// through the reference frame costs nothing. The scale is left out of the composition; see below.
+	const FTransform Requested = FTransform(ToUnrealRotation(Request.transform().rotation()),
+		ToUnrealLocation(Request.transform().location())) * Frame;
 	FTransform Result = Actor->GetActorTransform();
 
 	if (Request.transform().has_location())
@@ -876,9 +961,9 @@ void UTempoWorldControlServiceSubsystem::SetActorTransform(const TempoWorld::Set
 	}
 	// Scale is deliberately absolute: composing a non-uniform scale through a rotated frame does
 	// not survive as an FTransform, so the reference frame never applies to it.
-	if (Request.has_scale())
+	if (Scale.IsSet())
 	{
-		Result.SetScale3D(ToUnrealScale(Request.scale()));
+		Result.SetScale3D(Scale.GetValue());
 	}
 
 	Actor->SetActorTransform(Result, /*bSweep=*/false, /*OutSweepHitResult=*/nullptr, TransformTeleport);
@@ -991,6 +1076,14 @@ void UTempoWorldControlServiceSubsystem::SetComponentTransform(const TempoWorld:
 		return;
 	}
 
+	TOptional<FVector> Scale;
+	const grpc::Status ScaleStatus = GetRequestedScale(Request, Scale);
+	if (!ScaleStatus.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), ScaleStatus);
+		return;
+	}
+
 	// Same partial-update rule as SetActorTransform, read back from whichever space the caller is
 	// setting so that an unset member round-trips to exactly the value it already had.
 	const FTransform Requested = ToUnrealTransform(Request.transform());
@@ -1004,9 +1097,9 @@ void UTempoWorldControlServiceSubsystem::SetComponentTransform(const TempoWorld:
 	{
 		Result.SetRotation(Requested.GetRotation());
 	}
-	if (Request.has_scale())
+	if (Scale.IsSet())
 	{
-		Result.SetScale3D(ToUnrealScale(Request.scale()));
+		Result.SetScale3D(Scale.GetValue());
 	}
 
 	if (Request.relative_to_world())
@@ -1129,7 +1222,10 @@ void UTempoWorldControlServiceSubsystem::GetActorTransform(const TempoWorld::Get
 	*Response.mutable_transform() = FromUnrealTransform(Transform);
 	// The actor's own world scale, not Transform's - Transform is expressed in relative_to_actor's
 	// frame, and scale is never composed through that frame on the way in or the way out.
-	*Response.mutable_scale() = FromUnrealScale(WorldScale);
+	*Response.mutable_transform()->mutable_scale() = FromUnrealScale(WorldScale);
+PRAGMA_DISABLE_DEPRECATION_WARNINGS
+	*Response.mutable_scale() = Response.transform().scale();
+PRAGMA_ENABLE_DEPRECATION_WARNINGS
 
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
@@ -1198,7 +1294,9 @@ void UTempoWorldControlServiceSubsystem::GetComponentTransform(const TempoWorld:
 	*Response.mutable_transform() = FromUnrealTransform(Transform);
 	// Unlike the actor's, a component's scale does follow the frame - SetComponentTransform's
 	// scale honors relative_to_world the same way.
-	*Response.mutable_scale() = FromUnrealScale(Transform.GetScale3D());
+PRAGMA_DISABLE_DEPRECATION_WARNINGS
+	*Response.mutable_scale() = Response.transform().scale();
+PRAGMA_ENABLE_DEPRECATION_WARNINGS
 
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
@@ -1325,11 +1423,71 @@ void UTempoWorldControlServiceSubsystem::DeactivateComponent(const DeactivateCom
 	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), grpc::Status_OK);
 }
 
-template <typename RequestType>
-grpc::Status GetObjectForRequest(const UWorld* World, const RequestType& Request, UObject*& Object)
+// The instance of a subsystem class that belongs to this world, wherever that class keeps one. Each
+// kind of subsystem has its own owner -- the world, its game instance, the engine, a local player --
+// and a lookup by base class finds a derived one, so asking for an abstract base is fine too.
+grpc::Status GetSubsystemForName(const UWorld* World, const FString& SubsystemName, UObject*& Object)
 {
-	const FString ActorName(UTF8_TO_TCHAR(Request.actor().c_str()));
-	const FString ComponentName = FString(UTF8_TO_TCHAR(Request.component().c_str()));
+	UClass* Class = GetSubClassWithName<USubsystem>(SubsystemName);
+	if (!Class)
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("No subsystem class '%s' found (must be a subclass of USubsystem)"), *SubsystemName);
+		return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+
+	USubsystem* Subsystem = nullptr;
+	if (Class->IsChildOf<UWorldSubsystem>())
+	{
+		Subsystem = World->GetSubsystemBase(Class);
+	}
+	else if (Class->IsChildOf<UGameInstanceSubsystem>())
+	{
+		if (const UGameInstance* GameInstance = World->GetGameInstance())
+		{
+			Subsystem = GameInstance->GetSubsystemBase(Class);
+		}
+	}
+	else if (Class->IsChildOf<UEngineSubsystem>())
+	{
+		Subsystem = GEngine ? GEngine->GetEngineSubsystemBase(Class) : nullptr;
+	}
+	else if (Class->IsChildOf<ULocalPlayerSubsystem>())
+	{
+		const UGameInstance* GameInstance = World->GetGameInstance();
+		if (const ULocalPlayer* LocalPlayer = GameInstance ? GameInstance->GetFirstGamePlayer() : nullptr)
+		{
+			Subsystem = LocalPlayer->GetSubsystemBase(Class);
+		}
+	}
+	else
+	{
+		// An editor subsystem, or a kind this does not know the owner of.
+		const FString ErrorMsg = FString::Printf(TEXT("'%s' is not a world, game instance, engine or local player subsystem"), *SubsystemName);
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+
+	if (!Subsystem)
+	{
+		// A subsystem can decline to exist (ShouldCreateSubsystem), so a real class is no promise.
+		const FString ErrorMsg = FString::Printf(TEXT("No '%s' subsystem exists in this world"), *SubsystemName);
+		return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	}
+
+	Object = Subsystem;
+	return grpc::Status_OK;
+}
+
+grpc::Status GetObjectForName(const UWorld* World, const FString& ActorName,
+	const FString& ComponentName, const FString& SubsystemName, UObject*& Object)
+{
+	if (!SubsystemName.IsEmpty())
+	{
+		if (!ActorName.IsEmpty() || !ComponentName.IsEmpty())
+		{
+			return grpc::Status(grpc::FAILED_PRECONDITION, "a subsystem is addressed on its own, without an actor or component");
+		}
+		return GetSubsystemForName(World, SubsystemName, Object);
+	}
 
 	if (ActorName.IsEmpty())
 	{
@@ -1363,6 +1521,20 @@ grpc::Status GetObjectForRequest(const UWorld* World, const RequestType& Request
 	return grpc::Status_OK;
 }
 
+// Every RPC here addresses an object the same way: by actor name and an optional component name, or
+// -- for the typed requests, which carry the field -- by subsystem class instead.
+template <typename RequestType>
+grpc::Status GetObjectForRequest(const UWorld* World, const RequestType& Request, UObject*& Object)
+{
+	FString SubsystemName;
+	if constexpr (requires { Request.subsystem(); })
+	{
+		SubsystemName = FString(UTF8_TO_TCHAR(Request.subsystem().c_str()));
+	}
+	return GetObjectForName(World, FString(UTF8_TO_TCHAR(Request.actor().c_str())),
+		FString(UTF8_TO_TCHAR(Request.component().c_str())), SubsystemName, Object);
+}
+
 void MarkRenderStateDirty(UObject* Object)
 {
 	if (AActor* Actor = Cast<AActor>(Object))
@@ -1375,15 +1547,120 @@ void MarkRenderStateDirty(UObject* Object)
 	}
 }
 
+namespace
+{
+	void DescribeActor(const AActor* Actor, TempoWorld::ActorDescriptor& Out)
+	{
+		Out.set_name(TCHAR_TO_UTF8(*UTempoCoreUtils::GetActorIdentifier(Actor)));
+		Out.set_actor_type(TCHAR_TO_UTF8(*Actor->GetClass()->GetName()));
+		Out.set_class_path(TCHAR_TO_UTF8(*Actor->GetClass()->GetPathName()));
+	}
+}
+
 void UTempoWorldControlServiceSubsystem::GetAllActors(const TempoCore::Empty& Request, const TResponseDelegate<GetAllActorsResponse>& ResponseContinuation) const
 {
 	GetAllActorsResponse Response;
 
 	for (const AActor* Actor : TActorRange<AActor>(GetWorld()))
 	{
-		TempoWorld::ActorDescriptor* ActorDescriptor = Response.add_actors();
-		ActorDescriptor->set_name(TCHAR_TO_UTF8(*UTempoCoreUtils::GetActorIdentifier(Actor)));
-		ActorDescriptor->set_actor_type(TCHAR_TO_UTF8(*Actor->GetClass()->GetName()));
+		DescribeActor(Actor, *Response.add_actors());
+	}
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+}
+
+void UTempoWorldControlServiceSubsystem::GetAssets(const GetAssetsRequest& Request,
+	const TResponseDelegate<GetAssetsResponse>& ResponseContinuation) const
+{
+	const FString TypeName(UTF8_TO_TCHAR(Request.asset_type().c_str()));
+	if (TypeName.IsEmpty())
+	{
+		ResponseContinuation.ExecuteIfBound(GetAssetsResponse(),
+			grpc::Status(grpc::FAILED_PRECONDITION, "asset_type must be specified"));
+		return;
+	}
+
+	const UClass* Class = GetSubClassWithName<UObject>(TypeName);
+	if (!Class)
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Did not find asset class '%s'"), *TypeName);
+		ResponseContinuation.ExecuteIfBound(GetAssetsResponse(),
+			grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
+		return;
+	}
+
+	FAssetRegistryModule& AssetRegistryModule =
+		FModuleManager::LoadModuleChecked<FAssetRegistryModule>(FName("AssetRegistry"));
+	const IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
+
+	FARFilter Filter;
+	Filter.ClassPaths.Add(Class->GetClassPathName());
+	Filter.bRecursiveClasses = Request.include_subclasses();
+	Filter.bRecursivePaths = true;
+
+	const FString PathPrefix(UTF8_TO_TCHAR(Request.path_prefix().c_str()));
+	if (!PathPrefix.IsEmpty())
+	{
+		Filter.PackagePaths.Add(FName(*PathPrefix));
+	}
+
+	TArray<FAssetData> Assets;
+	AssetRegistry.GetAssets(Filter, Assets);
+
+	// Sorted, so two calls against the same build agree and a diff of the answers is readable. The
+	// registry's own order is an implementation detail.
+	//
+	// Case-sensitively, explicitly: FString's < is case-insensitive, which would order these
+	// differently from any client sorting the same strings itself.
+	Assets.Sort([](const FAssetData& A, const FAssetData& B)
+	{
+		return A.GetObjectPathString().Compare(B.GetObjectPathString(), ESearchCase::CaseSensitive) < 0;
+	});
+
+	GetAssetsResponse Response;
+	for (const FAssetData& Asset : Assets)
+	{
+		TempoWorld::AssetDescriptor* Descriptor = Response.add_assets();
+		Descriptor->set_name(TCHAR_TO_UTF8(*Asset.AssetName.ToString()));
+		Descriptor->set_path(TCHAR_TO_UTF8(*Asset.GetObjectPathString()));
+		Descriptor->set_class_path(TCHAR_TO_UTF8(*Asset.AssetClassPath.ToString()));
+	}
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+}
+
+void UTempoWorldControlServiceSubsystem::GetActorsOfClass(const GetActorsOfClassRequest& Request,
+	const TResponseDelegate<GetAllActorsResponse>& ResponseContinuation) const
+{
+	const FString ClassName(UTF8_TO_TCHAR(Request.actor_type().c_str()));
+	if (ClassName.IsEmpty())
+	{
+		ResponseContinuation.ExecuteIfBound(GetAllActorsResponse(),
+			grpc::Status(grpc::FAILED_PRECONDITION, "actor_type must be specified"));
+		return;
+	}
+
+	// Resolved through the one helper every client-supplied class name goes through, which accepts
+	// a path as well as a name (AGENTS.md section 6).
+	UClass* Class = GetSubClassWithName<AActor>(ClassName);
+	if (!Class)
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Did not find actor class '%s'"), *ClassName);
+		ResponseContinuation.ExecuteIfBound(GetAllActorsResponse(),
+			grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
+		return;
+	}
+
+	GetAllActorsResponse Response;
+	for (const AActor* Actor : TActorRange<AActor>(GetWorld()))
+	{
+		const UClass* ActorClass = Actor->GetClass();
+		const bool bMatches = Request.include_subclasses() ? ActorClass->IsChildOf(Class)
+			: ActorClass == Class;
+		if (bMatches)
+		{
+			DescribeActor(Actor, *Response.add_actors());
+		}
 	}
 
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
@@ -1414,6 +1691,7 @@ void UTempoWorldControlServiceSubsystem::GetAllComponents(const GetAllComponents
 		TempoWorld::ComponentDescriptor* ComponentDescriptor = Response.add_components();
 		ComponentDescriptor->set_name(TCHAR_TO_UTF8(*Component->GetName()));
 		ComponentDescriptor->set_component_type(TCHAR_TO_UTF8(*Component->GetClass()->GetName()));
+		ComponentDescriptor->set_class_path(TCHAR_TO_UTF8(*Component->GetClass()->GetPathName()));
 		ComponentDescriptor->set_actor(TCHAR_TO_UTF8(*UTempoCoreUtils::GetActorIdentifier(Actor)));
 	}
 
@@ -1425,64 +1703,26 @@ void UTempoWorldControlServiceSubsystem::GetAllComponents(const GetAllComponents
 // wasn't cooked (deleted asset, editor-only module, plugin disabled for the packaged target).
 // The editor always has the type loaded, so this only ever bites in a packaged build - and it
 // bites hard: FObjectProperty::GetCPPType() and friends check() on it.
-bool HasResolvedType(const FProperty* Property)
-{
-	// Covers FObjectProperty, FClassProperty, FSoftObjectProperty, FSoftClassProperty, FWeakObjectProperty, ...
-	if (const FObjectPropertyBase* ObjectProperty = CastField<FObjectPropertyBase>(Property))
-	{
-		if (!ObjectProperty->PropertyClass)
-		{
-			return false;
-		}
-	}
-	if (const FClassProperty* ClassProperty = CastField<FClassProperty>(Property))
-	{
-		return ClassProperty->MetaClass != nullptr;
-	}
-	if (const FSoftClassProperty* SoftClassProperty = CastField<FSoftClassProperty>(Property))
-	{
-		return SoftClassProperty->MetaClass != nullptr;
-	}
-	if (const FInterfaceProperty* InterfaceProperty = CastField<FInterfaceProperty>(Property))
-	{
-		return InterfaceProperty->InterfaceClass != nullptr;
-	}
-	if (const FEnumProperty* EnumProperty = CastField<FEnumProperty>(Property))
-	{
-		return EnumProperty->GetEnum() != nullptr;
-	}
-	if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
-	{
-		return StructProperty->Struct != nullptr;
-	}
-	return true;
-}
-
 // Render one property as a (type, value) pair of strings. Pass a null `Value` to ask for the
 // type alone. Shared by GetProperties and by CallFunction, so a function result reads exactly
 // like the same value read back off a property.
 void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, FString& Type, FString* Value)
 {
-	if (!HasResolvedType(Property))
+	// The type is whatever the one classifier says it is; this function's remaining job is reading
+	// the bytes, which needs the concrete FProperty and so keeps its own cast chain below.
+	Type = TempoWorldReflection::GetTypeString(Property);
+	if (Type == TEXT("unsupported"))
 	{
-		UE_LOG(LogTempoWorld, Warning, TEXT("Property '%s' names a type that isn't present in this build. Skipping it."),
-			*GetFullNameSafe(Property));
-		Type = TEXT("unsupported");
-		return;
-	}
-
-	if (Property->ArrayDim != 1)
-	{
-		// UProperties can be C-style arrays (who knew?), and this will be indicated by a non-1 ArrayDim member.
-		// For example, FPostProcessSettings has FLinearColor LensFlareTints[8]
-		// We don't support these types
-		Type = TEXT("unsupported");
+		if (!TempoWorldReflection::HasResolvedType(Property))
+		{
+			UE_LOG(LogTempoWorld, Warning, TEXT("Property '%s' names a type that isn't present in this build. Skipping it."),
+				*GetFullNameSafe(Property));
+		}
 		return;
 	}
 
 	if (const FStrProperty* StrProperty = CastField<FStrProperty>(Property))
 	{
-		Type = TEXT("string");
 		if (Value)
 		{
 			StrProperty->GetValue_InContainer(Container, Value);
@@ -1490,7 +1730,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FNameProperty* NameProperty = CastField<FNameProperty>(Property))
 	{
-		Type = TEXT("string");
 		if (Value)
 		{
 			FName ValueName;
@@ -1500,7 +1739,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FTextProperty* TextProperty = CastField<FTextProperty>(Property))
 	{
-		Type = TEXT("string");
 		if (Value)
 		{
 			FText ValueText;
@@ -1510,7 +1748,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FBoolProperty* BoolProperty = CastField<FBoolProperty>(Property))
 	{
-		Type = TEXT("bool");
 		if (Value)
 		{
 			// Read through the property rather than with GetValue_InContainer, which raw-copies
@@ -1521,7 +1758,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FIntProperty* IntProperty = CastField<FIntProperty>(Property))
 	{
-		Type = TEXT("int");
 		if (Value)
 		{
 			int32 ValueInt;
@@ -1531,7 +1767,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FInt64Property* Int64Property = CastField<FInt64Property>(Property))
 	{
-		Type = TEXT("int64");
 		if (Value)
 		{
 			int64 ValueInt;
@@ -1541,7 +1776,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FInt16Property* Int16Property = CastField<FInt16Property>(Property))
 	{
-		Type = TEXT("int");
 		if (Value)
 		{
 			int16 ValueInt;
@@ -1551,7 +1785,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FInt8Property* Int8Property = CastField<FInt8Property>(Property))
 	{
-		Type = TEXT("int");
 		if (Value)
 		{
 			int8 ValueInt;
@@ -1561,7 +1794,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FUInt64Property* UInt64Property = CastField<FUInt64Property>(Property))
 	{
-		Type = TEXT("int64");
 		if (Value)
 		{
 			uint64 ValueInt;
@@ -1571,7 +1803,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FUInt32Property* UInt32Property = CastField<FUInt32Property>(Property))
 	{
-		Type = TEXT("int64");
 		if (Value)
 		{
 			uint32 ValueInt;
@@ -1581,7 +1812,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FUInt16Property* UInt16Property = CastField<FUInt16Property>(Property))
 	{
-		Type = TEXT("int");
 		if (Value)
 		{
 			uint16 ValueInt;
@@ -1591,7 +1821,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FFloatProperty* FloatProperty = CastField<FFloatProperty>(Property))
 	{
-		Type = TEXT("float");
 		if (Value)
 		{
 			float ValueFloat;
@@ -1601,7 +1830,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FDoubleProperty* DoubleProperty = CastField<FDoubleProperty>(Property))
 	{
-		Type = TEXT("double");
 		if (Value)
 		{
 			double ValueDouble;
@@ -1611,8 +1839,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FEnumProperty* EnumProperty = CastField<FEnumProperty>(Property))
 	{
-		const FString EnumName = EnumProperty->GetEnum()->GetName();
-		Type = EnumName;
 		if (Value)
 		{
 			const FNumericProperty* EnumIntProperty = EnumProperty->GetUnderlyingProperty();
@@ -1626,18 +1852,15 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 		// Bytes might be enums, or just bytes
 		if (ByteProperty->Enum)
 		{
-			const FString EnumName = ByteProperty->Enum->GetName();
-			Type = EnumName;
 			if (Value)
 			{
 				uint8 ValueIndex;
 				ByteProperty->GetValue_InContainer(Container, &ValueIndex);
-				*Value = ByteProperty->Enum->GetAuthoredNameStringByIndex(ValueIndex);
+				*Value = ByteProperty->Enum->GetAuthoredNameStringByValue(ValueIndex);
 			}
 		}
 		else
 		{
-			Type = TEXT("int");
 			if (Value)
 			{
 				uint8 ValueByte;
@@ -1648,16 +1871,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FObjectProperty* ObjectProperty = CastField<FObjectProperty>(Property))
 	{
-		FString InnerType;
-		const FString OuterType =  ObjectProperty->GetCPPType(&InnerType, 0);
-		if (InnerType.IsEmpty())
-		{
-			Type = OuterType;
-		}
-		else
-		{
-			Type = FString::Printf(TEXT("%s<%s>"), *OuterType, *InnerType);
-		}
 		if (Value)
 		{
 			TObjectPtr<UObject> ValueObject;
@@ -1682,16 +1895,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	else if (const FSoftObjectProperty* SoftObjectProperty = CastField<FSoftObjectProperty>(Property))
 	{
 		// Catches both FSoftObjectProperty and FSoftClassProperty (the latter derives from the former).
-		FString InnerType;
-		const FString OuterType = SoftObjectProperty->GetCPPType(&InnerType, 0);
-		if (InnerType.IsEmpty())
-		{
-			Type = OuterType;
-		}
-		else
-		{
-			Type = FString::Printf(TEXT("%s<%s>"), *OuterType, *InnerType);
-		}
 		if (Value)
 		{
 			const FSoftObjectPtr& Soft = SoftObjectProperty->GetPropertyValue_InContainer(Container);
@@ -1699,11 +1902,25 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 			*Value = Path.IsEmpty() ? TEXT("null") : Path;
 		}
 	}
+	else if (const FWeakObjectProperty* WeakObjectProperty = CastField<FWeakObjectProperty>(Property))
+	{
+		if (Value)
+		{
+			const UObject* ValueObject = WeakObjectProperty->GetObjectPropertyValue_InContainer(Container);
+			if (const AActor* Actor = Cast<AActor>(ValueObject))
+			{
+				*Value = UTempoCoreUtils::GetActorIdentifier(Actor);
+			}
+			else
+			{
+				*Value = ValueObject ? ValueObject->GetName() : TEXT("null");
+			}
+		}
+	}
 	else if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
 	{
 		if (StructProperty->Struct->GetStructCPPName() == TEXT("FVector"))
 		{
-			Type = TEXT("vector");
 			if (Value)
 			{
 				FVector ValueVector;
@@ -1713,39 +1930,35 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 		}
 		else if (StructProperty->Struct->GetStructCPPName() == TEXT("FRotator"))
 		{
-			Type = TEXT("rotator");
 			if (Value)
 			{
 				FRotator ValueRotator;
 				StructProperty->GetValue_InContainer(Container, &ValueRotator);
-				ValueRotator = QuantityConverter<Deg2Rad,L2R>::Convert(ValueRotator);
+				// In degrees, as stored, matching the typed rotator_value this property reads as.
 				*Value = FString::Printf(TEXT("{R:%f, P:%f, Y:%f}"), ValueRotator.Roll, ValueRotator.Pitch, ValueRotator.Yaw);
 			}
 		}
 		else if (StructProperty->Struct->GetStructCPPName() == TEXT("FColor"))
 		{
-			Type = TEXT("color");
 			if (Value)
 			{
 				FColor ValueColor;
 				StructProperty->GetValue_InContainer(Container, &ValueColor);
-				*Value = FString::Printf(TEXT("{R:%d, G:%d, B:%d}"), ValueColor.R, ValueColor.G, ValueColor.B);
+				*Value = FString::Printf(TEXT("{R:%d, G:%d, B:%d, A:%d}"), ValueColor.R, ValueColor.G, ValueColor.B, ValueColor.A);
 			}
 		}
 		else if (StructProperty->Struct->GetStructCPPName() == TEXT("FLinearColor"))
 		{
-			Type = TEXT("color");
 			if (Value)
 			{
 				FLinearColor ValueLinearColor;
 				StructProperty->GetValue_InContainer(Container, &ValueLinearColor);
-				const FColor ValueColor = ValueLinearColor.ToFColor(true);
-				*Value = FString::Printf(TEXT("{R:%d, G:%d, B:%d}"), ValueColor.R, ValueColor.G, ValueColor.B);
+				// Linear and unclamped, matching the typed linear_color_value this property reads as.
+				*Value = FString::Printf(TEXT("{R:%f, G:%f, B:%f, A:%f}"), ValueLinearColor.R, ValueLinearColor.G, ValueLinearColor.B, ValueLinearColor.A);
 			}
 		}
 		else
 		{
-			Type = StructProperty->Struct->GetStructCPPName();
 			if (Value)
 			{
 				*Value = TEXT("{");
@@ -1765,9 +1978,8 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
 	{
-		FString InnerType = TEXT("unsupported");
-		// First, get the inner type (even if the array is empty!)
-		GetPropertyTypeAndValue(nullptr, ArrayProperty->Inner, InnerType, nullptr);
+		// The inner type is known even when the array is empty.
+		const FString InnerType = TempoWorldReflection::GetTypeString(ArrayProperty->Inner);
 		if (Value)
 		{
 			*Value = TEXT("[");
@@ -1785,15 +1997,12 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 			}
 			Value->Append(TEXT("]"));
 		}
-		Type = FString::Printf(TEXT("array<%s>"), *InnerType);
 	}
 	else if (const FMapProperty* MapProperty = CastField<FMapProperty>(Property))
 	{
-		FString KeyType = TEXT("unsupported");
-		FString ValueType = TEXT("unsupported");
-		// Get key and value types (even if the map is empty)
-		GetPropertyTypeAndValue(nullptr, MapProperty->KeyProp, KeyType, nullptr);
-		GetPropertyTypeAndValue(nullptr, MapProperty->ValueProp, ValueType, nullptr);
+		// Key and value types are known even when the map is empty.
+		const FString KeyType = TempoWorldReflection::GetTypeString(MapProperty->KeyProp);
+		const FString ValueType = TempoWorldReflection::GetTypeString(MapProperty->ValueProp);
 		if (Value)
 		{
 			*Value = TEXT("{");
@@ -1820,13 +2029,11 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 			}
 			Value->Append(TEXT("}"));
 		}
-		Type = FString::Printf(TEXT("map<%s,%s>"), *KeyType, *ValueType);
 	}
 	else if (const FSetProperty* SetProperty = CastField<FSetProperty>(Property))
 	{
-		FString InnerType = TEXT("unsupported");
-		// Get the inner type (even if the set is empty)
-		GetPropertyTypeAndValue(nullptr, SetProperty->ElementProp, InnerType, nullptr);
+		// The element type is known even when the set is empty.
+		const FString InnerType = TempoWorldReflection::GetTypeString(SetProperty->ElementProp);
 		if (Value)
 		{
 			*Value = TEXT("{");
@@ -1848,11 +2055,6 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 			}
 			Value->Append(TEXT("}"));
 		}
-		Type = FString::Printf(TEXT("set<%s>"), *InnerType);
-	}
-	else
-	{
-		Type = TEXT("unsupported");
 	}
 }
 
@@ -1955,40 +2157,160 @@ void UTempoWorldControlServiceSubsystem::GetComponentProperties(const GetCompone
 	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
-FString SplitPropertyName(FString& PropertyName)
+namespace
 {
-	// If a ']' appears before any '[', we are inside a bracket scope (e.g. parsing the contents
-	// of MyMap[...]) and only ']' should terminate the segment - '.' inside the brackets is part
-	// of the key (relevant for map keys containing dots, like FString or FName keys).
-	int32 OpenBracketIdx = INDEX_NONE;
-	int32 CloseBracketIdx = INDEX_NONE;
-	PropertyName.FindChar('[', OpenBracketIdx);
-	PropertyName.FindChar(']', CloseBracketIdx);
-	const bool bInBracket = CloseBracketIdx != INDEX_NONE && (OpenBracketIdx == INDEX_NONE || CloseBracketIdx < OpenBracketIdx);
-
-	for (int32 CharIdx = 0; CharIdx < PropertyName.Len(); ++CharIdx)
+	// Fill a TypeDescriptor from the classifier, following container nesting as far as it goes.
+	void WriteTypeDescriptor(const TempoWorldReflection::FTypeInfo& Type, TempoWorld::TypeDescriptor& Out)
 	{
-		if (!bInBracket && (PropertyName[CharIdx] == '.' || PropertyName[CharIdx] == '['))
+		using namespace TempoWorldReflection;
+		Out.set_kind(TCHAR_TO_UTF8(GetKindName(Type.Kind)));
+		Out.set_property_type(TCHAR_TO_UTF8(*Type.TypeString));
+		if (!Type.UnsupportedReason.IsEmpty())
 		{
-			// Chop everything before
-			const FString FirstPropertyName = PropertyName.LeftChop(PropertyName.Len() - CharIdx);
-			// Chop everything after
-			PropertyName.RightChopInline(CharIdx + 1);
-			return FirstPropertyName;
+			Out.set_unsupported_reason(TCHAR_TO_UTF8(*Type.UnsupportedReason));
 		}
-		if (PropertyName[CharIdx] == ']')
+		if (!Type.EnumName.IsEmpty())
 		{
-			// Chop everything before
-			const FString FirstPropertyName = PropertyName.LeftChop(PropertyName.Len() - CharIdx);
-			// Chop everything after (also chopping the '.' after the ']', if it's there)
-			PropertyName.RightChopInline(CharIdx + (CharIdx + 1 < PropertyName.Len() && PropertyName[CharIdx + 1] == '.' ? 2 : 1));
-			return FirstPropertyName;
+			Out.set_enum_name(TCHAR_TO_UTF8(*Type.EnumName));
+		}
+		if (Type.Kind == EValueKind::Struct && !Type.StructName.IsEmpty())
+		{
+			Out.set_struct_name(TCHAR_TO_UTF8(*Type.StructName));
+		}
+		if (!Type.ClassPath.IsEmpty())
+		{
+			Out.set_class_path(TCHAR_TO_UTF8(*Type.ClassPath));
+		}
+		if (Type.ElementType.IsValid())
+		{
+			WriteTypeDescriptor(*Type.ElementType, *Out.mutable_element());
+		}
+		if (Type.KeyType.IsValid())
+		{
+			WriteTypeDescriptor(*Type.KeyType, *Out.mutable_key());
 		}
 	}
 
-	const FString FirstPropertyName = PropertyName;
-	PropertyName.Empty(); // Nothing left
-	return FirstPropertyName;
+	void WriteMemberDescriptor(const TempoWorldSchemaWalk::FMember& Member, TempoWorld::ClassPropertyDescriptor& Out)
+	{
+		Out.set_name(TCHAR_TO_UTF8(*Member.Name));
+		WriteTypeDescriptor(Member.Type, *Out.mutable_value_type());
+		Out.set_readable(Member.Type.bBlueprintVisible);
+		Out.set_writable(Member.Type.IsWritable());
+		Out.set_value_expressible(Member.Type.IsValueExpressible());
+		Out.set_blueprint_getter(TCHAR_TO_UTF8(*Member.Type.BlueprintGetter));
+		Out.set_blueprint_setter(TCHAR_TO_UTF8(*Member.Type.BlueprintSetter));
+		Out.set_category(TCHAR_TO_UTF8(*Member.Type.Category));
+		Out.set_tooltip(TCHAR_TO_UTF8(*Member.Type.Tooltip));
+	}
+}
+
+void UTempoWorldControlServiceSubsystem::DescribeClasses(const DescribeClassesRequest& Request,
+	const TResponseDelegate<DescribeClassesResponse>& ResponseContinuation) const
+{
+	using namespace TempoWorldReflection;
+
+	TempoWorldSchemaWalk::FOptions Options;
+	for (const std::string& BaseClass : Request.base_classes())
+	{
+		Options.BaseClasses.Add(FString(UTF8_TO_TCHAR(BaseClass.c_str())));
+	}
+	Options.bIncludeBlueprintClasses = Request.include_blueprint_classes();
+	Options.bBlueprintAccessibleOnly = Request.blueprint_accessible_only();
+	Options.bIncludeFunctions = Request.include_functions();
+
+	TempoWorldSchemaWalk::FResult Result;
+	FString Error;
+	if (!TempoWorldSchemaWalk::Walk(Options, Result, Error))
+	{
+		ResponseContinuation.ExecuteIfBound(DescribeClassesResponse(),
+			grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*Error))));
+		return;
+	}
+
+	DescribeClassesResponse Response;
+
+	TempoWorld::SchemaHeader* Header = Response.mutable_header();
+	Header->set_schema_version(TCHAR_TO_UTF8(*TempoWorldSchemaWalk::GetSchemaVersion()));
+	Header->set_engine_version(TCHAR_TO_UTF8(*FEngineVersion::Current().ToString(EVersionComponent::Minor)));
+	// The same hash a generated schema file carries, so a client can compare the two directly.
+	Header->set_content_hash(TCHAR_TO_UTF8(*TempoWorldSchemaWalk::HashResult(Result)));
+	Header->set_blueprint_accessible_only(Options.bBlueprintAccessibleOnly);
+	Header->set_includes_blueprint_classes(Options.bIncludeBlueprintClasses);
+
+	for (const TempoWorldSchemaWalk::FClassEntry& Entry : Result.Classes)
+	{
+		TempoWorld::ClassDescriptor* Class = Response.add_classes();
+		Class->set_name(TCHAR_TO_UTF8(*Entry.Name));
+		Class->set_class_path(TCHAR_TO_UTF8(*Entry.ClassPath));
+		Class->set_super_path(TCHAR_TO_UTF8(*Entry.SuperPath));
+		Class->set_package(TCHAR_TO_UTF8(*Entry.Package));
+		Class->set_is_abstract(Entry.bAbstract);
+		Class->set_is_blueprint(Entry.bBlueprint);
+		Class->set_content_hash(TCHAR_TO_UTF8(*TempoWorldSchemaWalk::HashClass(Entry)));
+
+		for (const TempoWorldSchemaWalk::FMember& Member : Entry.Properties)
+		{
+			WriteMemberDescriptor(Member, *Class->add_properties());
+		}
+
+		for (const TempoWorldSchemaWalk::FComponentTemplate& Component : Entry.Components)
+		{
+			TempoWorld::ComponentTemplateDescriptor* Out = Class->add_components();
+			Out->set_name(TCHAR_TO_UTF8(*Component.Name));
+			Out->set_class_path(TCHAR_TO_UTF8(*Component.ClassPath));
+		}
+
+		for (const FFunctionInfo& Function : Entry.Functions)
+		{
+			TempoWorld::ClassFunctionDescriptor* Out = Class->add_functions();
+			Out->set_name(TCHAR_TO_UTF8(*Function.Name));
+			Out->set_signature(TCHAR_TO_UTF8(*Function.Signature));
+			Out->set_blueprint_callable(Function.bBlueprintCallable);
+			Out->set_callable(Function.bCallable);
+			Out->set_unsupported_reason(TCHAR_TO_UTF8(*Function.UnsupportedReason));
+			Out->set_positional(Function.AllInputsValueExpressible());
+			for (const FParameterInfo& Parameter : Function.Parameters)
+			{
+				TempoWorld::ClassParameterDescriptor* OutParm = Out->add_parameters();
+				OutParm->set_name(TCHAR_TO_UTF8(*Parameter.Name));
+				WriteTypeDescriptor(Parameter.Type, *OutParm->mutable_value_type());
+				OutParm->set_kind(Parameter.Kind == EParameterKind::Return ? TempoWorld::PK_RETURN
+					: Parameter.Kind == EParameterKind::Output ? TempoWorld::PK_OUTPUT
+					: TempoWorld::PK_INPUT);
+			}
+		}
+	}
+
+	for (const TempoWorldSchemaWalk::FStructEntry& Entry : Result.Structs)
+	{
+		TempoWorld::StructDescriptor* Struct = Response.add_structs();
+		Struct->set_name(TCHAR_TO_UTF8(*Entry.Name));
+		Struct->set_content_hash(TCHAR_TO_UTF8(*TempoWorldSchemaWalk::HashStruct(Entry)));
+		Struct->set_value_expressible(Entry.bValueExpressible);
+		for (const TempoWorldSchemaWalk::FMember& Member : Entry.Members)
+		{
+			WriteMemberDescriptor(Member, *Struct->add_members());
+		}
+	}
+
+	for (const TempoWorldSchemaWalk::FEnumEntry& Entry : Result.Enums)
+	{
+		TempoWorld::EnumDescriptor* Enum = Response.add_enums();
+		Enum->set_name(TCHAR_TO_UTF8(*Entry.Name));
+		Enum->set_content_hash(TCHAR_TO_UTF8(*TempoWorldSchemaWalk::HashEnum(Entry)));
+		for (const FString& Enumerator : Entry.Enumerators)
+		{
+			Enum->add_enumerators(TCHAR_TO_UTF8(*Enumerator));
+		}
+	}
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+}
+
+FString SplitPropertyName(FString& PropertyName)
+{
+	return TempoWorldReflection::SplitPropertyAddress(PropertyName);
 }
 
 grpc::Status GetPropertyByName(const UObject* Object, const FString& FullPropertyName, FProperty*& Property, FString& InnerPropertyName)
@@ -2021,10 +2343,554 @@ grpc::Status GetPropertyByName(const UObject* Object, const FString& FullPropert
 	return grpc::Status_OK;
 }
 
+// How an object-valued property names what it points at.
+//
+// An actor is named the way every other RPC names one. Everything else is named by full path, not
+// by UObject::GetName: a path is unambiguous, it is what the typed API addresses classes by, and
+// GetSubClassWithName accepts it, so a value read here can be written straight back.
+FString NameReferencedObject(const UObject* Object, TempoWorldReflection::EValueKind Kind)
+{
+	if (!Object)
+	{
+		return FString();
+	}
+	if (Kind == TempoWorldReflection::EValueKind::Actor)
+	{
+		return UTempoCoreUtils::GetActorIdentifier(Cast<AActor>(Object));
+	}
+	if (Kind == TempoWorldReflection::EValueKind::Component)
+	{
+		const UActorComponent* Component = Cast<UActorComponent>(Object);
+		const AActor* Owner = Component ? Component->GetOwner() : nullptr;
+		return Owner
+			? FString::Printf(TEXT("%s:%s"), *UTempoCoreUtils::GetActorIdentifier(Owner), *Component->GetName())
+			: Object->GetName();
+	}
+	return Object->GetPathName();
+}
+
+// Read one element of a container into a scalar Value, reusing the scalar paths below rather than
+// repeating them per element type.
+grpc::Status ReadContainerElement(const void* ElementPtr, const FProperty* ElementProperty,
+	PropertyValue& OutValue)
+{
+	// An element property's offset is zero, so the element pointer is also its container.
+	return WritePropertyToValue(ElementPtr, ElementProperty, OutValue);
+}
+
+// Read every member of a struct into a StructValue, each by the scalar or nested paths below. Only
+// reached for a struct the classifier calls value-expressible, so every member has a representation.
+grpc::Status WriteStructToValue(const UScriptStruct* Struct, const void* StructPtr,
+	TempoWorld::StructValue& OutValue)
+{
+	OutValue.set_struct_name(TCHAR_TO_UTF8(*Struct->GetStructCPPName()));
+	for (TFieldIterator<FProperty> It(Struct); It; ++It)
+	{
+		TempoWorld::StructField* Field = OutValue.add_fields();
+		// The authored name, which is what a nested address resolves a member by.
+		Field->set_name(TCHAR_TO_UTF8(*It->GetAuthoredName()));
+		// A member's offset is relative to the struct, so the struct is its container.
+		const grpc::Status Status = WritePropertyToValue(StructPtr, *It, *Field->mutable_value());
+		if (!Status.ok())
+		{
+			return Status;
+		}
+	}
+	return grpc::Status_OK;
+}
+
+// Read a property into a Value. The inverse of SetValueOnTarget, and driven by the same classifier,
+// so that a property the generated stubs present as readable is one this can actually read.
+grpc::Status WritePropertyToValue(const void* Container, const FProperty* Property, PropertyValue& OutValue)
+{
+	using namespace TempoWorldReflection;
+	const FTypeInfo Type = ClassifyProperty(Property);
+
+	if (!Type.IsValueExpressible())
+	{
+		const FString Reason = Type.IsSupported()
+			? FString::Printf(TEXT("'%s' (type '%s') cannot be read as one value; address its members instead"),
+				*Property->GetName(), *Type.TypeString)
+			: FString::Printf(TEXT("'%s' cannot be read: %s"), *Property->GetName(), *Type.UnsupportedReason);
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*Reason)));
+	}
+
+	switch (Type.Kind)
+	{
+	case EValueKind::Bool:
+	{
+		// Read through the property, not with GetValue_InContainer: a bitfield bool shares its byte
+		// with its neighbours, and a raw copy would report true whenever any of them is set.
+		OutValue.set_bool_value(CastFieldChecked<FBoolProperty>(Property)->GetPropertyValue_InContainer(Container));
+		return grpc::Status_OK;
+	}
+	case EValueKind::Int:
+	{
+		// Every width the API widens into int32, read at its own width.
+		if (const FIntProperty* P = CastField<FIntProperty>(Property))        { int32 V;  P->GetValue_InContainer(Container, &V); OutValue.set_int_value(V); }
+		else if (const FInt16Property* P16 = CastField<FInt16Property>(Property))  { int16 V;  P16->GetValue_InContainer(Container, &V); OutValue.set_int_value(V); }
+		else if (const FInt8Property* P8 = CastField<FInt8Property>(Property))     { int8 V;   P8->GetValue_InContainer(Container, &V); OutValue.set_int_value(V); }
+		else if (const FUInt16Property* PU16 = CastField<FUInt16Property>(Property)) { uint16 V; PU16->GetValue_InContainer(Container, &V); OutValue.set_int_value(V); }
+		else if (const FByteProperty* PB = CastField<FByteProperty>(Property))      { uint8 V;  PB->GetValue_InContainer(Container, &V); OutValue.set_int_value(V); }
+		else { return grpc::Status(grpc::INTERNAL, "int-kinded property of unexpected width"); }
+		return grpc::Status_OK;
+	}
+	case EValueKind::Int64:
+	{
+		if (const FInt64Property* P = CastField<FInt64Property>(Property))        { int64 V;  P->GetValue_InContainer(Container, &V); OutValue.set_int64_value(V); }
+		else if (const FUInt32Property* P32 = CastField<FUInt32Property>(Property)) { uint32 V; P32->GetValue_InContainer(Container, &V); OutValue.set_int64_value(V); }
+		else if (const FUInt64Property* P64 = CastField<FUInt64Property>(Property)) { uint64 V; P64->GetValue_InContainer(Container, &V); OutValue.set_int64_value(static_cast<int64>(V)); }
+		else { return grpc::Status(grpc::INTERNAL, "int64-kinded property of unexpected width"); }
+		return grpc::Status_OK;
+	}
+	case EValueKind::Float:
+	{
+		float V;
+		CastFieldChecked<FFloatProperty>(Property)->GetValue_InContainer(Container, &V);
+		OutValue.set_float_value(V);
+		return grpc::Status_OK;
+	}
+	case EValueKind::Double:
+	{
+		double V;
+		CastFieldChecked<FDoubleProperty>(Property)->GetValue_InContainer(Container, &V);
+		OutValue.set_float_value(V);
+		return grpc::Status_OK;
+	}
+	case EValueKind::String:
+	{
+		if (const FStrProperty* P = CastField<FStrProperty>(Property))
+		{
+			FString V;
+			P->GetValue_InContainer(Container, &V);
+			OutValue.set_string_value(TCHAR_TO_UTF8(*V));
+		}
+		else if (const FNameProperty* PN = CastField<FNameProperty>(Property))
+		{
+			FName V;
+			PN->GetValue_InContainer(Container, &V);
+			OutValue.set_string_value(TCHAR_TO_UTF8(*V.ToString()));
+		}
+		else if (const FTextProperty* PT = CastField<FTextProperty>(Property))
+		{
+			FText V;
+			PT->GetValue_InContainer(Container, &V);
+			OutValue.set_string_value(TCHAR_TO_UTF8(*V.ToString()));
+		}
+		else { return grpc::Status(grpc::INTERNAL, "string-kinded property of unexpected type"); }
+		return grpc::Status_OK;
+	}
+	case EValueKind::Enum:
+	{
+		// The authored name, which is the spelling SetProperty's enum_value accepts.
+		if (const FEnumProperty* P = CastField<FEnumProperty>(Property))
+		{
+			const void* ValuePtr = P->ContainerPtrToValuePtr<void>(Container);
+			const int64 IntValue = P->GetUnderlyingProperty()->GetSignedIntPropertyValue(ValuePtr);
+			OutValue.set_enum_value(TCHAR_TO_UTF8(*P->GetEnum()->GetAuthoredNameStringByValue(IntValue)));
+		}
+		else if (const FByteProperty* PB = CastField<FByteProperty>(Property))
+		{
+			uint8 Index;
+			PB->GetValue_InContainer(Container, &Index);
+			OutValue.set_enum_value(TCHAR_TO_UTF8(*PB->Enum->GetAuthoredNameStringByValue(Index)));
+		}
+		else { return grpc::Status(grpc::INTERNAL, "enum-kinded property of unexpected type"); }
+		return grpc::Status_OK;
+	}
+	case EValueKind::Vector:
+	{
+		FVector V;
+		CastFieldChecked<FStructProperty>(Property)->GetValue_InContainer(Container, &V);
+		TempoCore::Vector* Out = OutValue.mutable_vector_value();
+		Out->set_x(V.X); Out->set_y(V.Y); Out->set_z(V.Z);
+		return grpc::Status_OK;
+	}
+	case EValueKind::Vector2D:
+	{
+		FVector2D V;
+		CastFieldChecked<FStructProperty>(Property)->GetValue_InContainer(Container, &V);
+		TempoCore::Vector2D* Out = OutValue.mutable_vector2d_value();
+		Out->set_x(V.X); Out->set_y(V.Y);
+		return grpc::Status_OK;
+	}
+	case EValueKind::IntVector:
+	{
+		FIntVector V;
+		CastFieldChecked<FStructProperty>(Property)->GetValue_InContainer(Container, &V);
+		TempoWorld::IntVector* Out = OutValue.mutable_int_vector_value();
+		Out->set_x(V.X); Out->set_y(V.Y); Out->set_z(V.Z);
+		return grpc::Status_OK;
+	}
+	case EValueKind::IntPoint:
+	{
+		FIntPoint V;
+		CastFieldChecked<FStructProperty>(Property)->GetValue_InContainer(Container, &V);
+		TempoWorld::IntPoint* Out = OutValue.mutable_int_point_value();
+		Out->set_x(V.X); Out->set_y(V.Y);
+		return grpc::Status_OK;
+	}
+	case EValueKind::Rotator:
+	{
+		FRotator V;
+		CastFieldChecked<FStructProperty>(Property)->GetValue_InContainer(Container, &V);
+		TempoCore::Rotation* Out = OutValue.mutable_rotator_value();
+		Out->set_r(V.Roll); Out->set_p(V.Pitch); Out->set_y(V.Yaw);
+		return grpc::Status_OK;
+	}
+	case EValueKind::Quat:
+	{
+		FQuat V;
+		CastFieldChecked<FStructProperty>(Property)->GetValue_InContainer(Container, &V);
+		TempoWorld::Quat* Out = OutValue.mutable_quat_value();
+		Out->set_x(V.X); Out->set_y(V.Y); Out->set_z(V.Z); Out->set_w(V.W);
+		return grpc::Status_OK;
+	}
+	case EValueKind::Transform:
+	{
+		FTransform V;
+		CastFieldChecked<FStructProperty>(Property)->GetValue_InContainer(Container, &V);
+		// Exactly as Unreal stores it, in its own shape: a quaternion, a translation in cm and a
+		// scale, left-handed.
+		TempoWorld::NativeTransform* Out = OutValue.mutable_native_transform_value();
+		const FQuat Rotation = V.GetRotation();
+		Out->mutable_rotation()->set_x(Rotation.X); Out->mutable_rotation()->set_y(Rotation.Y);
+		Out->mutable_rotation()->set_z(Rotation.Z); Out->mutable_rotation()->set_w(Rotation.W);
+		const FVector Translation = V.GetTranslation();
+		Out->mutable_translation()->set_x(Translation.X); Out->mutable_translation()->set_y(Translation.Y);
+		Out->mutable_translation()->set_z(Translation.Z);
+		const FVector Scale = V.GetScale3D();
+		Out->mutable_scale3d()->set_x(Scale.X); Out->mutable_scale3d()->set_y(Scale.Y);
+		Out->mutable_scale3d()->set_z(Scale.Z);
+		return grpc::Status_OK;
+	}
+	case EValueKind::Color:
+	{
+		FColor V;
+		CastFieldChecked<FStructProperty>(Property)->GetValue_InContainer(Container, &V);
+		TempoWorld::Color* Out = OutValue.mutable_color_value();
+		Out->set_r(V.R); Out->set_g(V.G); Out->set_b(V.B); Out->set_a(V.A);
+		return grpc::Status_OK;
+	}
+	case EValueKind::LinearColor:
+	{
+		FLinearColor V;
+		CastFieldChecked<FStructProperty>(Property)->GetValue_InContainer(Container, &V);
+		// As Unreal stores it: linear and floating point. 8 bits of sRGB would lose both.
+		TempoWorld::LinearColor* Out = OutValue.mutable_linear_color_value();
+		Out->set_r(V.R); Out->set_g(V.G); Out->set_b(V.B); Out->set_a(V.A);
+		return grpc::Status_OK;
+	}
+	case EValueKind::Struct:
+	{
+		const FStructProperty* StructProperty = CastFieldChecked<FStructProperty>(Property);
+		return WriteStructToValue(StructProperty->Struct, StructProperty->ContainerPtrToValuePtr<void>(Container),
+			*OutValue.mutable_struct_value());
+	}
+	case EValueKind::Class:
+	case EValueKind::Asset:
+	case EValueKind::Actor:
+	case EValueKind::Component:
+	{
+		FString Name;
+		if (const FObjectProperty* P = CastField<FObjectProperty>(Property))
+		{
+			TObjectPtr<UObject> Object;
+			P->GetValue_InContainer(Container, &Object);
+			Name = NameReferencedObject(Object.Get(), Type.Kind);
+		}
+		else if (const FSoftObjectProperty* PS = CastField<FSoftObjectProperty>(Property))
+		{
+			// A soft reference names its target whether or not it is loaded, so report the stored
+			// path rather than resolving it.
+			Name = PS->GetPropertyValue_InContainer(Container).ToString();
+		}
+		else if (const FWeakObjectProperty* PW = CastField<FWeakObjectProperty>(Property))
+		{
+			// A weak reference to something since destroyed reads as nothing, as it would in C++.
+			Name = NameReferencedObject(PW->GetObjectPropertyValue_InContainer(Container), Type.Kind);
+		}
+		else { return grpc::Status(grpc::INTERNAL, "reference-kinded property of unexpected type"); }
+
+		switch (Type.Kind)
+		{
+		case EValueKind::Class:     OutValue.set_class_value(TCHAR_TO_UTF8(*Name)); break;
+		case EValueKind::Asset:     OutValue.set_asset_value(TCHAR_TO_UTF8(*Name)); break;
+		case EValueKind::Actor:     OutValue.set_actor_value(TCHAR_TO_UTF8(*Name)); break;
+		default:                    OutValue.set_component_value(TCHAR_TO_UTF8(*Name)); break;
+		}
+		return grpc::Status_OK;
+	}
+	case EValueKind::Array:
+	case EValueKind::Set:
+	{
+		// Read every element into a scalar Value first, then fan them into the one repeated variant
+		// that carries this element kind.
+		TArray<PropertyValue> Elements;
+		const void* ValuePtr = Property->ContainerPtrToValuePtr<void>(Container);
+		if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
+		{
+			FScriptArrayHelper Helper{ ArrayProperty, const_cast<void*>(ValuePtr) };
+			for (int32 Index = 0; Index < Helper.Num(); ++Index)
+			{
+				PropertyValue Element;
+				const grpc::Status Status = ReadContainerElement(Helper.GetRawPtr(Index), ArrayProperty->Inner, Element);
+				if (!Status.ok()) { return Status; }
+				Elements.Add(MoveTemp(Element));
+			}
+		}
+		else if (const FSetProperty* SetProperty = CastField<FSetProperty>(Property))
+		{
+			FScriptSetHelper Helper{ SetProperty, const_cast<void*>(ValuePtr) };
+			for (int32 Index = 0; Index < Helper.GetMaxIndex(); ++Index)
+			{
+				if (!Helper.IsValidIndex(Index)) { continue; }
+				PropertyValue Element;
+				const grpc::Status Status = ReadContainerElement(Helper.GetElementPtr(Index), SetProperty->ElementProp, Element);
+				if (!Status.ok()) { return Status; }
+				Elements.Add(MoveTemp(Element));
+			}
+		}
+		else { return grpc::Status(grpc::INTERNAL, "container-kinded property of unexpected type"); }
+
+		const bool bIsSet = Type.Kind == EValueKind::Set;
+		switch (Type.ElementType->Kind)
+		{
+		case EValueKind::Bool:
+		{
+			TempoWorld::BoolArray* Out = bIsSet ? OutValue.mutable_bool_set_value() : OutValue.mutable_bool_array_value();
+			for (const PropertyValue& Element : Elements) { Out->add_values(Element.bool_value()); }
+			break;
+		}
+		case EValueKind::Int:
+		{
+			TempoWorld::IntArray* Out = bIsSet ? OutValue.mutable_int_set_value() : OutValue.mutable_int_array_value();
+			for (const PropertyValue& Element : Elements) { Out->add_values(Element.int_value()); }
+			break;
+		}
+		case EValueKind::Int64:
+		{
+			TempoWorld::Int64Array* Out = bIsSet ? OutValue.mutable_int64_set_value() : OutValue.mutable_int64_array_value();
+			for (const PropertyValue& Element : Elements) { Out->add_values(Element.int64_value()); }
+			break;
+		}
+		case EValueKind::Float:
+		case EValueKind::Double:
+		{
+			TempoWorld::FloatArray* Out = bIsSet ? OutValue.mutable_float_set_value() : OutValue.mutable_float_array_value();
+			for (const PropertyValue& Element : Elements) { Out->add_values(Element.float_value()); }
+			break;
+		}
+		case EValueKind::String:
+		{
+			TempoWorld::StringArray* Out = bIsSet ? OutValue.mutable_string_set_value() : OutValue.mutable_string_array_value();
+			for (const PropertyValue& Element : Elements) { Out->add_values(Element.string_value()); }
+			break;
+		}
+		case EValueKind::Enum:
+		{
+			TempoWorld::StringArray* Out = bIsSet ? OutValue.mutable_enum_set_value() : OutValue.mutable_enum_array_value();
+			for (const PropertyValue& Element : Elements) { Out->add_values(Element.enum_value()); }
+			break;
+		}
+		case EValueKind::Class:
+		{
+			TempoWorld::StringArray* Out = bIsSet ? OutValue.mutable_class_set_value() : OutValue.mutable_class_array_value();
+			for (const PropertyValue& Element : Elements) { Out->add_values(Element.class_value()); }
+			break;
+		}
+		case EValueKind::Asset:
+		{
+			TempoWorld::StringArray* Out = bIsSet ? OutValue.mutable_asset_set_value() : OutValue.mutable_asset_array_value();
+			for (const PropertyValue& Element : Elements) { Out->add_values(Element.asset_value()); }
+			break;
+		}
+		case EValueKind::Actor:
+		{
+			TempoWorld::StringArray* Out = bIsSet ? OutValue.mutable_actor_set_value() : OutValue.mutable_actor_array_value();
+			for (const PropertyValue& Element : Elements) { Out->add_values(Element.actor_value()); }
+			break;
+		}
+		case EValueKind::Component:
+		{
+			TempoWorld::StringArray* Out = bIsSet ? OutValue.mutable_component_set_value() : OutValue.mutable_component_array_value();
+			for (const PropertyValue& Element : Elements) { Out->add_values(Element.component_value()); }
+			break;
+		}
+		case EValueKind::Struct:
+		{
+			// Arrays only: IsValueExpressible excludes a set of structs.
+			TempoWorld::StructArray* Out = OutValue.mutable_struct_array_value();
+			for (PropertyValue& Element : Elements) { *Out->add_values() = MoveTemp(*Element.mutable_struct_value()); }
+			break;
+		}
+		default:
+			// IsValueExpressible already excluded these, so reaching here is a classifier bug.
+			return grpc::Status(grpc::INTERNAL, "container element kind has no repeated Value variant");
+		}
+		return grpc::Status_OK;
+	}
+	default:
+		return grpc::Status(grpc::INTERNAL, "value-expressible property of unhandled kind");
+	}
+}
+
+// Read one property of one object, by the same addressing SetProperty accepts.
+grpc::Status GetPropertyOnObject(const FString& PropertyName, UObject* Object,
+	PropertyValue& OutValue)
+{
+	FProperty* Property = nullptr;
+	FString InnerPropertyName;
+	const grpc::Status FindStatus = GetPropertyByName(Object, PropertyName, Property, InnerPropertyName);
+	if (!FindStatus.ok())
+	{
+		return FindStatus;
+	}
+
+	const void* LeafContainer = nullptr;
+	const FProperty* LeafProperty = nullptr;
+	FString ResolveError;
+	const TempoWorldReflection::EAddressError AddressError = TempoWorldReflection::ResolveNestedPropertyForRead(
+		Object, Property, InnerPropertyName, LeafContainer, LeafProperty, ResolveError);
+	if (AddressError != TempoWorldReflection::EAddressError::None)
+	{
+		grpc::StatusCode Code = grpc::FAILED_PRECONDITION;
+		switch (AddressError)
+		{
+		case TempoWorldReflection::EAddressError::NotFound:   Code = grpc::NOT_FOUND; break;
+		case TempoWorldReflection::EAddressError::OutOfRange: Code = grpc::OUT_OF_RANGE; break;
+		default: break;
+		}
+		return grpc::Status(Code, std::string(TCHAR_TO_UTF8(*ResolveError)));
+	}
+
+	return WritePropertyToValue(LeafContainer, LeafProperty, OutValue);
+}
+
+void UTempoWorldControlServiceSubsystem::StreamProperty(const GetPropertyRequest& Request,
+	const TResponseDelegate<PropertyValue>& ResponseContinuation)
+{
+	FPropertySubscription Subscription;
+	Subscription.Actor = FString(UTF8_TO_TCHAR(Request.actor().c_str()));
+	Subscription.Component = FString(UTF8_TO_TCHAR(Request.component().c_str()));
+	Subscription.Subsystem = FString(UTF8_TO_TCHAR(Request.subsystem().c_str()));
+	Subscription.Property = FString(UTF8_TO_TCHAR(Request.property().c_str()));
+
+	const FString Key = FString::Printf(TEXT("%s/%s/%s/%s"), *Subscription.Actor,
+		*Subscription.Component, *Subscription.Subsystem, *Subscription.Property);
+
+	FPropertySubscription& Existing = PendingPropertyRequests.FindOrAdd(Key, MoveTemp(Subscription));
+	Existing.Continuations.Add(ResponseContinuation);
+}
+
+void UTempoWorldControlServiceSubsystem::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	// Nothing subscribed is the overwhelmingly common case, and it costs one empty check.
+	if (PendingPropertyRequests.IsEmpty())
+	{
+		return;
+	}
+
+	const UWorld* World = GetWorld();
+	for (auto It = PendingPropertyRequests.CreateIterator(); It; ++It)
+	{
+		FPropertySubscription& Subscription = It.Value();
+
+		// Resolved every tick rather than held: an actor can be destroyed and replaced under the
+		// same name, and a handle cached here would quietly address the dead one.
+		UObject* Object = nullptr;
+		grpc::Status Status = GetObjectForName(World, Subscription.Actor, Subscription.Component,
+			Subscription.Subsystem, Object);
+
+		PropertyValue Value;
+		if (Status.ok())
+		{
+			Status = GetPropertyOnObject(Subscription.Property, Object, Value);
+		}
+
+		for (const TResponseDelegate<PropertyValue>& Continuation : Subscription.Continuations)
+		{
+			Continuation.ExecuteIfBound(Status.ok() ? Value : PropertyValue(), Status);
+		}
+
+		// Each continuation answers exactly once, so the subscription is spent. A client that wants
+		// the next tick's value asks again, which is how the other streaming RPCs here behave.
+		It.RemoveCurrent();
+	}
+}
+
+TStatId UTempoWorldControlServiceSubsystem::GetStatId() const
+{
+	RETURN_QUICK_DECLARE_CYCLE_STAT(UTempoWorldControlServiceSubsystem, STATGROUP_Tickables);
+}
+
+void UTempoWorldControlServiceSubsystem::GetProperty(const GetPropertyRequest& Request,
+	const TResponseDelegate<PropertyValue>& ResponseContinuation) const
+{
+	UObject* Object = nullptr;
+	const grpc::Status ObjectStatus = GetObjectForRequest(GetWorld(), Request, Object);
+	if (!ObjectStatus.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(PropertyValue(), ObjectStatus);
+		return;
+	}
+
+	PropertyValue Value;
+	const grpc::Status Status = GetPropertyOnObject(
+		FString(UTF8_TO_TCHAR(Request.property().c_str())), Object, Value);
+	ResponseContinuation.ExecuteIfBound(Status.ok() ? Value : PropertyValue(), Status);
+}
+
+void UTempoWorldControlServiceSubsystem::GetProperties(const GetPropertiesRequest& Request,
+	const TResponseDelegate<GetPropertiesByNameResponse>& ResponseContinuation) const
+{
+	UObject* Object = nullptr;
+	const grpc::Status ObjectStatus = GetObjectForRequest(GetWorld(), Request, Object);
+	if (!ObjectStatus.ok())
+	{
+		ResponseContinuation.ExecuteIfBound(GetPropertiesByNameResponse(), ObjectStatus);
+		return;
+	}
+
+	// One unreadable property does not fail the batch: a caller reading a dozen properties wants the
+	// eleven that worked plus the reason for the twelfth, not one error and no values.
+	GetPropertiesByNameResponse Response;
+	for (const std::string& RequestedName : Request.properties())
+	{
+		NamedValue* Entry = Response.add_values();
+		Entry->set_name(RequestedName);
+
+		PropertyValue Value;
+		const grpc::Status Status = GetPropertyOnObject(
+			FString(UTF8_TO_TCHAR(RequestedName.c_str())), Object, Value);
+		if (Status.ok())
+		{
+			*Entry->mutable_value() = Value;
+		}
+		else
+		{
+			Entry->set_code(Status.error_code());
+			Entry->set_error(Status.error_message());
+		}
+	}
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
+}
+
 template <typename PropertyType, typename ValueType>
 grpc::Status SetSinglePropertyValue(void* ValuePtr, PropertyType* Property, const ValueType& Value)
 {
 	Property->SetPropertyValue(ValuePtr, Value);
+	return grpc::Status_OK;
+}
+
+// A Value carries every floating-point number as a double, so a float property takes the nearest float.
+template <>
+grpc::Status SetSinglePropertyValue(void* ValuePtr, FFloatProperty* Property, const double& Value)
+{
+	Property->SetPropertyValue(ValuePtr, static_cast<float>(Value));
 	return grpc::Status_OK;
 }
 
@@ -2116,9 +2982,23 @@ grpc::Status SetSinglePropertyValue<FSoftObjectProperty, UObject*>(void* ValuePt
 }
 
 template <>
+grpc::Status SetSinglePropertyValue<FWeakObjectProperty, UObject*>(void* ValuePtr, FWeakObjectProperty* Property, UObject* const& ValueObj)
+{
+	Property->SetObjectPropertyValue(ValuePtr, ValueObj);
+	return grpc::Status_OK;
+}
+
+template <>
 grpc::Status SetSinglePropertyValue<FTextProperty, FString>(void* ValuePtr, FTextProperty* Property, const FString& ValueStr)
 {
 	Property->SetPropertyValue(ValuePtr, FText::FromString(ValueStr));
+	return grpc::Status_OK;
+}
+
+template <>
+grpc::Status SetSinglePropertyValue<FNameProperty, FString>(void* ValuePtr, FNameProperty* Property, const FString& ValueStr)
+{
+	Property->SetPropertyValue(ValuePtr, FName(*ValueStr));
 	return grpc::Status_OK;
 }
 
@@ -2279,17 +3159,6 @@ grpc::Status SetSinglePropertyInContainer(void* Container, FProperty* Property, 
 	return SetSinglePropertyValue(ValuePtr, TypedProperty, Value);
 }
 
-// A resolved write destination: one property (with any nested inner path) inside a container.
-// Object is the owning UObject when writing to an actor or component, and null when writing into
-// a UFunction's parameter frame, which has no owner to notify or invalidate.
-struct FPropertyTarget
-{
-	UObject* Object = nullptr;
-	void* Container = nullptr;
-	FProperty* Property = nullptr;
-	FString InnerPropertyName;
-};
-
 // Fires PreEditChange/PostEditChangeProperty around an edit, but only for edits to a real UObject
 // in an editor world. Parameter-frame writes have no owner, so they notify nothing.
 struct FScopedPropertyEdit
@@ -2428,12 +3297,6 @@ grpc::Status SetSetOnTarget(const UWorld* World, const FPropertyTarget& Target, 
 		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
-	if (!Target.InnerPropertyName.IsEmpty())
-	{
-		const FString ErrorMsg = FString::Printf(TEXT("Inner property addressing is not supported for set properties (got '%s' on set '%s')"), *Target.InnerPropertyName, *Target.Property->GetName());
-		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-	}
-
 	grpc::Status FinalStatus = grpc::Status_OK;
 	{
 		FScopedPropertyEdit EditScope(World, Target);
@@ -2466,6 +3329,69 @@ grpc::Status SetSetOnTarget(const UWorld* World, const FPropertyTarget& Target, 
 	MarkRenderStateDirty(Target.Object);
 
 	return grpc::Status_OK;
+}
+
+// The container counterparts of TryTypesOnTarget: try each element type in turn, where
+// FAILED_PRECONDITION means "not this one" and anything else is the answer.
+template <typename FirstPropertyType, typename... RestPropertyTypes, typename ValueType>
+grpc::Status TryArrayTypesOnTarget(const UWorld* World, const FPropertyTarget& Target, const TArray<ValueType>& Values)
+{
+	const grpc::Status Status = SetArrayOnTarget<FirstPropertyType>(World, Target, Values);
+	if (Status.ok() || Status.error_code() != grpc::FAILED_PRECONDITION)
+	{
+		return Status;
+	}
+	if constexpr (sizeof...(RestPropertyTypes) == 0)
+	{
+		return Status;
+	}
+	else
+	{
+		return TryArrayTypesOnTarget<RestPropertyTypes...>(World, Target, Values);
+	}
+}
+
+template <typename FirstPropertyType, typename... RestPropertyTypes, typename ValueType>
+grpc::Status TrySetTypesOnTarget(const UWorld* World, const FPropertyTarget& Target, const TArray<ValueType>& Values)
+{
+	const grpc::Status Status = SetSetOnTarget<FirstPropertyType>(World, Target, Values);
+	if (Status.ok() || Status.error_code() != grpc::FAILED_PRECONDITION)
+	{
+		return Status;
+	}
+	if constexpr (sizeof...(RestPropertyTypes) == 0)
+	{
+		return Status;
+	}
+	else
+	{
+		return TrySetTypesOnTarget<RestPropertyTypes...>(World, Target, Values);
+	}
+}
+
+// Where a repeated Value variant lands. The *_array_value and *_set_value of a kind carry the same
+// payload and differ only in name, while the destination knows whether it is an array or a set, so
+// both variants of a kind come here and the target's own container type picks the writer. The
+// element types are the ones the kind's scalar variant accepts, so that a container the classifier
+// reports as writable -- a TArray<uint8>, which reads as int_array_value -- takes its own value back.
+template <typename... PropertyTypes, typename ValueType>
+grpc::Status SetContainerOnTarget(const UWorld* World, const FPropertyTarget& Target, const TArray<ValueType>& Values)
+{
+	if (CastField<FArrayProperty>(Target.Property))
+	{
+		return TryArrayTypesOnTarget<PropertyTypes...>(World, Target, Values);
+	}
+	if (CastField<FSetProperty>(Target.Property))
+	{
+		if (!Target.InnerPropertyName.IsEmpty())
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("Inner property addressing is not supported for set properties (got '%s' on set '%s')"), *Target.InnerPropertyName, *Target.Property->GetName());
+			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+		return TrySetTypesOnTarget<PropertyTypes...>(World, Target, Values);
+	}
+	const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' but an array or set property was expected"), *Target.Property->GetName(), *Target.Property->GetCPPType());
+	return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 }
 
 template <typename ValueType>
@@ -2505,32 +3431,13 @@ grpc::Status SetStructOnTarget(const UWorld* World, const FPropertyTarget& Targe
 // also catches FSoftClassProperty (which derives from FSoftObjectProperty).
 grpc::Status SetObjectOnTarget(const UWorld* World, const FPropertyTarget& Target, UObject* Object)
 {
-	return TryTypesOnTarget<FObjectProperty, FSoftObjectProperty>(World, Target, Object);
+	return TryTypesOnTarget<FObjectProperty, FSoftObjectProperty, FWeakObjectProperty>(World, Target, Object);
 }
 
-grpc::Status SetObjectArrayOnTarget(const UWorld* World, const FPropertyTarget& Target, const TArray<UObject*>& Objects)
+grpc::Status SetObjectContainerOnTarget(const UWorld* World, const FPropertyTarget& Target, const TArray<UObject*>& Objects)
 {
-	// First try to set it as an FObjectProperty array, then fall back on an FSoftObjectProperty array.
-	const grpc::Status ObjectStatus = SetArrayOnTarget<FObjectProperty>(World, Target, Objects);
-
-	// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
-	if (ObjectStatus.ok() || ObjectStatus.error_code() != grpc::FAILED_PRECONDITION)
-	{
-		return ObjectStatus;
-	}
-
-	return SetArrayOnTarget<FSoftObjectProperty>(World, Target, Objects);
-}
-
-grpc::Status SetObjectSetOnTarget(const UWorld* World, const FPropertyTarget& Target, const TArray<UObject*>& Objects)
-{
-	// First try to set it as an FObjectProperty set, then fall back on an FSoftObjectProperty set.
-	const grpc::Status ObjectStatus = SetSetOnTarget<FObjectProperty>(World, Target, Objects);
-	if (ObjectStatus.ok() || ObjectStatus.error_code() != grpc::FAILED_PRECONDITION)
-	{
-		return ObjectStatus;
-	}
-	return SetSetOnTarget<FSoftObjectProperty>(World, Target, Objects);
+	// Hard, then soft, then weak, as for a single reference.
+	return SetContainerOnTarget<FObjectProperty, FSoftObjectProperty, FWeakObjectProperty>(World, Target, Objects);
 }
 
 template <typename RepeatedStringType>
@@ -2637,6 +3544,152 @@ grpc::Status ResolveComponents(const UWorld* World, const RepeatedStringType& Va
 	return grpc::Status_OK;
 }
 
+grpc::Status AddressErrorStatus(TempoWorldReflection::EAddressError Error, const FString& Message)
+{
+	grpc::StatusCode Code = grpc::FAILED_PRECONDITION;
+	switch (Error)
+	{
+	case TempoWorldReflection::EAddressError::NotFound:   Code = grpc::NOT_FOUND; break;
+	case TempoWorldReflection::EAddressError::OutOfRange: Code = grpc::OUT_OF_RANGE; break;
+	default: break;
+	}
+	return grpc::Status(Code, std::string(TCHAR_TO_UTF8(*Message)));
+}
+
+// Write the fields of a StructValue into the struct at StructPtr, each through SetValueOnTarget.
+//
+// A merge: a member the value does not mention keeps what it holds. That is what lets a client that
+// knows only some of a struct's members -- every client, since a struct can carry state reflection
+// does not report -- write one without clobbering the rest, and it is what a nested-address write
+// of one member has always done. Each member is converted, range-checked and type-matched by the
+// same code as any other property, because it goes through the same function.
+grpc::Status WriteStructFields(const UWorld* World, const UScriptStruct* Struct, void* StructPtr,
+	const TempoWorld::StructValue& Value)
+{
+	const FString StructName = Struct->GetStructCPPName();
+	if (!Value.struct_name().empty())
+	{
+		const FString Given(UTF8_TO_TCHAR(Value.struct_name().c_str()));
+		if (Given != StructName)
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("A '%s' was given where a '%s' is expected"), *Given, *StructName);
+			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+	}
+
+	for (const TempoWorld::StructField& Field : Value.fields())
+	{
+		const FString FieldName(UTF8_TO_TCHAR(Field.name().c_str()));
+		FProperty* Member = nullptr;
+		for (FProperty* Candidate = Struct->PropertyLink; Candidate; Candidate = Candidate->PropertyLinkNext)
+		{
+			if (Candidate->GetAuthoredName() == FieldName)
+			{
+				Member = Candidate;
+				break;
+			}
+		}
+		if (!Member)
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("Struct '%s' has no member '%s'"), *StructName, *FieldName);
+			return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+
+		// No owning object: the edit is announced once, for the whole struct, by the caller.
+		FPropertyTarget MemberTarget;
+		MemberTarget.Container = StructPtr;
+		MemberTarget.Property = Member;
+		const grpc::Status Status = SetValueOnTarget(World, MemberTarget, Field.value());
+		if (!Status.ok())
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("%s.%s: %s"), *StructName, *FieldName, UTF8_TO_TCHAR(Status.error_message().c_str()));
+			return grpc::Status(Status.error_code(), std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+	}
+	return grpc::Status_OK;
+}
+
+// A StructValue into a struct-valued property, parameter, or nested address naming one.
+grpc::Status SetStructValueOnTarget(const UWorld* World, const FPropertyTarget& Target,
+	const TempoWorld::StructValue& Value)
+{
+	grpc::Status Status = grpc::Status_OK;
+	{
+		FScopedPropertyEdit EditScope(World, Target);
+
+		void* LeafContainer = nullptr;
+		FProperty* Leaf = nullptr;
+		FString ResolveError;
+		const TempoWorldReflection::EAddressError AddressError = TempoWorldReflection::ResolveNestedPropertyForWrite(
+			Target.Container, Target.Property, Target.InnerPropertyName, LeafContainer, Leaf, ResolveError);
+		if (AddressError != TempoWorldReflection::EAddressError::None)
+		{
+			return AddressErrorStatus(AddressError, ResolveError);
+		}
+
+		const FStructProperty* StructProperty = CastField<FStructProperty>(Leaf);
+		if (!StructProperty)
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' but a struct was given"), *Leaf->GetName(), *Leaf->GetCPPType());
+			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+
+		Status = WriteStructFields(World, StructProperty->Struct, StructProperty->ContainerPtrToValuePtr<void>(LeafContainer),
+			Value);
+	}
+
+	if (Status.ok())
+	{
+		MarkRenderStateDirty(Target.Object);
+	}
+	return Status;
+}
+
+// A StructArray replaces the whole array, as every other array variant does. Each element starts
+// from the struct's defaults, so a member an element does not mention is the default rather than
+// whatever happened to be at that index before.
+grpc::Status SetStructArrayOnTarget(const UWorld* World, const FPropertyTarget& Target,
+	const TempoWorld::StructArray& Values)
+{
+	grpc::Status Status = grpc::Status_OK;
+	{
+		FScopedPropertyEdit EditScope(World, Target);
+
+		void* LeafContainer = nullptr;
+		FProperty* Leaf = nullptr;
+		FString ResolveError;
+		const TempoWorldReflection::EAddressError AddressError = TempoWorldReflection::ResolveNestedPropertyForWrite(
+			Target.Container, Target.Property, Target.InnerPropertyName, LeafContainer, Leaf, ResolveError);
+		if (AddressError != TempoWorldReflection::EAddressError::None)
+		{
+			return AddressErrorStatus(AddressError, ResolveError);
+		}
+
+		const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Leaf);
+		const FStructProperty* ElementProperty = ArrayProperty ? CastField<FStructProperty>(ArrayProperty->Inner) : nullptr;
+		if (!ElementProperty)
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' but an array of structs was given"), *Leaf->GetName(), *Leaf->GetCPPType());
+			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+
+		FScriptArrayHelper ArrayHelper{ ArrayProperty, ArrayProperty->ContainerPtrToValuePtr<void>(LeafContainer) };
+		ArrayHelper.EmptyValues();
+		ArrayHelper.AddValues(Values.values_size());
+		for (int32 Index = 0; Index < Values.values_size() && Status.ok(); ++Index)
+		{
+			// An element's offset is zero, so the element pointer is its own value pointer.
+			Status = WriteStructFields(World, ElementProperty->Struct, ArrayHelper.GetRawPtr(Index), Values.values(Index));
+		}
+	}
+
+	if (Status.ok())
+	{
+		MarkRenderStateDirty(Target.Object);
+	}
+	return Status;
+}
+
 // The one place that knows how each Value variant maps onto Unreal property types. Both the
 // singular Set*Property RPCs and CallFunction's arguments come through here.
 grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target, const PropertyValue& Value)
@@ -2662,20 +3715,9 @@ grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target
 	}
 	case PropertyValue::kStringValue:
 	{
-		// Try FString, then FName, then FText.
+		// FString, then FName, then FText: the list the string containers probe too.
 		const FString ValueStr(UTF8_TO_TCHAR(Value.string_value().c_str()));
-		const grpc::Status StrStatus = SetSingleOnTarget<FStrProperty>(World, Target, ValueStr);
-		if (StrStatus.ok() || StrStatus.error_code() != grpc::FAILED_PRECONDITION)
-		{
-			return StrStatus;
-		}
-		const FName ValueName(*ValueStr);
-		const grpc::Status NameStatus = SetSingleOnTarget<FNameProperty>(World, Target, ValueName);
-		if (NameStatus.ok() || NameStatus.error_code() != grpc::FAILED_PRECONDITION)
-		{
-			return NameStatus;
-		}
-		return SetSingleOnTarget<FTextProperty>(World, Target, ValueStr);
+		return TryTypesOnTarget<FStrProperty, FNameProperty, FTextProperty>(World, Target, ValueStr);
 	}
 	case PropertyValue::kEnumValue:
 	{
@@ -2712,27 +3754,37 @@ grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target
 		Rotator.Roll = Value.rotator_value().r();
 		Rotator.Pitch = Value.rotator_value().p();
 		Rotator.Yaw = Value.rotator_value().y();
-		return SetStructOnTarget(World, Target, QuantityConverter<Rad2Deg,R2L>::Convert(Rotator), TEXT("FRotator"));
+		return SetStructOnTarget(World, Target, Rotator, TEXT("FRotator"));
 	}
 	case PropertyValue::kQuatValue:
 	{
-		// Convert from right-handed (API convention) to Unreal's left-handed FQuat.
-		const FQuat Quat = QuantityConverter<UC_NONE, R2L>::Convert(
-			FQuat(Value.quat_value().x(), Value.quat_value().y(), Value.quat_value().z(), Value.quat_value().w()));
+		const FQuat Quat(Value.quat_value().x(), Value.quat_value().y(), Value.quat_value().z(), Value.quat_value().w());
 		return SetStructOnTarget(World, Target, Quat, TEXT("FQuat"));
 	}
-	case PropertyValue::kTransformValue:
+	case PropertyValue::kNativeTransformValue:
 	{
-		// Same conventions as SpawnActor/SetActorTransform: m -> cm for location, rad/right-handed -> deg/left-handed for rotation.
-		const FTransform Transform = ToUnrealTransform(Value.transform_value());
+		const TempoWorld::NativeTransform& Given = Value.native_transform_value();
+		const FTransform Transform(
+			FQuat(Given.rotation().x(), Given.rotation().y(), Given.rotation().z(), Given.rotation().w()),
+			FVector(Given.translation().x(), Given.translation().y(), Given.translation().z()),
+			FVector(Given.scale3d().x(), Given.scale3d().y(), Given.scale3d().z()));
 		return SetStructOnTarget(World, Target, Transform, TEXT("FTransform"));
+	}
+	case PropertyValue::kLinearColorValue:
+	{
+		const TempoWorld::LinearColor& Given = Value.linear_color_value();
+		return SetStructOnTarget(World, Target, FLinearColor(Given.r(), Given.g(), Given.b(), Given.a()),
+			TEXT("FLinearColor"));
 	}
 	case PropertyValue::kColorValue:
 	{
-		FColor Color;
+		// Zero-initialized, so no component is left as whatever the stack held; alpha is opaque
+		// unless the value says otherwise.
+		FColor Color(ForceInitToZero);
 		Color.R = Value.color_value().r();
 		Color.G = Value.color_value().g();
 		Color.B = Value.color_value().b();
+		Color.A = Value.color_value().has_a() ? Value.color_value().a() : 255;
 
 		const grpc::Status ColorStatus = SetStructOnTarget(World, Target, Color, TEXT("FColor"));
 		if (ColorStatus.ok())
@@ -2800,209 +3852,111 @@ grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target
 		return SetObjectOnTarget(World, Target, Component);
 	}
 	case PropertyValue::kBoolArrayValue:
+	case PropertyValue::kBoolSetValue:
 	{
+		const TempoWorld::BoolArray& Given = Value.has_bool_array_value() ? Value.bool_array_value() : Value.bool_set_value();
 		TArray<bool> Array;
-		Array.Append(Value.bool_array_value().values().data(), Value.bool_array_value().values_size());
-		return SetArrayOnTarget<FBoolProperty>(World, Target, Array);
+		Array.Append(Given.values().data(), Given.values_size());
+		return SetContainerOnTarget<FBoolProperty>(World, Target, Array);
 	}
 	case PropertyValue::kStringArrayValue:
+	case PropertyValue::kStringSetValue:
 	{
-		// First try to set it as an FString array, then fall back on FName array
-		const TArray<FString> StrArray = ToStringArray(Value.string_array_value().values());
-		const grpc::Status StatusStr = SetArrayOnTarget<FStrProperty>(World, Target, StrArray);
-		// If we got an error other than FAILED_PRECONDITION that means the type was right, but something else was wrong.
-		if (StatusStr.ok() || StatusStr.error_code() != grpc::FAILED_PRECONDITION)
-		{
-			return StatusStr;
-		}
-		TArray<FName> NameArray;
-		NameArray.Reserve(StrArray.Num());
-		for (const FString& String : StrArray)
-		{
-			NameArray.Add(FName(*String));
-		}
-		return SetArrayOnTarget<FNameProperty>(World, Target, NameArray);
+		const TempoWorld::StringArray& Given = Value.has_string_array_value() ? Value.string_array_value() : Value.string_set_value();
+		return SetContainerOnTarget<FStrProperty, FNameProperty, FTextProperty>(World, Target, ToStringArray(Given.values()));
 	}
 	case PropertyValue::kEnumArrayValue:
+	case PropertyValue::kEnumSetValue:
 	{
-		// First try to set it as an FEnumProperty array, then fall back on FByteProperty array
-		const TArray<FString> StrArray = ToStringArray(Value.enum_array_value().values());
-		const grpc::Status EnumStatus = SetArrayOnTarget<FEnumProperty>(World, Target, StrArray);
-		if (EnumStatus.ok() || EnumStatus.error_code() != grpc::FAILED_PRECONDITION)
-		{
-			return EnumStatus;
-		}
-		return SetArrayOnTarget<FByteProperty>(World, Target, StrArray);
+		const TempoWorld::StringArray& Given = Value.has_enum_array_value() ? Value.enum_array_value() : Value.enum_set_value();
+		return SetContainerOnTarget<FEnumProperty, FByteProperty>(World, Target, ToStringArray(Given.values()));
 	}
 	case PropertyValue::kIntArrayValue:
+	case PropertyValue::kIntSetValue:
 	{
+		const TempoWorld::IntArray& Given = Value.has_int_array_value() ? Value.int_array_value() : Value.int_set_value();
 		TArray<int32> Array;
-		Array.Append(Value.int_array_value().values().data(), Value.int_array_value().values_size());
-		return SetArrayOnTarget<FIntProperty>(World, Target, Array);
+		Array.Append(Given.values().data(), Given.values_size());
+		return SetContainerOnTarget<FIntProperty, FByteProperty, FInt16Property, FInt8Property, FUInt16Property>(World, Target, Array);
 	}
 	case PropertyValue::kInt64ArrayValue:
+	case PropertyValue::kInt64SetValue:
 	{
 		// Protobuf's int64 is `long` on Linux but Unreal's int64 is `long long`; same width, different
 		// C++ types, so the pointer overload of TArray::Append can't match. Copy element-by-element instead.
+		const TempoWorld::Int64Array& Given = Value.has_int64_array_value() ? Value.int64_array_value() : Value.int64_set_value();
 		TArray<int64> Array;
-		Array.Reserve(Value.int64_array_value().values_size());
-		for (const int64 V : Value.int64_array_value().values())
+		Array.Reserve(Given.values_size());
+		for (const int64 V : Given.values())
 		{
 			Array.Add(V);
 		}
-		return SetArrayOnTarget<FInt64Property>(World, Target, Array);
+		return SetContainerOnTarget<FInt64Property, FUInt32Property, FUInt64Property>(World, Target, Array);
 	}
 	case PropertyValue::kFloatArrayValue:
-	{
-		// First try to set it as a double array, then fall back on float array
-		TArray<float> FloatArray;
-		FloatArray.Append(Value.float_array_value().values().data(), Value.float_array_value().values_size());
-		const grpc::Status StatusFloat = SetArrayOnTarget<FDoubleProperty>(World, Target, FloatArray);
-		if (StatusFloat.ok() || StatusFloat.error_code() != grpc::FAILED_PRECONDITION)
-		{
-			return StatusFloat;
-		}
-		return SetArrayOnTarget<FFloatProperty>(World, Target, FloatArray);
-	}
-	case PropertyValue::kClassArrayValue:
-	{
-		TArray<UObject*> ClassArray;
-		const grpc::Status Status = ResolveClasses(Value.class_array_value().values(), ClassArray);
-		if (!Status.ok())
-		{
-			return Status;
-		}
-		return SetObjectArrayOnTarget(World, Target, ClassArray);
-	}
-	case PropertyValue::kAssetArrayValue:
-	{
-		TArray<UObject*> AssetArray;
-		const grpc::Status Status = ResolveAssets(Value.asset_array_value().values(), AssetArray);
-		if (!Status.ok())
-		{
-			return Status;
-		}
-		return SetObjectArrayOnTarget(World, Target, AssetArray);
-	}
-	case PropertyValue::kActorArrayValue:
-	{
-		TArray<UObject*> ActorArray;
-		const grpc::Status Status = ResolveActors(World, Value.actor_array_value().values(), ActorArray);
-		if (!Status.ok())
-		{
-			return Status;
-		}
-		return SetObjectArrayOnTarget(World, Target, ActorArray);
-	}
-	case PropertyValue::kComponentArrayValue:
-	{
-		TArray<UObject*> ComponentArray;
-		const grpc::Status Status = ResolveComponents(World, Value.component_array_value().values(), TEXT("Component array property value"), ComponentArray);
-		if (!Status.ok())
-		{
-			return Status;
-		}
-		return SetObjectArrayOnTarget(World, Target, ComponentArray);
-	}
-	case PropertyValue::kBoolSetValue:
-	{
-		TArray<bool> Array;
-		Array.Append(Value.bool_set_value().values().data(), Value.bool_set_value().values_size());
-		return SetSetOnTarget<FBoolProperty>(World, Target, Array);
-	}
-	case PropertyValue::kStringSetValue:
-	{
-		const TArray<FString> StrArray = ToStringArray(Value.string_set_value().values());
-		const grpc::Status StatusStr = SetSetOnTarget<FStrProperty>(World, Target, StrArray);
-		if (StatusStr.ok() || StatusStr.error_code() != grpc::FAILED_PRECONDITION)
-		{
-			return StatusStr;
-		}
-		TArray<FName> NameArray;
-		NameArray.Reserve(StrArray.Num());
-		for (const FString& String : StrArray)
-		{
-			NameArray.Add(FName(*String));
-		}
-		return SetSetOnTarget<FNameProperty>(World, Target, NameArray);
-	}
-	case PropertyValue::kEnumSetValue:
-	{
-		const TArray<FString> StrArray = ToStringArray(Value.enum_set_value().values());
-		const grpc::Status EnumStatus = SetSetOnTarget<FEnumProperty>(World, Target, StrArray);
-		if (EnumStatus.ok() || EnumStatus.error_code() != grpc::FAILED_PRECONDITION)
-		{
-			return EnumStatus;
-		}
-		return SetSetOnTarget<FByteProperty>(World, Target, StrArray);
-	}
-	case PropertyValue::kIntSetValue:
-	{
-		TArray<int32> Array;
-		Array.Append(Value.int_set_value().values().data(), Value.int_set_value().values_size());
-		return SetSetOnTarget<FIntProperty>(World, Target, Array);
-	}
-	case PropertyValue::kInt64SetValue:
-	{
-		// See the int64 array case: protobuf's int64 and Unreal's int64 are distinct C++ types on Linux.
-		TArray<int64> Array;
-		Array.Reserve(Value.int64_set_value().values_size());
-		for (const int64 V : Value.int64_set_value().values())
-		{
-			Array.Add(V);
-		}
-		return SetSetOnTarget<FInt64Property>(World, Target, Array);
-	}
 	case PropertyValue::kFloatSetValue:
 	{
-		TArray<float> FloatArray;
-		FloatArray.Append(Value.float_set_value().values().data(), Value.float_set_value().values_size());
-		const grpc::Status StatusFloat = SetSetOnTarget<FDoubleProperty>(World, Target, FloatArray);
-		if (StatusFloat.ok() || StatusFloat.error_code() != grpc::FAILED_PRECONDITION)
-		{
-			return StatusFloat;
-		}
-		return SetSetOnTarget<FFloatProperty>(World, Target, FloatArray);
+		const TempoWorld::FloatArray& Given = Value.has_float_array_value() ? Value.float_array_value() : Value.float_set_value();
+		TArray<double> Array;
+		Array.Append(Given.values().data(), Given.values_size());
+		return SetContainerOnTarget<FDoubleProperty, FFloatProperty>(World, Target, Array);
 	}
+	case PropertyValue::kClassArrayValue:
 	case PropertyValue::kClassSetValue:
 	{
-		TArray<UObject*> ClassArray;
-		const grpc::Status Status = ResolveClasses(Value.class_set_value().values(), ClassArray);
+		TArray<UObject*> Classes;
+		const grpc::Status Status = ResolveClasses(
+			Value.has_class_array_value() ? Value.class_array_value().values() : Value.class_set_value().values(), Classes);
 		if (!Status.ok())
 		{
 			return Status;
 		}
-		return SetObjectSetOnTarget(World, Target, ClassArray);
+		return SetObjectContainerOnTarget(World, Target, Classes);
 	}
+	case PropertyValue::kAssetArrayValue:
 	case PropertyValue::kAssetSetValue:
 	{
-		TArray<UObject*> AssetArray;
-		const grpc::Status Status = ResolveAssets(Value.asset_set_value().values(), AssetArray);
+		TArray<UObject*> Assets;
+		const grpc::Status Status = ResolveAssets(
+			Value.has_asset_array_value() ? Value.asset_array_value().values() : Value.asset_set_value().values(), Assets);
 		if (!Status.ok())
 		{
 			return Status;
 		}
-		return SetObjectSetOnTarget(World, Target, AssetArray);
+		return SetObjectContainerOnTarget(World, Target, Assets);
 	}
+	case PropertyValue::kActorArrayValue:
 	case PropertyValue::kActorSetValue:
 	{
-		TArray<UObject*> ActorArray;
-		const grpc::Status Status = ResolveActors(World, Value.actor_set_value().values(), ActorArray);
+		TArray<UObject*> Actors;
+		const grpc::Status Status = ResolveActors(World,
+			Value.has_actor_array_value() ? Value.actor_array_value().values() : Value.actor_set_value().values(), Actors);
 		if (!Status.ok())
 		{
 			return Status;
 		}
-		return SetObjectSetOnTarget(World, Target, ActorArray);
+		return SetObjectContainerOnTarget(World, Target, Actors);
 	}
+	case PropertyValue::kComponentArrayValue:
 	case PropertyValue::kComponentSetValue:
 	{
-		TArray<UObject*> ComponentArray;
-		const grpc::Status Status = ResolveComponents(World, Value.component_set_value().values(), TEXT("Component set property value"), ComponentArray);
+		TArray<UObject*> Components;
+		const grpc::Status Status = Value.has_component_array_value()
+			? ResolveComponents(World, Value.component_array_value().values(), TEXT("Component array property value"), Components)
+			: ResolveComponents(World, Value.component_set_value().values(), TEXT("Component set property value"), Components);
 		if (!Status.ok())
 		{
 			return Status;
 		}
-		return SetObjectSetOnTarget(World, Target, ComponentArray);
+		return SetObjectContainerOnTarget(World, Target, Components);
+	}
+	case PropertyValue::kStructValue:
+	{
+		return SetStructValueOnTarget(World, Target, Value.struct_value());
+	}
+	case PropertyValue::kStructArrayValue:
+	{
+		return SetStructArrayOnTarget(World, Target, Value.struct_array_value());
 	}
 	case PropertyValue::VALUE_NOT_SET:
 	default:
@@ -3029,6 +3983,42 @@ grpc::Status SetPropertyOnObject(const UWorld* World, const RequestType& Request
 	}
 
 	return SetValueOnTarget(World, Target, Value);
+}
+
+PropertyValue RotatorValueFromSI(double Roll, double Pitch, double Yaw)
+{
+	const FRotator Rotator = QuantityConverter<Rad2Deg,R2L>::Convert(FRotator(Pitch, Yaw, Roll));
+	PropertyValue Value;
+	Value.mutable_rotator_value()->set_r(Rotator.Roll);
+	Value.mutable_rotator_value()->set_p(Rotator.Pitch);
+	Value.mutable_rotator_value()->set_y(Rotator.Yaw);
+	return Value;
+}
+
+PropertyValue QuatValueFromSI(double X, double Y, double Z, double W)
+{
+	const FQuat Quat = QuantityConverter<UC_NONE, R2L>::Convert(FQuat(X, Y, Z, W));
+	PropertyValue Value;
+	TempoWorld::Quat* Out = Value.mutable_quat_value();
+	Out->set_x(Quat.X); Out->set_y(Quat.Y); Out->set_z(Quat.Z); Out->set_w(Quat.W);
+	return Value;
+}
+
+PropertyValue TransformValueFromSI(const TempoCore::Transform& Transform)
+{
+	const FTransform Native = ToUnrealTransform(Transform);
+	PropertyValue Value;
+	TempoWorld::NativeTransform* Out = Value.mutable_native_transform_value();
+	const FQuat Rotation = Native.GetRotation();
+	Out->mutable_rotation()->set_x(Rotation.X); Out->mutable_rotation()->set_y(Rotation.Y);
+	Out->mutable_rotation()->set_z(Rotation.Z); Out->mutable_rotation()->set_w(Rotation.W);
+	const FVector Translation = Native.GetTranslation();
+	Out->mutable_translation()->set_x(Translation.X); Out->mutable_translation()->set_y(Translation.Y);
+	Out->mutable_translation()->set_z(Translation.Z);
+	const FVector Scale = Native.GetScale3D();
+	Out->mutable_scale3d()->set_x(Scale.X); Out->mutable_scale3d()->set_y(Scale.Y);
+	Out->mutable_scale3d()->set_z(Scale.Z);
+	return Value;
 }
 
 // Credit: https://stackoverflow.com/a/44065093
@@ -3133,30 +4123,19 @@ grpc::Status SetPropertyImpl<SetIntPointPropertyRequest>(const UWorld* World, co
 template<>
 grpc::Status SetPropertyImpl<SetRotatorPropertyRequest>(const UWorld* World, const SetRotatorPropertyRequest& Request)
 {
-	PropertyValue Value;
-	Value.mutable_rotator_value()->set_r(Request.r());
-	Value.mutable_rotator_value()->set_p(Request.p());
-	Value.mutable_rotator_value()->set_y(Request.y());
-	return SetPropertyOnObject(World, Request, Value);
+	return SetPropertyOnObject(World, Request, RotatorValueFromSI(Request.r(), Request.p(), Request.y()));
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetQuatPropertyRequest>(const UWorld* World, const SetQuatPropertyRequest& Request)
 {
-	PropertyValue Value;
-	Value.mutable_quat_value()->set_x(Request.x());
-	Value.mutable_quat_value()->set_y(Request.y());
-	Value.mutable_quat_value()->set_z(Request.z());
-	Value.mutable_quat_value()->set_w(Request.w());
-	return SetPropertyOnObject(World, Request, Value);
+	return SetPropertyOnObject(World, Request, QuatValueFromSI(Request.x(), Request.y(), Request.z(), Request.w()));
 }
 
 template<>
 grpc::Status SetPropertyImpl<SetTransformPropertyRequest>(const UWorld* World, const SetTransformPropertyRequest& Request)
 {
-	PropertyValue Value;
-	*Value.mutable_transform_value() = Request.value();
-	return SetPropertyOnObject(World, Request, Value);
+	return SetPropertyOnObject(World, Request, TransformValueFromSI(Request.value()));
 }
 
 template<>
@@ -3166,6 +4145,7 @@ grpc::Status SetPropertyImpl<SetColorPropertyRequest>(const UWorld* World, const
 	Value.mutable_color_value()->set_r(Request.r());
 	Value.mutable_color_value()->set_g(Request.g());
 	Value.mutable_color_value()->set_b(Request.b());
+	Value.mutable_color_value()->set_a(255);
 	return SetPropertyOnObject(World, Request, Value);
 }
 
@@ -3245,7 +4225,7 @@ template<>
 grpc::Status SetPropertyImpl<SetFloatArrayPropertyRequest>(const UWorld* World, const SetFloatArrayPropertyRequest& Request)
 {
 	PropertyValue Value;
-	*Value.mutable_float_array_value()->mutable_values() = Request.values();
+	Value.mutable_float_array_value()->mutable_values()->Add(Request.values().begin(), Request.values().end());
 	return SetPropertyOnObject(World, Request, Value);
 }
 
@@ -3325,7 +4305,7 @@ template<>
 grpc::Status SetPropertyImpl<SetFloatSetPropertyRequest>(const UWorld* World, const SetFloatSetPropertyRequest& Request)
 {
 	PropertyValue Value;
-	*Value.mutable_float_set_value()->mutable_values() = Request.values();
+	Value.mutable_float_set_value()->mutable_values()->Add(Request.values().begin(), Request.values().end());
 	return SetPropertyOnObject(World, Request, Value);
 }
 
@@ -3413,6 +4393,7 @@ namespace
 		case SetPropertyOp::kAssetSetOp:        return SetPropertyImpl(World, Op.asset_set_op());
 		case SetPropertyOp::kActorSetOp:        return SetPropertyImpl(World, Op.actor_set_op());
 		case SetPropertyOp::kComponentSetOp:    return SetPropertyImpl(World, Op.component_set_op());
+		case SetPropertyOp::kGenericOp:         return SetPropertyOnObject(World, Op.generic_op(), Op.generic_op().value());
 		case SetPropertyOp::OP_NOT_SET:
 		default:
 			return grpc::Status(grpc::FAILED_PRECONDITION, "SetPropertyOp has no op set");
@@ -3440,7 +4421,8 @@ void UTempoWorldControlServiceSubsystem::SetProperties(const SetPropertiesReques
 
 void UTempoWorldControlServiceSubsystem::SetPropertyValue(const SetPropertyRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const
 {
-	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(), SetPropertyOnObject(GetWorld(), Request, Request.value()));
+	ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
+		SetPropertyOnObject(GetWorld(), Request, Request.value()));
 }
 
 namespace
@@ -3449,41 +4431,16 @@ namespace
 	// parameters. A Blueprint "by-ref" input is CPF_OutParm|CPF_ReferenceParm and is an input.
 	bool IsInputParm(const FProperty* Property)
 	{
-		if (!Property->HasAnyPropertyFlags(CPF_Parm) || Property->HasAnyPropertyFlags(CPF_ReturnParm))
-		{
-			return false;
-		}
-		return !Property->HasAnyPropertyFlags(CPF_OutParm) || Property->HasAnyPropertyFlags(CPF_ReferenceParm);
+		return TempoWorldReflection::IsInputParameter(Property);
 	}
 
-	grpc::Status CheckFunctionIsCallable(const UObject* Object, const UFunction* Function)
+	grpc::Status CheckFunctionIsCallable(const UFunction* Function)
 	{
-		for (TFieldIterator<FProperty> It(Function); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+		const TempoWorldReflection::FFunctionInfo Info = TempoWorldReflection::ClassifyFunction(Function);
+		if (!Info.bCallable)
 		{
-			const FProperty* Parm = *It;
-			// Latent functions are identified by their FLatentActionInfo parameter, which only
-			// the caller's own latent action manager can meaningfully fill in.
-			if (const FStructProperty* StructParm = CastField<FStructProperty>(Parm))
-			{
-				if (StructParm->Struct == FLatentActionInfo::StaticStruct())
-				{
-					const FString ErrorMsg = FString::Printf(TEXT("Function '%s' on object '%s' is latent, which cannot be called over the API"), *Function->GetName(), *Object->GetName());
-					return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-				}
-			}
-			if (Parm->ArrayDim != 1)
-			{
-				// UProperties can be C-style arrays, indicated by a non-1 ArrayDim. We don't support these.
-				const FString ErrorMsg = FString::Printf(TEXT("Parameter '%s' of function '%s' is a C-style array, which is not supported"), *Parm->GetName(), *Function->GetName());
-				return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-			}
-			if (IsInputParm(Parm) && (CastField<FDelegateProperty>(Parm) || CastField<FMulticastDelegateProperty>(Parm)))
-			{
-				const FString ErrorMsg = FString::Printf(TEXT("Parameter '%s' of function '%s' is a delegate, which cannot be supplied over the API"), *Parm->GetName(), *Function->GetName());
-				return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-			}
+			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*Info.UnsupportedReason)));
 		}
-
 		return grpc::Status_OK;
 	}
 
@@ -3525,7 +4482,7 @@ namespace
 	// container that SetValueOnTarget can write into.
 	grpc::Status CallFunctionWithArgs(const UWorld* World, UObject* Object, UFunction* Function, const CallFunctionRequest& Request, CallFunctionResponse& Response)
 	{
-		const grpc::Status CallableStatus = CheckFunctionIsCallable(Object, Function);
+		const grpc::Status CallableStatus = CheckFunctionIsCallable(Function);
 		if (!CallableStatus.ok())
 		{
 			return CallableStatus;
@@ -3603,32 +4560,27 @@ namespace
 			Result->set_name(TCHAR_TO_UTF8(*Parm->GetName()));
 			Result->set_property_type(TCHAR_TO_UTF8(*Type));
 			Result->set_value(TCHAR_TO_UTF8(*Value));
+
+			// The same value, typed. A call frame is just another container, so this is the
+			// property reader pointed at the frame rather than at an object -- which is what keeps
+			// a returned vector identical to the same vector read off a property.
+			//
+			// A type the API cannot carry as one value leaves typed_value unset rather than
+			// failing the call: the string form is still useful, and the caller asked to invoke a
+			// function, not to read this parameter.
+			PropertyValue TypedValue;
+			if (WritePropertyToValue(Frame, Parm, TypedValue).ok())
+			{
+				*Result->mutable_typed_value() = TypedValue;
+			}
 		}
 
 		return grpc::Status_OK;
 	}
 
-	// Render a function's signature the way its declaration reads, using the same type vocabulary
-	// GetProperties reports: "float GetDistanceTo(AActor* OtherActor)". Out parameters stay in the
-	// parameter list, prefixed with "out ", since that is where the frame expects them.
 	FString GetFunctionSignature(const UFunction* Function)
 	{
-		FString ReturnType = TEXT("void");
-		TArray<FString> Parms;
-		for (TFieldIterator<FProperty> It(Function); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
-		{
-			const FProperty* Parm = *It;
-			FString Type;
-			GetPropertyTypeAndValue(nullptr, Parm, Type, nullptr);
-			if (Parm->HasAnyPropertyFlags(CPF_ReturnParm))
-			{
-				ReturnType = Type;
-				continue;
-			}
-			Parms.Add(FString::Printf(TEXT("%s%s %s"), IsInputParm(Parm) ? TEXT("") : TEXT("out "), *Type, *Parm->GetName()));
-		}
-
-		return FString::Printf(TEXT("%s %s(%s)"), *ReturnType, *Function->GetName(), *FString::Join(Parms, TEXT(", ")));
+		return TempoWorldReflection::ClassifyFunction(Function).Signature;
 	}
 
 	void GetObjectFunctions(const UObject* Object, GetFunctionsResponse& Response)
@@ -3685,7 +4637,7 @@ namespace
 
 			// Report exactly what CallFunction would refuse, so a caller never has to guess which
 			// of the listed functions it can actually invoke.
-			const grpc::Status CallableStatus = CheckFunctionIsCallable(Object, Function);
+			const grpc::Status CallableStatus = CheckFunctionIsCallable(Function);
 			FunctionDescriptor->set_callable(CallableStatus.ok());
 			if (!CallableStatus.ok())
 			{
@@ -3695,34 +4647,111 @@ namespace
 	}
 }
 
+namespace
+{
+	// CallFunction, from the request to the response: shared by the RPC and by RunBatch's call ops.
+	grpc::Status CallFunctionForRequest(const UWorld* World, const CallFunctionRequest& Request, CallFunctionResponse& Response)
+	{
+		UObject* Object = nullptr;
+		const grpc::Status GetObjectStatus = GetObjectForRequest(World, Request, Object);
+		if (!GetObjectStatus.ok())
+		{
+			return GetObjectStatus;
+		}
+
+		if (Request.function().empty())
+		{
+			return grpc::Status(grpc::FAILED_PRECONDITION, "function must be specified in CallFunction request");
+		}
+
+		const FName FunctionName(UTF8_TO_TCHAR(Request.function().c_str()));
+		UFunction* Function = Object->GetClass()->FindFunctionByName(FunctionName);
+		if (!Function)
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("Function '%s' not found on object '%s' (class '%s')"), *FunctionName.ToString(), *Object->GetName(), *Object->GetClass()->GetName());
+			return grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+
+		return CallFunctionWithArgs(World, Object, Function, Request, Response);
+	}
+}
+
 void UTempoWorldControlServiceSubsystem::CallObjectFunction(const CallFunctionRequest& Request, const TResponseDelegate<CallFunctionResponse>& ResponseContinuation) const
 {
-	UObject* Object = nullptr;
-	const grpc::Status GetObjectStatus = GetObjectForRequest(GetWorld(), Request, Object);
-	if (!GetObjectStatus.ok())
-	{
-		ResponseContinuation.ExecuteIfBound(CallFunctionResponse(), GetObjectStatus);
-		return;
-	}
-
-	if (Request.function().empty())
-	{
-		ResponseContinuation.ExecuteIfBound(CallFunctionResponse(), grpc::Status(grpc::FAILED_PRECONDITION, "function must be specified in CallFunction request"));
-		return;
-	}
-
-	const FName FunctionName(UTF8_TO_TCHAR(Request.function().c_str()));
-	UFunction* Function = Object->GetClass()->FindFunctionByName(FunctionName);
-	if (!Function)
-	{
-		const FString ErrorMsg = FString::Printf(TEXT("Function '%s' not found on object '%s' (class '%s')"), *FunctionName.ToString(), *Object->GetName(), *Object->GetClass()->GetName());
-		ResponseContinuation.ExecuteIfBound(CallFunctionResponse(), grpc::Status(grpc::NOT_FOUND, std::string(TCHAR_TO_UTF8(*ErrorMsg))));
-		return;
-	}
-
 	CallFunctionResponse Response;
-	const grpc::Status CallStatus = CallFunctionWithArgs(GetWorld(), Object, Function, Request, Response);
-	ResponseContinuation.ExecuteIfBound(Response, CallStatus);
+	const grpc::Status CallStatus = CallFunctionForRequest(GetWorld(), Request, Response);
+	ResponseContinuation.ExecuteIfBound(CallStatus.ok() ? Response : CallFunctionResponse(), CallStatus);
+}
+
+void UTempoWorldControlServiceSubsystem::RunBatch(const RunBatchRequest& Request, const TResponseDelegate<RunBatchResponse>& ResponseContinuation) const
+{
+	const UWorld* World = GetWorld();
+	RunBatchResponse Response;
+
+	// The whole batch runs here, in one handler invocation on the game thread, which is what puts
+	// it between two ticks. Each op is the same code its own RPC runs, so a batched write, read or
+	// call behaves exactly as the unbatched one would at that point in the sequence.
+	int32 FailedAt = INDEX_NONE;
+	for (int32 Index = 0; Index < Request.ops_size(); ++Index)
+	{
+		BatchOpResult* Result = Response.add_results();
+		if (FailedAt != INDEX_NONE)
+		{
+			Result->set_code(grpc::ABORTED);
+			Result->set_error(TCHAR_TO_UTF8(*FString::Printf(TEXT("not run: op %d failed first"), FailedAt)));
+			continue;
+		}
+
+		const BatchOp& Op = Request.ops(Index);
+		grpc::Status Status = grpc::Status_OK;
+		switch (Op.op_case())
+		{
+		case BatchOp::kSet:
+			Status = SetPropertyOnObject(World, Op.set(), Op.set().value());
+			break;
+		case BatchOp::kGet:
+		{
+			UObject* Object = nullptr;
+			Status = GetObjectForRequest(World, Op.get(), Object);
+			PropertyValue Value;
+			if (Status.ok())
+			{
+				Status = GetPropertyOnObject(FString(UTF8_TO_TCHAR(Op.get().property().c_str())), Object, Value);
+			}
+			if (Status.ok())
+			{
+				*Result->mutable_value() = MoveTemp(Value);
+			}
+			break;
+		}
+		case BatchOp::kCall:
+		{
+			CallFunctionResponse CallResponse;
+			Status = CallFunctionForRequest(World, Op.call(), CallResponse);
+			if (Status.ok())
+			{
+				*Result->mutable_call() = MoveTemp(CallResponse);
+			}
+			break;
+		}
+		case BatchOp::OP_NOT_SET:
+		default:
+			Status = grpc::Status(grpc::FAILED_PRECONDITION, "BatchOp has no op set");
+			break;
+		}
+
+		if (!Status.ok())
+		{
+			Result->set_code(static_cast<int32>(Status.error_code()));
+			Result->set_error(Status.error_message());
+			if (Request.stop_on_failure())
+			{
+				FailedAt = Index;
+			}
+		}
+	}
+
+	ResponseContinuation.ExecuteIfBound(Response, grpc::Status_OK);
 }
 
 void UTempoWorldControlServiceSubsystem::GetActorFunctions(const GetActorFunctionsRequest& Request, const TResponseDelegate<GetFunctionsResponse>& ResponseContinuation) const

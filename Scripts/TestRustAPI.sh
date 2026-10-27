@@ -60,18 +60,61 @@ TESTS_DIR="${TEMPO_RUST_TESTS_DIR:-$TEMPO_ROOT/Tests/Rust}"
 REPORT_DIR="${TEMPO_TEST_REPORT_DIR:-$TEMPO_ROOT/Saved/RustTestReport}"
 mkdir -p "$REPORT_DIR"
 
+# The reflected API's tests are their own crate, because they need a second path dependency whose
+# package name belongs to the host project. Everything else lives in Tests/Rust itself.
+CRATE_DIR="$TESTS_DIR"
+if [ "$GROUP" = "typed" ]; then
+  CRATE_DIR="$TESTS_DIR/typed"
+fi
+
 # Vendor the packaged crate so the test crate's `path` dependency resolves.
-rm -rf "$TESTS_DIR/vendor/tempo-sim"
-mkdir -p "$TESTS_DIR/vendor"
-cp -r "$CRATE_SRC" "$TESTS_DIR/vendor/tempo-sim"
+rm -rf "$CRATE_DIR/vendor/tempo-sim"
+mkdir -p "$CRATE_DIR/vendor"
+cp -r "$CRATE_SRC" "$CRATE_DIR/vendor/tempo-sim"
+
+if [ "$GROUP" = "typed" ]; then
+  # The project's own crate, which carries this build's generated classes as its `reflected` module,
+  # vendored under a fixed name. The crate is called after the host project (tempo-sample), and a
+  # dependency has to be named at compile time, so the one `name =` line is rewritten rather than
+  # having every project fork the test crate.
+  CLASSES_SRC=""
+  for candidate in "$PACKAGED_DIR"/API/Rust/*/; do
+    if [ "$(basename "$candidate")" != "tempo-sim" ] \
+        && [ -f "$candidate/src/reflected/mod.rs" ]; then
+      CLASSES_SRC="${candidate%/}"
+      break
+    fi
+  done
+  if [ -z "$CLASSES_SRC" ]; then
+    echo "FAILED: no crate under $PACKAGED_DIR/API/Rust carries generated classes (was the package built with TEMPO_GEN_RUST_API=1?)." 1>&2
+    exit 1
+  fi
+  echo "Vendoring $(basename "$CLASSES_SRC") as project"
+  rm -rf "$CRATE_DIR/vendor/project"
+  cp -r "$CLASSES_SRC" "$CRATE_DIR/vendor/project"
+  # Not `sed -i`: its suffix argument is required on BSD and rejected on GNU, and this script runs
+  # on both. [[:space:]] rather than \s for the same reason.
+  CLASSES_MANIFEST="$CRATE_DIR/vendor/project/Cargo.toml"
+  sed -E 's/^name[[:space:]]*=[[:space:]]*"[^"]+"/name = "project"/' \
+    "$CLASSES_MANIFEST" > "$CLASSES_MANIFEST.renamed"
+  mv "$CLASSES_MANIFEST.renamed" "$CLASSES_MANIFEST"
+fi
 
 # Launch the sim for groups that need it (everything except the compile-only "contract" group).
 SIM_PID=""
+# The sim is launched under job control (set -m), which makes it the leader of a process group of
+# its own, so this signals the group: what a package calls its binary is a launcher script on
+# Linux, and signalling the launcher alone stops the script and orphans the game, which keeps the
+# port. Terminated first, killed if the group is still there after a grace period.
 cleanup() {
-  if [ -n "$SIM_PID" ] && kill -0 "$SIM_PID" 2>/dev/null; then
-    kill "$SIM_PID" 2>/dev/null || true
-    wait "$SIM_PID" 2>/dev/null || true
-  fi
+  [ -n "$SIM_PID" ] || return 0
+  kill -TERM -- -"$SIM_PID" 2>/dev/null || kill -TERM "$SIM_PID" 2>/dev/null || true
+  for _ in $(seq 1 30); do
+    kill -0 -- -"$SIM_PID" 2>/dev/null || break
+    sleep 1
+  done
+  kill -KILL -- -"$SIM_PID" 2>/dev/null || true
+  wait "$SIM_PID" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -92,9 +135,12 @@ if [ "$GROUP" != "contract" ]; then
     ENDPOINT_ARG=(-ServerPort="$PORT")
     echo "Launching sim: $BINARY $RHI_ARG (port $PORT)"
   fi
+  # Under job control, so the sim leads a process group cleanup can signal as a whole.
+  set -m
   "$BINARY" "$RHI_ARG" -unattended -nopause -nosound -nosplash \
     "${ENDPOINT_ARG[@]}" -stdout -fullstdoutlogoutput > "$REPORT_DIR/sim.log" 2>&1 &
   SIM_PID=$!
+  set +m
 
   # Wait for the endpoint to show up (the tests then retry the gRPC handshake). A socket has no
   # /dev/tcp equivalent, so wait for the server to create the file.
@@ -115,14 +161,21 @@ fi
 export TEMPO_SERVER_PORT="$PORT"
 export TEMPO_SERVER_SOCKET="$SOCKET"
 
-CARGO_ARGS=(test --manifest-path "$TESTS_DIR/Cargo.toml")
+CARGO_ARGS=(test --manifest-path "$CRATE_DIR/Cargo.toml")
 if [ -n "$GROUP" ] && [ "$GROUP" != "all" ]; then
   CARGO_ARGS+=(--test "$GROUP")
 fi
 
+# The sim-backed tests share the client's global connection context and drive the one sim, so they
+# run on a single thread. The contract group compiles and inspects, and may use them all.
+HARNESS_ARGS=(--nocapture)
+if [ "$GROUP" != "contract" ]; then
+  HARNESS_ARGS+=(--test-threads=1)
+fi
+
 echo "Running Rust API tests (group='${GROUP:-all}') against the packaged crate ..."
 set +e
-cargo "${CARGO_ARGS[@]}" -- --nocapture 2>&1 | tee "$REPORT_DIR/cargo-${GROUP:-all}.log"
+cargo "${CARGO_ARGS[@]}" -- "${HARNESS_ARGS[@]}" 2>&1 | tee "$REPORT_DIR/cargo-${GROUP:-all}.log"
 STATUS=${PIPESTATUS[0]}
 set -e
 exit "$STATUS"

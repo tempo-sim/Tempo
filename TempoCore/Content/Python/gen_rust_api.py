@@ -7,20 +7,26 @@ import copy
 import google.protobuf.descriptor as gpd
 import importlib.util
 import jinja2
-import json
 import os
-import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+from gen_project_package import (
+    RUST_CLASSES,
+    RUST_METADATA_FILE,
+    read_version,
+    write_project_lib_rs,
+    write_rust_crate,
+)
 from gen_common import (
     INFRA_PACKAGE,
     classify_modules,
     gather_enums,
     gather_messages,
     gather_services,
+    is_proto_module,
     package_import_name,
     pascal_to_snake,
     prost_to_snake,
@@ -30,6 +36,26 @@ from gen_common import (
 
 
 TEMPO_INFRA_CRATE = "tempo_sim"  # Rust ident form of the tempo-sim crate name.
+
+# The request type of an RPC whose wrapper takes no argument.
+EMPTY_MESSAGE = "TempoCore.Empty"
+
+# Where a deprecated RPC's wrapper points its caller.
+MIGRATION_URL = "https://tempo-sim.readthedocs.io/en/latest/migration/v0.4.0/"
+
+# Names a generated module defines or imports itself, which a re-exported request type must not take.
+RESERVED_MODULE_NAMES = {"Batch", "Call", "SyncStreamIterator"}
+
+
+def is_proto3_optional(field):
+    """Whether a field is a proto3 `optional` scalar, which prost makes an `Option<T>`.
+
+    Such a field sits alone in a synthetic oneof named after it. The descriptor's own
+    `is_synthetic` is missing from some protobuf runtimes, so recognize the oneof by its shape.
+    """
+    return (field.label != "repeated"
+            and field.proto_type != gpd.FieldDescriptor.TYPE_MESSAGE
+            and field.containing_oneof == f"_{field.name}")
 
 
 def _crate_prefix_for(target_module_pascal, current_owner, module_owners):
@@ -149,6 +175,8 @@ def generate_rust_api(module_dirs, tempo_root_dir, project_root_dir, module_owne
     all_enums = {}
     all_messages = {}
     all_services = {}
+    # (module, service, rpc) of every RPC with the `deprecated` method option.
+    deprecated_rpcs = set()
 
     # Track which modules have services (and thus need wrapper generation)
     modules_with_services = set()
@@ -179,6 +207,10 @@ def generate_rust_api(module_dirs, tempo_root_dir, project_root_dir, module_owne
                         if len(services) > 0:
                             modules_with_services.add(tempo_module_name)
                         all_services = all_services | services
+                        for service in module_descriptor.services_by_name.values():
+                            for method in service.methods:
+                                if method.GetOptions().deprecated:
+                                    deprecated_rpcs.add((tempo_module_name, service.name, method.name))
 
     # Resolve type names
     for tempo_message_descriptor in all_messages.values():
@@ -186,89 +218,53 @@ def generate_rust_api(module_dirs, tempo_root_dir, project_root_dir, module_owne
 
     # Jinja2 templates for Rust code generation
 
-    # Shared signature/body fragments. `sig_fields` are the function parameters (one
-    # per proto field, oneof members typed Option<T>); `plain_fields` become direct
-    # prost struct fields; each `oneof_groups` entry collapses its members into the
-    # single Option<Enum> field prost emits for the oneof.
-    sig_params_fragment = '''
-{%- for field in sig_fields %}
-    {{ field.name }}: {{ field.rust_type }},
-{%- endfor %}'''
-
-    oneof_build_fragment = '''
-{%- for oneof in oneof_groups %}
-    let {{ oneof.name }} = {% for variant in oneof.variants %}if let Some(value) = {{ variant.param }} {
-        Some({{ oneof.enum_path }}::{{ variant.variant }}(value))
-    } else {% endfor %}{
-        None
-    };
-{%- endfor %}'''
-
-    struct_init_fragment = '''
-{%- for field in plain_fields %}
-{%- if field.needs_option_wrap %}
-        {{ field.name }}: {{ field.name }}.into(),
-{%- else %}
-        {{ field.name }},
-{%- endif %}
-{%- endfor %}
-{%- for oneof in oneof_groups %}
-        {{ oneof.name }},
-{%- endfor %}'''
-
-    call_args_fragment = '''
-{%- for field in sig_fields %}
-        {{ field.name }},
-{%- endfor %}'''
+    # Each wrapper takes its request message whole, so a field added to a request does not change
+    # the wrapper's signature. One whose request is TempoCore.Empty takes nothing.
+    request_param_fragment = '''{% if takes_request %}request: {{ request_short_type }}{% endif %}'''
+    request_build_fragment = '''{% if not takes_request %}
+    let request = {{ request_rust_type }}::default();{% endif %}'''
+    call_arg_fragment = '''{% if takes_request %}request{% endif %}'''
+    deprecated_fragment = '''{% if deprecated %}
+#[deprecated(note = "{{ rpc.name }} is deprecated; see {{ migration_url }}")]{% endif %}'''
+    allow_deprecated_fragment = '''{% if deprecated %}#[allow(deprecated)]
+    {% endif %}'''
 
     # Template for unary RPC (non-streaming)
     unary_rpc_template = '''
-/// {{ rpc.name }}
-pub async fn {{ name }}_async(''' + sig_params_fragment + '''
-) -> Result<{{ response_rust_type }}, {{ infra }}::TempoError> {
+/// {{ rpc.name }}''' + deprecated_fragment + '''
+pub async fn {{ name }}_async(''' + request_param_fragment + ''') -> Result<{{ response_rust_type }}, {{ infra }}::TempoError> {
     let channel = {{ infra }}::context::connected_channel().await?;
     let mut client = {{ client_type }}::new(channel)
         .max_decoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE)
-        .max_encoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE);
-''' + oneof_build_fragment + '''
-    let request = {{ request_rust_type }} {''' + struct_init_fragment + '''
-    };
+        .max_encoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE);''' + request_build_fragment + '''
 
-    let response = client.{{ method_name }}(request).await?;
+    ''' + allow_deprecated_fragment + '''let response = client.{{ method_name }}(request).await?;
     Ok(response.into_inner())
 }
 
-/// Synchronous version of {{ name }}
-pub fn {{ name }}(''' + sig_params_fragment + '''
-) -> Result<{{ response_rust_type }}, {{ infra }}::TempoError> {
-    {{ infra }}::context::RUNTIME.block_on({{ name }}_async(''' + call_args_fragment + '''
-    ))
+/// Synchronous version of {{ name }}''' + deprecated_fragment + '''
+pub fn {{ name }}(''' + request_param_fragment + ''') -> Result<{{ response_rust_type }}, {{ infra }}::TempoError> {
+    ''' + allow_deprecated_fragment + '''{{ infra }}::context::RUNTIME.block_on({{ name }}_async(''' + call_arg_fragment + '''))
 }
 
 '''
 
     # Template for server-streaming RPC
     streaming_rpc_template = '''
-/// {{ rpc.name }} (server streaming)
-pub async fn {{ name }}_async(''' + sig_params_fragment + '''
-) -> Result<tonic::Streaming<{{ response_rust_type }}>, {{ infra }}::TempoError> {
+/// {{ rpc.name }} (server streaming)''' + deprecated_fragment + '''
+pub async fn {{ name }}_async(''' + request_param_fragment + ''') -> Result<tonic::Streaming<{{ response_rust_type }}>, {{ infra }}::TempoError> {
     let channel = {{ infra }}::context::connected_channel().await?;
     let mut client = {{ client_type }}::new(channel)
         .max_decoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE)
-        .max_encoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE);
-''' + oneof_build_fragment + '''
-    let request = {{ request_rust_type }} {''' + struct_init_fragment + '''
-    };
+        .max_encoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE);''' + request_build_fragment + '''
 
-    let response = client.{{ method_name }}(request).await?;
+    ''' + allow_deprecated_fragment + '''let response = client.{{ method_name }}(request).await?;
     Ok(response.into_inner())
 }
 
-/// Synchronous iterator version of {{ name }}
-pub fn {{ name }}(''' + sig_params_fragment + '''
-) -> Result<impl Iterator<Item = Result<{{ response_rust_type }}, tonic::Status>>, {{ infra }}::TempoError> {
-    let stream = {{ infra }}::context::RUNTIME.block_on({{ name }}_async(''' + call_args_fragment + '''
-    ))?;
+/// Synchronous iterator version of {{ name }}''' + deprecated_fragment + '''
+pub fn {{ name }}(''' + request_param_fragment + ''') -> Result<impl Iterator<Item = Result<{{ response_rust_type }}, tonic::Status>>, {{ infra }}::TempoError> {
+    ''' + allow_deprecated_fragment + '''let stream = {{ infra }}::context::RUNTIME.block_on({{ name }}_async(''' + call_arg_fragment + '''))?;
 
     Ok(SyncStreamIterator::new(stream))
 }
@@ -284,14 +280,18 @@ pub fn {{ name }}(''' + sig_params_fragment + '''
 /// Stages property-set operations and submits them in one SetProperties RPC.
 /// Each method appends an op and returns `self` for fluent chaining; call
 /// [`Batch::execute`] (sync) or [`Batch::execute_async`] (async) to send.
+#[deprecated(note = "SetProperties is deprecated; see {{ migration_url }}")]
 pub struct Batch {
     ops: Vec<{{ op_type }}>,
 }
 
+#[deprecated(note = "SetProperties is deprecated; see {{ migration_url }}")]
+#[allow(deprecated)]
 pub fn batch() -> Batch {
     Batch { ops: Vec::new() }
 }
 
+#[allow(deprecated)]
 impl Batch {
 {%- for method in methods %}
     pub fn {{ method.name }}(
@@ -346,11 +346,12 @@ impl Batch {
 // Auto-generated by gen_rust_api.py. Do not edit.
 
 //! High-level API wrappers for {{ module_name }}.
-
 {% if has_streaming %}
 use {{ infra }}::streaming::SyncStreamIterator;
 {% endif %}
-
+{% for path in reexports -%}
+pub use {{ path }};
+{% endfor %}
 '''
 
     # Template for a Call struct that stages typed CallFunction arguments. One method per
@@ -367,13 +368,21 @@ pub struct Call {
     component: String,
     function: String,
     args: Vec<{{ arg_type }}>,
+    subsystem: String,
 }
 
 pub fn call(actor: String, component: String, function: String) -> Call {
-    Call { actor, component, function, args: Vec::new() }
+    Call { actor, component, function, args: Vec::new(), subsystem: String::new() }
 }
 
 impl Call {
+    /// Call the function on a subsystem rather than an actor: its class, by path or name. The
+    /// actor and component given to [`call`] must then be empty.
+    pub fn subsystem(mut self, subsystem: String) -> Self {
+        self.subsystem = subsystem;
+        self
+    }
+
 {%- for method in methods %}
     pub fn {{ method.name }}(
         mut self,
@@ -389,7 +398,11 @@ impl Call {
 {%- if method.wrapper_rust_type %}
                     {{ method.wrapper_rust_type }} {
 {%- for field in method.fields %}
+{%- if field.optional %}
+                        {{ field.name }}: {{ field.name }}.into(),
+{%- else %}
                         {{ field.name }},
+{%- endif %}
 {%- endfor %}
                     }
 {%- else %}
@@ -416,6 +429,7 @@ impl Call {
             component: self.component,
             function: self.function,
             args: self.args,
+            subsystem: self.subsystem,
         };
         let response = client.call_function(request).await?;
         Ok(response.into_inner())
@@ -460,6 +474,20 @@ impl Call {
 
             has_streaming = False
             rpc_code = []
+            # Short name -> path of each request type this module's wrappers take, re-exported so a
+            # caller can build one without reaching into `proto`.
+            reexports = {}
+
+            def reexport(short_name, path):
+                if short_name in RESERVED_MODULE_NAMES:
+                    raise RuntimeError(
+                        f"{rust_module_name}: request type {short_name} would shadow the module's own "
+                        f"{short_name}")
+                existing = reexports.setdefault(short_name, path)
+                if existing != path:
+                    raise RuntimeError(
+                        f"{rust_module_name}: two request types are both named {short_name} "
+                        f"({existing} and {path}), so both cannot be re-exported. Rename one.")
 
             for tempo_service_descriptor in service_descriptors:
                 for rpc_descriptor in tempo_service_descriptor.rpcs:
@@ -483,49 +511,11 @@ impl Call {
                         f"{tempo_service_descriptor.object_name}Client",
                     )
 
-                    # Build the function signature, the plain prost struct fields,
-                    # and one collapsed Option<Enum> assignment per oneof. prost emits
-                    # a oneof as a single field named after the oneof; members become
-                    # enum variants, so they're function params (Option<T>) but not
-                    # direct struct fields.
-                    sig_fields = []
-                    plain_fields = []
-                    oneof_groups = {}
-                    request_module_pascal = tempo_request_descriptor.module_name.split(".")[0]
-                    request_msg_snake = prost_to_snake(tempo_request_descriptor.object_name)
-                    for field in tempo_request_descriptor.fields:
-                        field.rust_type = get_rust_type(field, owner, module_owners)
-                        field.needs_option_wrap = needs_option_wrap(field)
-                        if field.label == "repeated":
-                            field.rust_type = f"Vec<{field.rust_type}>"
-                        if field.containing_oneof is not None:
-                            sig_fields.append({
-                                "name": field.name,
-                                "rust_type": f"Option<{field.rust_type}>",
-                            })
-                            group = oneof_groups.setdefault(field.containing_oneof, {
-                                "name": field.containing_oneof,
-                                "enum_path": _crate_path(
-                                    owner, request_module_pascal,
-                                    f"{request_msg_snake}::"
-                                    f"{snake_to_upper_camel(field.containing_oneof)}",
-                                ),
-                                "variants": [],
-                            })
-                            group["variants"].append({
-                                "param": field.name,
-                                "variant": snake_to_upper_camel(field.name),
-                            })
-                        else:
-                            # Message fields are Option<T> in prost, so accept
-                            # `impl Into<Option<T>>`: callers can pass a bare `T`,
-                            # `Some(T)`, or `None` (e.g. a component with no transform).
-                            if field.needs_option_wrap:
-                                param_type = f"impl Into<Option<{field.rust_type}>>"
-                            else:
-                                param_type = field.rust_type
-                            sig_fields.append({"name": field.name, "rust_type": param_type})
-                            plain_fields.append(field)
+                    takes_request = rpc_descriptor.request_type != EMPTY_MESSAGE
+                    if takes_request:
+                        reexport(tempo_request_descriptor.object_name, request_rust_type)
+                    deprecated = (service_module_pascal, tempo_service_descriptor.object_name,
+                                  rpc_descriptor.name) in deprecated_rpcs
 
                     if rpc_descriptor.server_streaming:
                         has_streaming = True
@@ -537,11 +527,10 @@ impl Call {
                         infra=infra,
                         name=pascal_to_snake(rpc_descriptor.name),
                         rpc=rpc_descriptor,
-                        request=tempo_request_descriptor,
-                        sig_fields=sig_fields,
-                        plain_fields=plain_fields,
-                        oneof_groups=list(oneof_groups.values()),
-                        response=tempo_response_descriptor,
+                        takes_request=takes_request,
+                        deprecated=deprecated,
+                        migration_url=MIGRATION_URL,
+                        request_short_type=tempo_request_descriptor.object_name,
                         request_rust_type=request_rust_type,
                         response_rust_type=response_rust_type,
                         client_type=client_type,
@@ -605,6 +594,7 @@ impl Call {
                 batch_tpl = j2_environment.from_string(batch_template)
                 rpc_code.append(batch_tpl.render(
                     infra=infra,
+                    migration_url=MIGRATION_URL,
                     methods=methods,
                     op_type=op_type,
                     op_enum_path=op_enum_path,
@@ -635,6 +625,21 @@ impl Call {
                 value_enum_path = _crate_path(owner, value_module_pascal, f"{value_module_snake}::Value")
                 request_rust_type_call = _crate_path(owner, value_module_pascal, "CallFunctionRequest")
                 call_rpc = next(rpc for rpc in call_service.rpcs if rpc.name == "CallFunction")
+                # The Call builder below spells out CallFunctionRequest's fields, because each one
+                # reaches it differently (args accumulate through the *_arg methods, the rest are
+                # set once). That makes it the one place a new field has to be wired in by hand, so
+                # check for one here: the alternative is an E0063 in generated Rust that points at
+                # the output instead of at this template.
+                call_request_desc = all_messages[call_rpc.request_type]
+                modelled_fields = {"actor", "component", "function", "args", "subsystem"}
+                actual_fields = {field.name for field in call_request_desc.fields}
+                if actual_fields != modelled_fields:
+                    raise Exception(
+                        "CallFunctionRequest fields changed: {}. The Rust Call builder in "
+                        "gen_rust_api.py spells its fields out, so add the new one to the builder "
+                        "struct, to `call()`, to the request initializer, and to `modelled_fields` "
+                        "here.".format(
+                            ", ".join(sorted(actual_fields.symmetric_difference(modelled_fields)))))
                 call_response_desc = all_messages[call_rpc.response_type]
                 response_rust_type_call = _crate_path(
                     owner, call_response_desc.module_name.split(".")[0], call_response_desc.object_name)
@@ -656,9 +661,14 @@ impl Call {
                             f.proto_type != gpd.FieldDescriptor.TYPE_MESSAGE for f in wrapper_desc.fields):
                         method_fields = []
                         for field in wrapper_desc.fields:
+                            field = copy.copy(field)
                             field.rust_type = get_rust_type(field, owner, module_owners)
+                            field.optional = is_proto3_optional(field)
                             if field.label == "repeated":
                                 field.rust_type = f"Vec<{field.rust_type}>"
+                            elif field.optional:
+                                # prost makes a proto3 `optional` an Option; accept a bare value too.
+                                field.rust_type = f"impl Into<Option<{field.rust_type}>>"
                             method_fields.append(field)
                         wrapper_rust_type = _crate_path(
                             owner, wrapper_desc.module_name.split(".")[0], wrapper_desc.object_name)
@@ -699,6 +709,7 @@ impl Call {
                         infra=infra,
                         module_name=tempo_module_name,
                         has_streaming=has_streaming,
+                        reexports=[reexports[name] for name in sorted(reexports)],
                     ))
                     for code in rpc_code:
                         f.write(code)
@@ -709,7 +720,8 @@ impl Call {
     update_lib_rs(tempo_root_dir, tempo_generated)
     # Sweep stale wrappers: anything that's not infra (context/error/streaming),
     # not lib.rs/proto.rs, and not in the current generated set.
-    _tempo_keep = {"context.rs", "error.rs", "streaming.rs", "lib.rs", "proto.rs"}
+    _tempo_keep = {"context.rs", "conversion.rs", "error.rs", "streaming.rs", "lib.rs",
+                   "proto.rs", "unreal.rs", "world.rs"}
     _tempo_keep |= {f"{m}.rs" for m in tempo_generated}
     for entry in os.listdir(tempo_root_dir):
         full = os.path.join(tempo_root_dir, entry)
@@ -727,7 +739,7 @@ impl Call {
         os.makedirs(project_root_dir, exist_ok=True)
         project_generated = _render_owner("project", project_root_dir, project_proto_modules)
         generate_proto_includes(project_root_dir, project_proto_modules)
-        update_project_lib_rs(project_root_dir, project_generated)
+        write_project_lib_rs(Path(project_root_dir))
 
     return tempo_generated
 
@@ -789,6 +801,13 @@ pub mod error;
 pub mod proto;
 pub mod streaming;
 
+// The reflected API's runtime: hand-written, unlike everything below. The base a project's
+// generated types build on, and the conversions between their Unreal-native values and the SI ones
+// the RPCs speak.
+pub mod conversion;
+pub mod unreal;
+pub mod world;
+
 // Re-export commonly used items
 pub use context::{set_server, set_server_async, set_socket, set_socket_async, tempo_context, TempoContext};
 pub use error::TempoError;
@@ -801,213 +820,13 @@ pub use streaming::SyncStreamIterator;
             f.write(f"pub mod {module};\n")
 
 
-def update_project_lib_rs(project_root_dir, generated_modules):
-    """Write the project crate's lib.rs.
-
-    The project crate has no infra of its own — it re-exports tempo-sim's runtime
-    helpers (`set_server`, `TempoError`, ...) so consumers can `use <project>::*`
-    without separately depending on `tempo-sim`.
-    """
-    lib_rs_path = os.path.join(project_root_dir, "lib.rs")
-    with open(lib_rs_path, 'w') as f:
-        f.write('''// Copyright Tempo Simulation, LLC. All Rights Reserved
-//
-// Auto-generated by gen_rust_api.py. Do not edit.
-
-//! Project-specific Rust client API.
-//!
-//! Re-exports the Tempo runtime helpers from `tempo_sim` and adds the
-//! project's own service wrappers and proto types.
-
-pub mod proto;
-
-pub use tempo_sim::{set_server, set_server_async, set_socket, set_socket_async, tempo_context, TempoContext, TempoError, SyncStreamIterator};
-
-''')
-        for module in sorted(generated_modules):
-            f.write(f"pub mod {module};\n")
-
-
-PROJECT_METADATA_FILE = "crate_info.json"
-
-
-def read_project_metadata(project_crate_dir: Path) -> dict:
-    """Read project-owned publish metadata from crate_info.json, if present.
-
-    This file is the project's hook for filling in the generated Cargo.toml's
-    publish fields (license, repository, homepage, ...) WITHOUT editing this
-    Tempo-owned script or the generated Cargo.toml — both of which are
-    overwritten on every run. Every field is optional; an absent file returns
-    {} and the generator falls back to placeholders, preserving prior behavior.
-    """
-    metadata_path = project_crate_dir / PROJECT_METADATA_FILE
-    if not metadata_path.exists():
-        return {}
-    try:
-        data = json.loads(metadata_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"Invalid JSON in {metadata_path}: {e}") from e
-    if not isinstance(data, dict):
-        raise RuntimeError(f"{metadata_path} must contain a JSON object, got {type(data).__name__}")
-    return data
-
-
-def _toml_str(value) -> str:
-    """Render a Python value as a TOML basic string, escaping backslashes/quotes."""
-    return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
-
-
-def _toml_str_array(values) -> str:
-    if not isinstance(values, list):
-        raise RuntimeError(f"Expected a JSON array, got {type(values).__name__}: {values!r}")
-    return "[" + ", ".join(_toml_str(v) for v in values) + "]"
-
-
-def write_project_cargo_toml(project_crate_dir: Path, crate_name: str, tempo_crate_dir: Path,
-                             tempo_crate_version: str, metadata: dict = None):
-    """Write the project crate's Cargo.toml.
-
-    Always overwritten — it's a generated artifact, like lib.rs.
-
-    By default `tempo-sim` is a path+version dependency: the path lets local
-    changes propagate without a publish step, and the version lets `cargo
-    package` accept it (cargo strips the path on publish and falls back to the
-    crates.io version). Set "tempo_sim_source": "registry" in crate_info.json
-    to depend on the published crates.io crate only (no local path) — useful
-    for building the project crate in isolation or against a released tempo-sim.
-
-    Publish metadata (version, license, repository, homepage, ...) comes from
-    `metadata` — the project's crate_info.json (see read_project_metadata).
-    The `name`, `edition`, and the rest of the `[dependencies]` block stay
-    generator-owned so the tempo-sim version pin is always re-derived;
-    everything else is the project's to set. Absent keys fall back to
-    placeholders so `cargo build` stays quiet.
-    """
-    metadata = metadata or {}
-    rel_tempo = os.path.relpath(tempo_crate_dir, project_crate_dir)
-
-    # How to depend on tempo-sim: "path" (default) keeps the local path for
-    # development and a version pin for publishing; "registry" drops the path
-    # and depends on the published crates.io crate only.
-    tempo_sim_source = metadata.get("tempo_sim_source", "path")
-    if tempo_sim_source == "path":
-        tempo_sim_dep = (f"tempo-sim = {{ path = {_toml_str(rel_tempo)}, "
-                         f"version = {_toml_str(tempo_crate_version)} }}")
-    elif tempo_sim_source == "registry":
-        # Default to the local crate's version; let the project pin a different
-        # published requirement (e.g. "0.1") via tempo_sim_version.
-        registry_version = metadata.get("tempo_sim_version", tempo_crate_version)
-        tempo_sim_dep = f"tempo-sim = {_toml_str(registry_version)}"
-    else:
-        raise RuntimeError(
-            f'{PROJECT_METADATA_FILE} "tempo_sim_source" must be "path" or "registry", '
-            f'got {tempo_sim_source!r}')
-
-    version = metadata.get("version", "0.1.0")
-    rust_version = metadata.get("rust-version", "1.85")
-    description = metadata.get(
-        "description",
-        "Project-specific Rust client API; layers project protos on top of tempo-sim.")
-
-    lines = [
-        "# Auto-generated by Tempo's gen_rust_api.py. Do not edit.",
-        f"# Publish metadata (license, repository, homepage, ...) comes from {PROJECT_METADATA_FILE}",
-        "# in this directory — edit that file, not this one.",
-        "",
-        "[package]",
-        f"name = {_toml_str(crate_name)}",
-        f"version = {_toml_str(version)}",
-        'edition = "2021"',
-        f"rust-version = {_toml_str(rust_version)}",
-        f"description = {_toml_str(description)}",
-    ]
-
-    if "license" in metadata:
-        lines.append(f"license = {_toml_str(metadata['license'])}")
-    elif "license-file" in metadata:
-        lines.append(f"license-file = {_toml_str(metadata['license-file'])}")
-    else:
-        lines += [
-            f"# TODO: set \"license\" in {PROJECT_METADATA_FILE} before publishing — `Apache-2.0` is a",
-            "# placeholder so `cargo build` is quiet; replace it with this project's actual license.",
-            'license = "Apache-2.0"',
-        ]
-
-    # Optional single-value metadata, emitted only when the project sets it.
-    for key in ("repository", "homepage", "documentation", "readme"):
-        if key in metadata:
-            lines.append(f"{key} = {_toml_str(metadata[key])}")
-    for key in ("keywords", "categories"):
-        if key in metadata:
-            lines.append(f"{key} = {_toml_str_array(metadata[key])}")
-
-    # Explicit include so generated files (which .gitignore excludes) ship in the .crate.
-    # Whitelist any project-provided readme/license file so it lands in the .crate too.
-    include = ["Cargo.toml", "src/**/*.rs", "proto/**/*.proto"]
-    for key in ("readme", "license-file"):
-        if key in metadata and metadata[key] not in include:
-            include.insert(1, metadata[key])
-
-    lines += [
-        "",
-        "# Explicit include so generated files (which .gitignore excludes) ship in the .crate.",
-        "include = [",
-    ]
-    lines += [f"    {_toml_str(p)}," for p in include]
-    lines += [
-        "]",
-        "",
-        "[dependencies]",
-        tempo_sim_dep,
-        'tonic = "0.13"',
-        'prost = "0.13"',
-        'tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time"] }',
-        'tokio-stream = "0.1"',
-    ]
-
-    cargo_toml = project_crate_dir / "Cargo.toml"
-    cargo_toml.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def write_project_gitignore(project_crate_dir: Path):
-    """Write the project crate's .gitignore. The whole src/ and proto/ trees are
-    generated, so they stay out of git; consumers regenerate them locally.
-
-    Cargo.toml is listed too: write_project_cargo_toml regenerates it on every
-    run, so a project that tracked it would see a spurious diff after each
-    build. (It sits under "Build artifacts" next to Cargo.lock, which is also
-    generated rather than hand-written.)"""
-    (project_crate_dir / ".gitignore").write_text('''# Build artifacts
-/target/
-Cargo.lock
-Cargo.toml
-
-# Generated proto sources (populated by gen_protos.py)
-/proto/
-
-# Tempo proto sources staged here so protoc can resolve project imports.
-/tempo_proto_includes/
-
-# Generated Rust sources (populated by gen_rust_api.py)
-/src/
-''', encoding="utf-8")
-
-
-def _read_crate_version(cargo_toml: Path) -> str:
-    """Pull the package version out of Cargo.toml without taking a TOML dep."""
-    text = cargo_toml.read_text(encoding="utf-8")
-    match = re.search(r'^\s*version\s*=\s*"([^"]+)"', text, re.MULTILINE)
-    if not match:
-        raise RuntimeError(f"Could not find package version in {cargo_toml}")
-    return match.group(1)
-
-
 def _collect_rust_inputs(script_dir: str, pb2_roots, rust_crate_dir: Path,
                          codegen_crate_dir: Path):
     """Files whose contents drive Rust wrapper generation and the cargo build."""
     inputs = [
         Path(__file__).resolve(),
         (Path(script_dir) / "gen_common.py").resolve(),
+        (Path(script_dir) / "gen_project_package.py").resolve(),
     ]
     # All pb2 modules (across the tempo_sim and project package dirs) feed the
     # wrapper templates.
@@ -1046,7 +865,7 @@ def _collect_project_crate_inputs(project_crate_dir: Path):
     inputs = []
     # crate_info.json drives the generated Cargo.toml, so a change to it must
     # invalidate the cache even before Cargo.toml is regenerated.
-    for fname in ("Cargo.toml", PROJECT_METADATA_FILE):
+    for fname in ("Cargo.toml", RUST_METADATA_FILE):
         path = project_crate_dir / fname
         if path.exists():
             inputs.append(path)
@@ -1054,7 +873,11 @@ def _collect_project_crate_inputs(project_crate_dir: Path):
         sub_dir = project_crate_dir / sub
         if not sub_dir.exists():
             continue
-        for path, _, files in os.walk(sub_dir):
+        for path, directories, files in os.walk(sub_dir):
+            # The reflected API is GenReflectedAPI.sh's, generated from reflection rather than from
+            # anything this reads -- thousands of files that would only slow the hash down.
+            if Path(path) == project_crate_dir / "src":
+                directories[:] = [d for d in directories if d != RUST_CLASSES]
             for filename in files:
                 if filename.endswith((".rs", ".proto")):
                     inputs.append(Path(path) / filename)
@@ -1131,20 +954,20 @@ if __name__ == "__main__":
         os.makedirs(tempo_src_dir)
 
     cargo_toml = tempo_crate_dir / "Cargo.toml"
-    crate_version = _read_crate_version(cargo_toml)
+    crate_version = read_version(cargo_toml)
     crate_artifact = tempo_crate_dir / "target" / "package" / f"tempo-sim-{crate_version}.crate"
 
     # Discover modules by inspecting the nested pb2 trees: each subdir of a
-    # package dir is one module. {module: (namespace, dir)}.
+    # package dir holding pb2 is one module. {module: (namespace, dir)}.
     module_dirs = {}
     for name in sorted(os.listdir(tempo_sim_pb2_dir)):
-        d = os.path.join(tempo_sim_pb2_dir, name)
-        if os.path.isdir(d) and name != "__pycache__":
-            module_dirs[name] = (INFRA_PACKAGE, Path(d))
+        d = Path(tempo_sim_pb2_dir, name)
+        if is_proto_module(d):
+            module_dirs[name] = (INFRA_PACKAGE, d)
     if project_pb2_dir.exists():
         for name in sorted(os.listdir(project_pb2_dir)):
             d = project_pb2_dir / name
-            if d.is_dir() and name != "__pycache__":
+            if is_proto_module(d):
                 if name in module_dirs:
                     raise RuntimeError(
                         f"Module name collision: {name!r} exists in both the "
@@ -1201,11 +1024,7 @@ if __name__ == "__main__":
     )
 
     if project_modules_present:
-        project_name = project_crate_name(project_root)
-        project_metadata = read_project_metadata(project_crate_dir)
-        write_project_cargo_toml(project_crate_dir, project_name, tempo_crate_dir, crate_version,
-                                 project_metadata)
-        write_project_gitignore(project_crate_dir)
+        write_rust_crate(project_root)
 
     # cargo package's verify step compiles the extracted crate, so this doubles
     # as a build sanity check on the generated code.
@@ -1222,9 +1041,11 @@ if __name__ == "__main__":
         # packaging and then can't resolve the version on crates.io (where it
         # isn't published). Package.sh enumerates ship-files via `cargo package
         # --list --no-verify`, which works without resolving deps.
+        # Without the reflected API, which this generated none of: checking them here would add a
+        # whole build's worth of compiling to every build that touches a proto.
         print("[Tempo Prebuild] Building project Rust crate", flush=True)
         subprocess.run(
-            ["cargo", "build", "--quiet",
+            ["cargo", "build", "--quiet", "--no-default-features",
              "--manifest-path", str(project_crate_dir / "Cargo.toml")],
             check=True,
         )

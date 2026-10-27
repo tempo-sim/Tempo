@@ -434,23 +434,23 @@ protected:
 	bool NextReadComplete() const;
 
 	// Derived components may set this to use a non-default render target format.
-	UPROPERTY(VisibleAnywhere, Category = "Tempo")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Tempo")
 	TEnumAsByte<ETextureRenderTargetFormat> RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA8;
 
 	// Derived components may set this to use a non-default pixel format.
-	UPROPERTY(VisibleAnywhere, Category = "Tempo")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Tempo")
 	TEnumAsByte<EPixelFormat> PixelFormatOverride = EPixelFormat::PF_Unknown;
 
 	// The rate in Hz this sensor updates at.
-	UPROPERTY(EditAnywhere, Category = "Tempo")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo")
 	float RateHz = 10.0;
 
 	// Capture resolution.
-	UPROPERTY(EditAnywhere, Category = "Tempo")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tempo")
 	FIntPoint SizeXY = FIntPoint(960, 540);
 
 	// Monotonically increasing counter of frames captured.
-	UPROPERTY(VisibleAnywhere, Category = "Tempo")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Tempo")
 	int32 SequenceId = 0;
 
 	// Initialize our RenderTarget and TextureRHICopy with the current settings.

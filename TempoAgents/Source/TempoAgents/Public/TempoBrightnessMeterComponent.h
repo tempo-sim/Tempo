@@ -28,10 +28,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float UpdatePeriod = 5.0;
 
-	UPROPERTY(VisibleAnywhere)
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	float Brightness = 0.0;
 
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	FIntPoint SizeXY = FIntPoint(8, 8);
 
 	FTimerHandle TimerHandle;

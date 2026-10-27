@@ -8,9 +8,12 @@ Tempo generates both the Python classes for the messages and services in your Pr
 *and* a wrapper library that makes writing client code easy.
 
 - Tempo's own modules end up in the publishable **`tempo_sim`** package (PyPI dist name
-  `tempo-sim`, import name `tempo_sim`).
+  `tempo-sim`, import name `tempo_sim`), with the runtime of the
+  [reflected API](reflected-api.md): `tempo_sim.unreal`, `tempo_sim.world` and
+  `tempo_sim.conversion`.
 - Your project's own service modules end up in a **separate project package** (e.g.
-  `tempo_sample`) that depends on `tempo_sim` and re-exports its runtime helpers.
+  `tempo_sample`) that depends on `tempo_sim` and re-exports its runtime helpers. When the project
+  is packaged, the same package also carries the reflected classes of its build.
 
 Both are installed automatically into a virtual environment at `<project_root>/TempoEnv`.
 
@@ -22,13 +25,21 @@ source <project_root>/TempoEnv/bin/activate
 source <project_root>/TempoEnv/Scripts/activate
 ```
 
-Alternatively, install them into your system Python or another virtual environment:
+Packaging installs the project's reflected classes into `TempoEnv` too.
+
+To use them from another environment, install `tempo-sim` from PyPI and the project package from
+the project:
 
 ```bash
-pip install "<project_root>/Plugins/Tempo/TempoCore/Content/Python/API"
-# And, for the project package, if present:
+pip install tempo-sim
+# And the project package, if the project has one: from a packaged build, with its reflected classes,
+pip install <project_root>/Packaged/API/Python/<your-project>/*.whl
+# or from its source, with only its services.
 pip install "<project_root>/Content/Python/API"
 ```
+
+The project package pins the `tempo-sim` version it was generated against, which pip installs from
+PyPI if it is not already there.
 
 ## The shape of the API
 
@@ -97,7 +108,7 @@ async for state in tw.stream_actor_state(actor="MyActor"):
 |---|---|
 | `tempo_sim.set_server(address=..., port=...)` | Point the client at a server. See [Connecting](connecting.md). |
 | `tempo_sim.set_socket(path)` | Point the client at a server listening on a Unix domain socket (Linux/macOS). See [Connecting](connecting.md#several-sims-on-one-machine-without-ports). |
-| `tempo_sim.run_async(...)` | Run a coroutine from synchronous code. |
+| `tempo_sim.run_async(...)` | Run a coroutine from synchronous code. Called from inside a coroutine it raises rather than blocking the loop its answer needs; await the coroutine there instead. |
 | `tempo_sim.TempoImageUtils` | Stream and decode color / depth / label / video frames. |
 | `tempo_sim.TempoLidarUtils` | Decode lidar scan segments into point clouds. |
 
@@ -123,7 +134,7 @@ To share it, publish to [PyPI](https://pypi.org/). After a build with the API ge
 
 ```text
 Packaged/API/Python/tempo-sim/        # Tempo's own services
-Packaged/API/Python/<your-project>/   # your project's services, if any
+Packaged/API/Python/<your-project>/   # your project's services and reflected classes
 ```
 
 Upload them with [twine](https://twine.readthedocs.io/) — `tempo-sim` first, since your project
@@ -148,10 +159,11 @@ pip install "tempo-sim[examples]"   # adds visualization / example-client depend
 
 !!! warning
 
-    The published `tempo-sim` contains only Tempo's own services — it does **not** include custom
-    RPCs you define in your project. If your project defines its own services, generate and use
-    your project package instead. Keep the installed `tempo-sim` version matched to the Tempo
-    version your server runs.
+    The published `tempo-sim` contains only Tempo's own services and the reflected API's runtime —
+    it does **not** include custom RPCs you define in your project, or any project's reflected
+    classes. For those, install your project package from `Packaged/API/Python/<your-project>/`
+    beside it. Keep the installed `tempo-sim` version matched to the Tempo version your server
+    runs.
 
 ## API reference
 

@@ -17,6 +17,7 @@ namespace TempoCore
 
 namespace TempoWorld
 {
+
 	class SpawnActorRequest;
 	class SpawnActorResponse;
 	class AddComponentRequest;
@@ -46,11 +47,20 @@ namespace TempoWorld
 	class GetRotationResponse;
 	class GetScale3DResponse;
 	class GetAllActorsResponse;
+	class GetActorsOfClassRequest;
+	class GetAssetsRequest;
+	class GetAssetsResponse;
 	class GetAllComponentsRequest;
 	class GetAllComponentsResponse;
 	class GetActorPropertiesRequest;
 	class GetComponentPropertiesRequest;
 	class GetPropertiesResponse;
+	class GetPropertyRequest;
+	class GetPropertiesRequest;
+	class GetPropertiesByNameResponse;
+	class DescribeClassesRequest;
+	class DescribeClassesResponse;
+	class Value;
 	class GetActorFunctionsRequest;
 	class GetComponentFunctionsRequest;
 	class GetFunctionsResponse;
@@ -61,13 +71,15 @@ namespace TempoWorld
 	class SetPropertyRequest;
 	class SetPropertiesRequest;
 	class SetPropertiesResponse;
+	class RunBatchRequest;
+	class RunBatchResponse;
 }
 
 DECLARE_MULTICAST_DELEGATE(FTempoWorldControlServiceActivated);
 DECLARE_MULTICAST_DELEGATE(FTempoWorldControlServiceDeactivated);
 
 UCLASS()
-class TEMPOWORLD_API UTempoWorldControlServiceSubsystem : public UTempoWorldSubsystem, public ITempoServiceProvider
+class TEMPOWORLD_API UTempoWorldControlServiceSubsystem : public UTempoTickableWorldSubsystem, public ITempoServiceProvider
 {
 	GENERATED_BODY()
 
@@ -128,11 +140,27 @@ public:
 
 	void GetAllActors(const TempoCore::Empty& Request, const TResponseDelegate<TempoWorld::GetAllActorsResponse>& ResponseContinuation) const;
 
+	void GetActorsOfClass(const TempoWorld::GetActorsOfClassRequest& Request, const TResponseDelegate<TempoWorld::GetAllActorsResponse>& ResponseContinuation) const;
+
+	void GetAssets(const TempoWorld::GetAssetsRequest& Request, const TResponseDelegate<TempoWorld::GetAssetsResponse>& ResponseContinuation) const;
+
 	void GetAllComponents(const TempoWorld::GetAllComponentsRequest& Request, const TResponseDelegate<TempoWorld::GetAllComponentsResponse>& ResponseContinuation) const;
 
 	void GetActorProperties(const TempoWorld::GetActorPropertiesRequest& Request, const TResponseDelegate<TempoWorld::GetPropertiesResponse>& ResponseContinuation) const;
 
 	void GetComponentProperties(const TempoWorld::GetComponentPropertiesRequest& Request, const TResponseDelegate<TempoWorld::GetPropertiesResponse>& ResponseContinuation) const;
+
+	void GetProperty(const TempoWorld::GetPropertyRequest& Request, const TResponseDelegate<TempoWorld::Value>& ResponseContinuation) const;
+
+	void GetProperties(const TempoWorld::GetPropertiesRequest& Request, const TResponseDelegate<TempoWorld::GetPropertiesByNameResponse>& ResponseContinuation) const;
+
+	void StreamProperty(const TempoWorld::GetPropertyRequest& Request, const TResponseDelegate<TempoWorld::Value>& ResponseContinuation);
+
+	virtual void Tick(float DeltaTime) override;
+
+	virtual TStatId GetStatId() const override;
+
+	void DescribeClasses(const TempoWorld::DescribeClassesRequest& Request, const TResponseDelegate<TempoWorld::DescribeClassesResponse>& ResponseContinuation) const;
 
 	void GetActorFunctions(const TempoWorld::GetActorFunctionsRequest& Request, const TResponseDelegate<TempoWorld::GetFunctionsResponse>& ResponseContinuation) const;
 
@@ -143,6 +171,8 @@ public:
 	void CallObjectFunction(const TempoWorld::CallFunctionRequest& Request, const TResponseDelegate<TempoWorld::CallFunctionResponse>& ResponseContinuation) const;
 
 	void SetProperties(const TempoWorld::SetPropertiesRequest& Request, const TResponseDelegate<TempoWorld::SetPropertiesResponse>& ResponseContinuation) const;
+
+	void RunBatch(const TempoWorld::RunBatchRequest& Request, const TResponseDelegate<TempoWorld::RunBatchResponse>& ResponseContinuation) const;
 
 	void OnTempoWorldControlServiceActivated();
 
@@ -158,4 +188,28 @@ private:
 
 	static FTempoWorldControlServiceActivated TempoWorldControlServiceActivated;
 	static FTempoWorldControlServiceDeactivated TempoWorldControlServiceDeactivated;
+
+protected:
+	// One entry per distinct property being watched, each holding every continuation waiting on it,
+	// so N clients watching the same property cost one read rather than N.
+	/**
+	 * One property being watched, and everyone waiting on it.
+	 *
+	 * Keyed by a string built from everything that changes what is read -- the object and the
+	 * address -- so two clients watching the same property share one read.
+	 *
+	 * Holds the address as plain strings rather than the request message, which keeps the generated
+	 * protobuf header out of this one: everything else here is forward-declared, and a subscription
+	 * is not a good enough reason to make every consumer pay for the full definitions.
+	 */
+	struct FPropertySubscription
+	{
+		FString Actor;
+		FString Component;
+		FString Subsystem;
+		FString Property;
+		TArray<TResponseDelegate<TempoWorld::Value>> Continuations;
+	};
+
+	TMap<FString, FPropertySubscription> PendingPropertyRequests;
 };

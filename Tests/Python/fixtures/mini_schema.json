@@ -1,0 +1,671 @@
+{
+ "header": {
+  "blueprint_accessible_only": true,
+  "content_hash": "FIXTURE",
+  "engine_version": "5.8",
+  "includes_blueprint_classes": false,
+  "schema_version": "3"
+ },
+ "classes": [
+  {
+   "name": "Object",
+   "path": "/Script/CoreUObject.Object",
+   "super": "",
+   "package": "/Script/CoreUObject",
+   "abstract": false,
+   "blueprint": false,
+   "content_hash": "FIXTURE-CLASS-OBJECT",
+   "properties": [
+    {
+     "name": "Name",
+     "kind": "string",
+     "type": "FString",
+     "readable": true,
+     "writable": false,
+     "value_expressible": true
+    }
+   ],
+   "functions": [],
+   "components": []
+  },
+  {
+   "name": "Bridged",
+   "path": "/Script/Engine.Bridged",
+   "super": "/Script/SomePlugin.PluginBase",
+   "package": "/Script/Engine",
+   "abstract": false,
+   "blueprint": false,
+   "content_hash": "FIXTURE-CLASS-BRIDGED",
+   "components": [],
+   "properties": [
+    {
+     "name": "bBridged",
+     "kind": "bool",
+     "type": "bool",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    }
+   ],
+   "functions": []
+  },
+  {
+   "name": "DeepBridged",
+   "path": "/Script/Engine.DeepBridged",
+   "super": "/Script/SomePlugin.PluginMiddle",
+   "package": "/Script/Engine",
+   "abstract": false,
+   "blueprint": false,
+   "content_hash": "FIXTURE-CLASS-DEEPBRIDGED",
+   "components": [],
+   "properties": [
+    {
+     "name": "bDeep",
+     "kind": "bool",
+     "type": "bool",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    },
+    {
+     "name": "Outsider",
+     "kind": "actor",
+     "type": "APluginBase*",
+     "class": "/Script/SomePlugin.PluginBase",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    }
+   ],
+   "functions": []
+  },
+  {
+   "name": "MeshThing",
+   "path": "/Script/Engine.MeshThing",
+   "super": "/Script/CoreUObject.Object",
+   "package": "/Script/Engine",
+   "abstract": false,
+   "blueprint": false,
+   "content_hash": "FIXTURE-CLASS-MESHTHING",
+   "components": [],
+   "properties": [
+    {
+     "name": "Visible",
+     "kind": "bool",
+     "type": "bool",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    }
+   ],
+   "functions": []
+  },
+  {
+   "name": "Orphan",
+   "path": "/Script/Engine.Orphan",
+   "super": "/Script/SomePlugin.Rootless",
+   "package": "/Script/Engine",
+   "abstract": false,
+   "blueprint": false,
+   "content_hash": "FIXTURE-CLASS-ORPHAN",
+   "components": [],
+   "properties": [],
+   "functions": []
+  },
+  {
+   "name": "Widget",
+   "path": "/Script/Engine.Widget",
+   "super": "/Script/CoreUObject.Object",
+   "package": "/Script/Engine",
+   "abstract": false,
+   "blueprint": false,
+   "content_hash": "FIXTURE-CLASS-WIDGET",
+   "properties": [
+    {
+     "name": "Mesh",
+     "kind": "component",
+     "type": "UMeshThing*",
+     "class": "/Script/Engine.MeshThing",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    },
+    {
+     "name": "Target",
+     "kind": "actor",
+     "type": "AMeshThing*",
+     "class": "/Script/Engine.MeshThing",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    },
+    {
+     "name": "ScaleFactor",
+     "kind": "float",
+     "type": "float",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true,
+     "setter": "SetScaleFactor"
+    },
+    {
+     "name": "Untouchable",
+     "kind": "bool",
+     "type": "bool",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true,
+     "setter": "SetNoSuchFunction"
+    },
+    {
+     "name": "bEnabled",
+     "kind": "bool",
+     "type": "bool",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    },
+    {
+     "name": "Offset",
+     "kind": "vector",
+     "type": "vector",
+     "readable": true,
+     "writable": false,
+     "value_expressible": true
+    },
+    {
+     "name": "Mode",
+     "kind": "enum",
+     "type": "EWidgetMode",
+     "enum": "EWidgetMode",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    },
+    {
+     "name": "Tags",
+     "kind": "array",
+     "type": "array<string>",
+     "element": {
+      "kind": "string",
+      "type": "string"
+     },
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    },
+    {
+     "name": "Settings",
+     "kind": "struct",
+     "type": "FWidgetSettings",
+     "struct": "FWidgetSettings",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    },
+    {
+     "name": "Limits",
+     "kind": "struct",
+     "type": "FWidgetLimits",
+     "struct": "FWidgetLimits",
+     "readable": true,
+     "writable": false,
+     "value_expressible": false
+    },
+    {
+     "name": "History",
+     "kind": "array",
+     "type": "array<FWidgetSettings>",
+     "element": {
+      "kind": "struct",
+      "type": "FWidgetSettings",
+      "struct": "FWidgetSettings"
+     },
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    },
+    {
+     "name": "Waypoints",
+     "kind": "array",
+     "type": "array<vector>",
+     "element": {
+      "kind": "vector",
+      "type": "vector"
+     },
+     "readable": true,
+     "writable": false,
+     "value_expressible": false
+    },
+    {
+     "name": "Doomed",
+     "kind": "unsupported",
+     "type": "unsupported",
+     "unsupported_reason": "C-style fixed-size array",
+     "readable": true,
+     "writable": true,
+     "value_expressible": false
+    },
+    {
+     "name": "Has Spaces",
+     "kind": "bool",
+     "type": "bool",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    },
+    {
+     "name": "Skin",
+     "kind": "asset",
+     "type": "TObjectPtr<UMeshThing>",
+     "class": "/Script/Engine.MeshThing",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    },
+    {
+     "name": "AnyAsset",
+     "kind": "asset",
+     "type": "TObjectPtr<UObject>",
+     "class": "/Script/CoreUObject.Object",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    },
+    {
+     "name": "Frame",
+     "kind": "asset",
+     "type": "TObjectPtr<UMeshThing>",
+     "class": "/Script/Engine.MeshThing",
+     "readable": true,
+     "writable": false,
+     "value_expressible": true
+    }
+   ],
+   "functions": [
+    {
+     "name": "SetScaleFactor",
+     "signature": "void SetScaleFactor(float InScale)",
+     "callable": true,
+     "positional": true,
+     "parameters": [
+      {
+       "name": "InScale",
+       "direction": "in",
+       "kind": "float",
+       "type": "float"
+      }
+     ]
+    },
+    {
+     "name": "Refresh",
+     "signature": "void Refresh()",
+     "callable": true,
+     "positional": true,
+     "parameters": []
+    },
+    {
+     "name": "Resize",
+     "signature": "bool Resize(int NewSize)",
+     "callable": true,
+     "positional": true,
+     "parameters": [
+      {
+       "name": "NewSize",
+       "direction": "in",
+       "kind": "int",
+       "type": "int"
+      },
+      {
+       "name": "ReturnValue",
+       "direction": "return",
+       "kind": "bool",
+       "type": "bool"
+      }
+     ]
+    },
+    {
+     "name": "Latent",
+     "signature": "void Latent()",
+     "callable": false,
+     "positional": true,
+     "unsupported_reason": "Function 'Latent' is latent, which cannot be called over the API",
+     "parameters": []
+    },
+    {
+     "name": "Configure",
+     "signature": "FWidgetSettings Configure(FWidgetSettings NewSettings)",
+     "callable": true,
+     "positional": true,
+     "parameters": [
+      {
+       "name": "NewSettings",
+       "direction": "in",
+       "kind": "struct",
+       "type": "FWidgetSettings",
+       "struct": "FWidgetSettings"
+      },
+      {
+       "name": "ReturnValue",
+       "direction": "return",
+       "kind": "struct",
+       "type": "FWidgetSettings",
+       "struct": "FWidgetSettings"
+      }
+     ]
+    },
+    {
+     "name": "ApplyLimits",
+     "signature": "void ApplyLimits(FWidgetLimits NewLimits)",
+     "callable": true,
+     "positional": false,
+     "parameters": [
+      {
+       "name": "NewLimits",
+       "direction": "in",
+       "kind": "struct",
+       "type": "FWidgetLimits",
+       "struct": "FWidgetLimits"
+      }
+     ]
+    },
+    {
+     "name": "GetLimits",
+     "signature": "FWidgetLimits GetLimits()",
+     "callable": true,
+     "positional": true,
+     "parameters": [
+      {
+       "name": "ReturnValue",
+       "direction": "return",
+       "kind": "struct",
+       "type": "FWidgetLimits",
+       "struct": "FWidgetLimits"
+      }
+     ]
+    },
+    {
+     "name": "Measure",
+     "signature": "bool Measure(out FWidgetSettings Measured, out map<string,int> Tally)",
+     "callable": true,
+     "positional": true,
+     "parameters": [
+      {
+       "name": "Measured",
+       "direction": "out",
+       "kind": "struct",
+       "type": "FWidgetSettings",
+       "struct": "FWidgetSettings"
+      },
+      {
+       "name": "Tally",
+       "direction": "out",
+       "kind": "map",
+       "type": "map<string,int>",
+       "key": {
+        "kind": "string",
+        "type": "string"
+       },
+       "element": {
+        "kind": "int",
+        "type": "int"
+       }
+      },
+      {
+       "name": "ReturnValue",
+       "direction": "return",
+       "kind": "bool",
+       "type": "bool"
+      }
+     ]
+    },
+    {
+     "name": "Reskin",
+     "signature": "bool Reskin(TObjectPtr<UMeshThing> NewSkin)",
+     "callable": true,
+     "positional": true,
+     "parameters": [
+      {
+       "name": "NewSkin",
+       "direction": "in",
+       "kind": "asset",
+       "type": "TObjectPtr<UMeshThing>",
+       "class": "/Script/Engine.MeshThing"
+      },
+      {
+       "name": "ReturnValue",
+       "direction": "return",
+       "kind": "bool",
+       "type": "bool"
+      }
+     ]
+    },
+    {
+     "name": "SetFrame",
+     "signature": "bool SetFrame(TObjectPtr<UMeshThing> NewFrame)",
+     "callable": true,
+     "positional": true,
+     "parameters": [
+      {
+       "name": "NewFrame",
+       "direction": "in",
+       "kind": "asset",
+       "type": "TObjectPtr<UMeshThing>",
+       "class": "/Script/Engine.MeshThing"
+      },
+      {
+       "name": "ReturnValue",
+       "direction": "return",
+       "kind": "bool",
+       "type": "bool"
+      }
+     ]
+    }
+   ],
+   "components": [
+    {
+     "name": "Mesh",
+     "class": "/Script/Engine.MeshThing"
+    },
+    {
+     "name": "Gone",
+     "class": "/Script/Engine.NotInThisBuild"
+    },
+    {
+     "name": "Has Space",
+     "class": "/Script/Engine.MeshThing"
+    }
+   ]
+  },
+  {
+   "name": "PluginBase",
+   "path": "/Script/SomePlugin.PluginBase",
+   "super": "/Script/Engine.Widget",
+   "package": "/Script/SomePlugin",
+   "abstract": false,
+   "blueprint": false,
+   "content_hash": "FIXTURE-CLASS-PLUGINBASE",
+   "components": [],
+   "properties": [
+    {
+     "name": "Tuning",
+     "kind": "float",
+     "type": "float",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    }
+   ],
+   "functions": []
+  },
+  {
+   "name": "PluginMiddle",
+   "path": "/Script/SomePlugin.PluginMiddle",
+   "super": "/Script/SomePlugin.PluginBase",
+   "package": "/Script/SomePlugin",
+   "abstract": false,
+   "blueprint": false,
+   "content_hash": "FIXTURE-CLASS-PLUGINMIDDLE",
+   "components": [],
+   "properties": [
+    {
+     "name": "Trim",
+     "kind": "float",
+     "type": "float",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    }
+   ],
+   "functions": []
+  },
+  {
+   "name": "Rootless",
+   "path": "/Script/SomePlugin.Rootless",
+   "super": "",
+   "package": "/Script/SomePlugin",
+   "abstract": false,
+   "blueprint": false,
+   "content_hash": "FIXTURE-CLASS-ROOTLESS",
+   "components": [],
+   "properties": [],
+   "functions": []
+  }
+ ],
+ "structs": [
+  {
+   "name": "FWidgetLimits",
+   "content_hash": "FIXTURE-STRUCT-FWIDGETLIMITS",
+   "value_expressible": false,
+   "members": [
+    {
+     "name": "Floor",
+     "kind": "float",
+     "type": "float",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    },
+    {
+     "name": "Steps",
+     "kind": "map",
+     "type": "map<string,int>",
+     "key": {
+      "kind": "string",
+      "type": "string"
+     },
+     "element": {
+      "kind": "int",
+      "type": "int"
+     },
+     "readable": true,
+     "writable": false,
+     "value_expressible": false
+    }
+   ]
+  },
+  {
+   "name": "FWidgetSettings",
+   "content_hash": "FIXTURE-STRUCT-FWIDGETSETTINGS",
+   "value_expressible": true,
+   "members": [
+    {
+     "name": "Inner",
+     "kind": "struct",
+     "type": "FWidgetTrim",
+     "struct": "FWidgetTrim",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    },
+    {
+     "name": "Label",
+     "kind": "string",
+     "type": "string",
+     "readable": true,
+     "writable": false,
+     "value_expressible": true
+    },
+    {
+     "name": "Scale",
+     "kind": "float",
+     "type": "float",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    }
+   ]
+  },
+  {
+   "name": "FWidgetTrim",
+   "content_hash": "FIXTURE-STRUCT-FWIDGETTRIM",
+   "value_expressible": true,
+   "members": [
+    {
+     "name": "Offset",
+     "kind": "vector",
+     "type": "vector",
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
+    }
+   ]
+  }
+ ],
+ "enums": [
+  {
+   "name": "EWidgetMode",
+   "content_hash": "FIXTURE-ENUM-EWIDGETMODE",
+   "enumerators": [
+    "Simple",
+    "Advanced"
+   ]
+  },
+  {
+   "name": "EWidgetComparison",
+   "content_hash": "FIXTURE-ENUM-EWIDGETCOMPARISON",
+   "enumerators": [
+    "==",
+    "<",
+    "Enumerator1",
+    "Less Than",
+    "Less_Than",
+    "Greater"
+   ]
+  }
+ ],
+ "assets": [
+  {
+   "path": "/Engine/Basic/9Grid.9Grid",
+   "class": "/Script/Engine.MeshThing"
+  },
+  {
+   "path": "/Engine/Basic/Gizmo.Gizmo",
+   "class": "/Script/NotInTheWalk.Thing"
+  },
+  {
+   "path": "/Game/Maps/Showroom.Showroom",
+   "class": "/Script/Engine.Orphan"
+  },
+  {
+   "path": "/Game/Maps/Showroom/Lighting.Lighting",
+   "class": "/Script/Engine.MeshThing"
+  },
+  {
+   "path": "/Game/Widgets/Dup-One.Dup-One",
+   "class": "/Script/Engine.MeshThing"
+  },
+  {
+   "path": "/Game/Widgets/Dup_One.Dup_One",
+   "class": "/Script/Engine.MeshThing"
+  },
+  {
+   "path": "/Game/Widgets/Trims/T_Gold.T_Gold",
+   "class": "/Script/Engine.Widget"
+  },
+  {
+   "path": "/Game/Widgets/W_Main.W_Main",
+   "class": "/Script/Engine.MeshThing"
+  }
+ ]
+}

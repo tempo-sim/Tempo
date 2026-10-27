@@ -41,13 +41,13 @@ using TempoEmpty = TempoCore::Empty;
 namespace
 {
 	// Convert a proto Twist (SI, right-handed) to an FTempoTwist (Unreal-native).
-	// Linear is a true vector: handedness flip negates Y only (via QuantityConverter<R2L>).
-	// Angular follows FRotator-style handedness: negate Pitch (Y) and Yaw (Z), leave Roll (X).
-	// See FRotator R2L in TempoConversion.h for the rationale.
+	// Linear is a polar vector: the handedness flip negates Y only (via QuantityConverter<R2L>).
+	// Angular is an axial vector, which a reflection also negates as a whole: (-X, Y, -Z), the
+	// inverse of what TempoWorldState reports, so an angular velocity read back can be commanded.
 	FTempoTwist FromProto(const TempoCore::Twist& ProtoTwist)
 	{
 		const FVector LinearSI(ProtoTwist.linear().x(), ProtoTwist.linear().y(), ProtoTwist.linear().z());
-		const FVector AngularSI(ProtoTwist.angular().x(), -ProtoTwist.angular().y(), -ProtoTwist.angular().z());
+		const FVector AngularSI(-ProtoTwist.angular().x(), ProtoTwist.angular().y(), -ProtoTwist.angular().z());
 		return FTempoTwist(
 			QuantityConverter<M2CM, R2L>::Convert(LinearSI),
 			QuantityConverter<Rad2Deg>::Convert(AngularSI));
@@ -56,7 +56,7 @@ namespace
 	FTempoAccel FromProto(const TempoCore::Accel& ProtoAccel)
 	{
 		const FVector LinearSI(ProtoAccel.linear().x(), ProtoAccel.linear().y(), ProtoAccel.linear().z());
-		const FVector AngularSI(ProtoAccel.angular().x(), -ProtoAccel.angular().y(), -ProtoAccel.angular().z());
+		const FVector AngularSI(-ProtoAccel.angular().x(), ProtoAccel.angular().y(), -ProtoAccel.angular().z());
 		return FTempoAccel(
 			QuantityConverter<M2CM, R2L>::Convert(LinearSI),
 			QuantityConverter<Rad2Deg>::Convert(AngularSI));

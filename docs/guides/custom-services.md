@@ -262,7 +262,7 @@ places — and that asymmetry is the thing to understand before you tell anyone 
 | Package | Where a user can get it |
 |---|---|
 | `tempo-sim` (Tempo's services) | The generated `TempoEnv`, **or** [PyPI](https://pypi.org/project/tempo-sim/) / [crates.io](https://crates.io/crates/tempo-sim) — Tempo publishes it. |
-| Your project package (your services) | **Only** the generated `TempoEnv`, until you publish it yourself. |
+| Your project package (your services, and the reflected classes of a packaged build) | **Only** your build: the generated `TempoEnv`, or the package `Package.sh` leaves under `Packaged/API/`, until you publish it yourself. |
 
 So a client that only calls Tempo's built-in RPCs can `pip install tempo-sim` and never touch
 Unreal. The moment it calls one of *your* RPCs, that stops working: the published `tempo-sim`

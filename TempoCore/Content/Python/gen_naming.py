@@ -7,6 +7,8 @@
 # gen_common re-exports everything here, so venv-side code can keep importing
 # these names from gen_common.
 
+import os
+import platform
 import re
 from pathlib import Path
 
@@ -14,7 +16,7 @@ from pathlib import Path
 # Import name of the publishable Tempo plugin distribution (PyPI dist name
 # `tempo-sim`, import name `tempo_sim`). This is the namespace under which the
 # plugin-owned generated protos and wrappers are nested, and the Rust-symmetric
-# infra crate name. See PYTHON_API_SPLIT_PLAN.md.
+# infra crate name. See AGENTS.md section 4.
 INFRA_PACKAGE = "tempo_sim"
 
 
@@ -104,3 +106,36 @@ def classify_modules(plugin_root: Path, module_names):
             if d.is_dir():
                 tempo_modules.add(d.name)
     return {name: ("tempo" if name in tempo_modules else "project") for name in module_names}
+
+
+def host_platform_name() -> str:
+    """The C++ client's folder name under lib/ for the current build host."""
+    system = platform.system()
+    if system == "Darwin":
+        return "Mac"
+    if system == "Windows":
+        return "Win64"
+    if system == "Linux":
+        return "Linux"
+    raise RuntimeError(f"Unsupported host platform for C++ API build: {system}")
+
+
+def build_jobs(gigabytes_per_job=2):
+    """How many compilers a C++ build may run at once: one per core, as memory allows.
+
+    Never `cmake --build --parallel` with no number: for the Makefile generator that is `make -j`,
+    which starts every compile at once. The reflected API is three hundred translation units, each
+    parsing protobuf and gRPC, and starting them all exhausted a 64 GB machine. TEMPO_CPP_BUILD_JOBS
+    overrides the estimate.
+    """
+    override = os.environ.get("TEMPO_CPP_BUILD_JOBS", "")
+    if override.isdigit() and int(override) > 0:
+        return int(override)
+    jobs = os.cpu_count() or 1
+    try:
+        memory = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+        jobs = min(jobs, max(1, memory // (gigabytes_per_job * 1024 ** 3)))
+    except (AttributeError, OSError, ValueError):
+        pass  # No sysconf on Windows; the core count alone.
+    return int(jobs)
+

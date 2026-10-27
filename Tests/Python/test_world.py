@@ -34,11 +34,13 @@ def _transform(x, y, z):
 def _make_movable(name):
     """A StaticMeshActor spawns with Static mobility, which Unreal refuses to move at runtime
     (SetActorTransform is a no-op). Flip its root component to Movable first — this also exercises
-    set_enum_property (the enum byte is resolved by authored name, e.g. "Movable")."""
+    an enum write through set_property (the enum byte is resolved by authored name, e.g.
+    "Movable")."""
     comps = tw.get_all_components(actor=name).components
     assert comps, f"{name} reported no components"
     root = next((c.name for c in comps if "StaticMesh" in c.component_type), comps[0].name)
-    tw.set_enum_property(actor=name, component=root, property="Mobility", value="Movable")
+    tw.set_property(actor=name, component=root, property="Mobility",
+                    value=WorldControl.Value(enum_value="Movable"))
 
 
 def test_get_all_actors_returns_descriptors(sim_server):
@@ -174,8 +176,8 @@ def test_call_function_with_multiple_args(sim_server):
 
 
 def test_call_function_with_struct_arg(sim_server):
-    """A struct parameter goes through the same conversion rules as the matching
-    set_*_property RPC — vector_arg is unitless, exactly like set_vector_property."""
+    """A struct parameter is a Value like any other argument, in Unreal's own units, exactly as
+    set_property takes it."""
     name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 40.0)).name
     try:
         _make_movable(name)
@@ -256,7 +258,7 @@ def test_call_function_returns_scalar_result(sim_server):
         result = resp.results[0]
         assert result.name == "ReturnValue"
         assert result.property_type == "float"
-        # Floats are not unit-converted, matching set_float_property: 5 m is 500 cm.
+        # A result is Unreal-native, as a property read is: 5 m is 500 cm.
         assert float(result.value) == pytest.approx(500.0, abs=1.0)
     finally:
         for name in (a, b):
@@ -411,9 +413,9 @@ def test_get_functions_requires_its_target(sim_server):
         tw.destroy_actor(actor=name)
 
 
-def test_set_property_generic_matches_typed(sim_server):
-    """The generic SetProperty carries the value's type in the value, and must behave
-    identically to the singular set_*_property RPC it generalizes."""
+def test_set_property_carries_the_type_in_the_value(sim_server):
+    """SetProperty carries the value's type in the value, so one RPC writes any kind the
+    deprecated singular set_*_property RPCs each wrote one of."""
     name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 65.0)).name
     try:
         root = _root_component(name)
@@ -464,8 +466,8 @@ def _child_component(name):
 
 
 def test_set_actor_transform_preserves_scale(sim_server):
-    """TempoCore.Transform has no scale field, so a set_actor_transform request expresses a pose
-    and nothing more. Moving an actor must not resize it."""
+    """A transform whose scale is unset leaves the scale alone, so moving an actor that way must
+    not resize it."""
     name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 70.0)).name
     try:
         _make_movable(name)
@@ -541,8 +543,8 @@ def test_set_actor_transform_only_sets_what_was_supplied(sim_server):
         assert state.transform.rotation.y == pytest.approx(0.0, abs=1e-3)
         assert _scale_of(name) == pytest.approx((2.0, 2.0, 2.0), abs=1e-3)
 
-        # An empty transform with only a scale touches nothing but the scale.
-        tw.set_actor_transform(actor=name, transform=Geometry.Transform(), scale=_vector(3.0, 3.0, 3.0))
+        # A transform with only a scale touches nothing but the scale.
+        tw.set_actor_transform(actor=name, transform=Geometry.Transform(scale=_vector(3.0, 3.0, 3.0)))
         state = tw.get_current_actor_state(actor=name)
         assert state.transform.location.x == pytest.approx(9.0, abs=0.05)
         assert _scale_of(name) == pytest.approx((3.0, 3.0, 3.0), abs=1e-3)
@@ -615,14 +617,14 @@ def test_component_location_rotation_scale(sim_server):
 
 
 def test_set_component_transform_partial_and_scale(sim_server):
-    """SetComponentTransform takes the same partial update and scale field as the actor RPC."""
+    """SetComponentTransform takes the same partial update, scale included, as the actor RPC."""
     name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 105.0)).name
     try:
         _make_movable(name)
         child = _child_component(name)
 
         tw.set_component_transform(
-            actor=name, component=child, transform=Geometry.Transform(), scale=_vector(2.0, 3.0, 4.0)
+            actor=name, component=child, transform=Geometry.Transform(scale=_vector(2.0, 3.0, 4.0))
         )
         assert _scale_of(name, child) == pytest.approx((2.0, 3.0, 4.0), abs=1e-3)
 
@@ -633,6 +635,67 @@ def test_set_component_transform_partial_and_scale(sim_server):
         assert _location_of(name, child)[0] == pytest.approx(100.0, abs=0.05)
     finally:
         tw.destroy_actor(actor=name)
+
+
+def test_the_deprecated_scale_field_still_works(sim_server):
+    """The separate `scale` beside a transform is deprecated, not gone: honored when the
+    transform's own scale is unset, and an error beside one, since the two could disagree. The
+    deprecated GetTransformResponse.scale reports what transform.scale does."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 120.0)).name
+    try:
+        _make_movable(name)
+        tw.set_actor_transform(actor=name, transform=Geometry.Transform(),
+                               scale=_vector(2.0, 3.0, 4.0))
+        assert _scale_of(name) == pytest.approx((2.0, 3.0, 4.0), abs=1e-3)
+        got = tw.get_actor_transform(actor=name)
+        assert (got.scale.x, got.scale.y, got.scale.z) == pytest.approx(
+            (got.transform.scale.x, got.transform.scale.y, got.transform.scale.z))
+
+        with pytest.raises(grpc.RpcError):
+            tw.set_actor_transform(actor=name,
+                                   transform=Geometry.Transform(scale=_vector(1.0, 1.0, 1.0)),
+                                   scale=_vector(5.0, 5.0, 5.0))
+        assert _scale_of(name) == pytest.approx((2.0, 3.0, 4.0), abs=1e-3), "a refused call rescaled it"
+
+        child = _child_component(name)
+        tw.set_component_transform(actor=name, component=child, transform=Geometry.Transform(),
+                                   scale=_vector(2.0, 2.0, 2.0))
+        assert _scale_of(name, child) == pytest.approx((2.0, 2.0, 2.0), abs=1e-3)
+        with pytest.raises(grpc.RpcError):
+            tw.set_component_transform(actor=name, component=child,
+                                       transform=Geometry.Transform(scale=_vector(1.0, 1.0, 1.0)),
+                                       scale=_vector(5.0, 5.0, 5.0))
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_a_deprecated_property_setter_still_works_and_warns(sim_server):
+    """The typed set_*_property RPCs are deprecated in favor of set_property, but still answer,
+    converting as they always did; the client says so on every call."""
+    name = tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=_transform(0.0, 0.0, 125.0)).name
+    try:
+        with pytest.warns(DeprecationWarning, match="set_bool_property is deprecated"):
+            tw.set_bool_property(actor=name, property="bHidden", value=True)
+        assert _actor_property(name, "bHidden") == "true"
+    finally:
+        tw.destroy_actor(actor=name)
+
+
+def test_spawn_carries_the_transforms_scale(sim_server):
+    """A spawn transform's scale is the actor's, unconverted; unset, it is 1."""
+    scaled = _transform(0.0, 0.0, 175.0)
+    scaled.scale.CopyFrom(_vector(2.0, 3.0, 4.0))
+    names = [tw.spawn_actor(actor_type=SPAWNABLE_TYPE, transform=scaled).name]
+    try:
+        names.append(tw.spawn_actor(actor_type=SPAWNABLE_TYPE,
+                                    transform=_transform(0.0, 0.0, 180.0)).name)
+        scale = tw.get_actor_transform(actor=names[0]).transform.scale
+        assert (scale.x, scale.y, scale.z) == pytest.approx((2.0, 3.0, 4.0), abs=1e-3)
+        scale = tw.get_actor_transform(actor=names[1]).transform.scale
+        assert (scale.x, scale.y, scale.z) == pytest.approx((1.0, 1.0, 1.0), abs=1e-3)
+    finally:
+        for name in names:
+            tw.destroy_actor(actor=name)
 
 
 def test_get_actor_transform_round_trips_through_the_setter(sim_server):
@@ -652,7 +715,8 @@ def test_get_actor_transform_round_trips_through_the_setter(sim_server):
         assert got.transform.location.z == pytest.approx(130.0, abs=0.05)
         assert got.transform.rotation.y == pytest.approx(math.pi / 2.0, abs=1e-3)
         # Scale is unitless and unmirrored, so it comes back exactly as it was set.
-        assert (got.scale.x, got.scale.y, got.scale.z) == pytest.approx((2.0, 3.0, 4.0), abs=1e-3)
+        scale = got.transform.scale
+        assert (scale.x, scale.y, scale.z) == pytest.approx((2.0, 3.0, 4.0), abs=1e-3)
 
         # The singular getters agree with the composite one.
         loc = tw.get_actor_location(actor=name).location
@@ -699,7 +763,8 @@ def test_get_actor_transform_relative_to_actor_inverts_the_setter(sim_server):
         # Scale is absolute whatever the frame, exactly as set_actor_transform treats it: the
         # child's own world scale, not its scale relative to the doubled reference actor.
         got = tw.get_actor_transform(actor=child, relative_to_actor=ref)
-        assert (got.scale.x, got.scale.y, got.scale.z) == pytest.approx((1.0, 1.0, 1.0), abs=1e-3)
+        scale = got.transform.scale
+        assert (scale.x, scale.y, scale.z) == pytest.approx((1.0, 1.0, 1.0), abs=1e-3)
         assert (got.transform.location.x, got.transform.location.y) == pytest.approx((1.0, 0.0), abs=0.05)
     finally:
         for name in (child, ref):
@@ -781,10 +846,12 @@ def test_get_component_scale_follows_the_frame(sim_server):
         assert (world.x, world.y, world.z) == pytest.approx((6.0, 6.0, 6.0), abs=1e-3)
 
         # get_component_transform reports the same scale as the singular RPC, per frame.
-        assert tw.get_component_transform(actor=name, component=child).scale.x == pytest.approx(6.0, abs=1e-3)
+        assert tw.get_component_transform(
+            actor=name, component=child
+        ).transform.scale.x == pytest.approx(6.0, abs=1e-3)
         assert tw.get_component_transform(
             actor=name, component=child, frame=WorldControl.CF_PARENT
-        ).scale.x == pytest.approx(3.0, abs=1e-3)
+        ).transform.scale.x == pytest.approx(3.0, abs=1e-3)
     finally:
         tw.destroy_actor(actor=name)
 

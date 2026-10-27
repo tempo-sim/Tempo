@@ -15,38 +15,72 @@ Velocities follow: linear in m/s, angular in rad/s.
 This applies to actor and component transforms, world state, sensor poses, movement commands,
 lidar azimuths and elevations, and geographic coordinates.
 
-## The exception: `set_*_property` { #the-exception-set_property }
+## Angular velocity
 
-The property setters in [TempoWorld](../plugins/tempo-world.md#getting-and-setting-properties)
-reach *arbitrary* `UPROPERTY` values through Unreal's reflection system. Tempo cannot know
-whether a given `float` or `FVector` represents a distance, a ratio, a gain, or a color channel —
-so for those it does not guess.
+An angular velocity or acceleration — the `angular` of a `Twist` or an `Accel` — is the
+right-handed angular velocity *vector*, not a set of Euler-angle rates: the axis it points along is
+the axis of rotation, and the right-hand rule gives the sense. So a positive `angular.z` turns
+counterclockwise seen from above, a left turn, and a positive `angular.x` rolls the left side up.
+World state reports it and movement commands take it in the same convention, so an angular
+velocity read back from one can be handed straight to the other.
 
-| Property type | Converted? |
+## The exception: property and function access { #the-exception-set_property }
+
+The property and function RPCs in [TempoWorld](../plugins/tempo-world.md#getting-and-setting-properties)
+— `set_property`, `get_property`, `get_properties`, `stream_property`, `call_function` and
+`run_batch` — reach *arbitrary* `UPROPERTY` values and `UFUNCTION` parameters through Unreal's
+reflection system. Tempo cannot know whether a given `float` or `FVector` represents a distance, a
+ratio, a gain, or a color channel, so it converts nothing: every value they take or report is
+**Unreal-native**, exactly as the property stores it.
+
+| Value | Through the property and function RPCs |
 |---|---|
-| `set_rotator_property`, `set_quat_property` | :material-check: radians/right-handed → degrees/left-handed |
-| `set_transform_property` | :material-check: location m → cm, rotation converted |
-| `set_float_property` | :material-close: raw — pass centimeters if it is a distance |
-| `set_vector_property`, `set_vector2d_property`, `set_int_vector_property`, `set_int_point_property` | :material-close: raw |
+| A distance, a location, a velocity | centimeters, left-handed |
+| A rotator | `rotator_value`: roll, pitch, yaw in **degrees**, as Unreal's `FRotator` |
+| A quaternion | `quat_value`: Unreal's own left-handed `FQuat` |
+| A transform | `native_transform_value`: rotation as a quaternion, translation in centimeters, scale |
+| A linear color | `linear_color_value`, unclamped floats |
+| A float or a double | `float_value`, at double precision either way |
 
-`set_transform_property` is converted because a transform almost always represents a world-frame
-pose. A bare float or vector does not.
+The human-readable `value` strings that `get_*_properties` and `call_function` report follow the
+same rule: a rotator reads in degrees as it is stored, and a color reads with its alpha — an
+`FLinearColor` as linear floats.
 
 !!! warning "The practical consequence"
 
     ```python
-    # Meters — set_actor_location is a first-class, unit-converted RPC.
+    import tempo_sim.tempo_world as tw
+    import tempo_sim.TempoCore.Geometry_pb2 as Geometry
+    import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+    # Meters -- set_actor_location is a first-class, unit-converted RPC.
     tw.set_actor_location(actor="MyActor", location=Geometry.Vector(x=1.0, y=2.0, z=3.0))
 
-    # Centimeters — RelativeLocation is a raw UProperty.
-    tw.set_vector_property(actor="MyActor", component="Mesh",
-                           property="RelativeLocation", x=100.0, y=200.0, z=300.0)
+    # Centimeters -- RelativeLocation is a raw UProperty.
+    tw.set_property(actor="MyActor", component="Mesh", property="RelativeLocation",
+                    value=WorldControl.Value(vector_value=Geometry.Vector(x=100.0, y=200.0, z=300.0)))
     ```
 
-    Values you *read back* through `get_*_properties` are likewise Unreal-native and unconverted,
-    as are values returned by [`call_function`](../plugins/tempo-world.md#calling-functions).
+The [reflected API](../clients/reflected-api.md#units) is built on these RPCs and is Unreal-native
+for the same reason. Its value types are Unreal's own — `FVector`, `FRotator`, `FQuat`,
+`FTransform` — shaped as Unreal's are. `tempo_sim.conversion` (Python), `tempo_sim::conversion`
+(Rust) and `tempo/conversion.h` (C++) convert them to and from the API's units with the rules above:
+`ue_to_si` and `si_to_ue`. An `FQuat` converts to a `Quat` exactly; for Euler angles, convert the
+rotator Unreal would make of it, `ue_to_si(rotator_of(q))`. A bare angle, an angular velocity, a
+`Twist`, an `Accel` and a `Box` have no conversion helper.
+
+??? note "The deprecated typed setters convert differently"
+
+    The typed setters — `set_float_property`, `set_rotator_property` and the rest, deprecated in
+    v0.4.0 — keep the rule they always had: a rotator, a quaternion and a transform are given in
+    radians and right-handed, with a transform's location in meters, while a scalar or a vector is
+    raw. Moving a call from one of them to `set_property` therefore changes the units of a rotator,
+    a quaternion or a transform. See the [v0.4.0 migration guide](../migration/v0.4.0.md).
 
 ## Scale is unitless
+
+`TempoCore.Transform` carries a `scale` beside its location and rotation. Where you give a
+transform, leaving it unset means (1, 1, 1); a transform Tempo reports always has it set.
 
 Every other `Vector` in the API is meters and right-handed, and is converted on the way in. A
 scale is a ratio, so its components are used exactly as given — negating Y to change handedness

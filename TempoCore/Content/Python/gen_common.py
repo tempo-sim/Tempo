@@ -225,3 +225,11 @@ def gather_services(module_name, module_descriptor):
     return services
 
 
+def is_proto_module(d):
+    """Whether a subdirectory of a client package is a proto module: one holding _pb2 files.
+
+    A package holds more than proto modules -- a project's reflected API, `reflected`, sits beside
+    them -- and a generator counting every subdirectory would report a module that does not
+    exist.
+    """
+    return d.is_dir() and d.name != "__pycache__" and any(d.rglob("*_pb2.py"))

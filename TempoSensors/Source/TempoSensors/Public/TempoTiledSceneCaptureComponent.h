@@ -100,7 +100,7 @@ protected:
 	void RetirePPM(UMaterialInstanceDynamic* PPM);
 
 	// The measurement types this sensor supports. Set in subclass constructors.
-	UPROPERTY(VisibleAnywhere, Category = "Tempo")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Tempo")
 	TArray<TEnumAsByte<EMeasurementType>> MeasurementTypes;
 
 	// Shared render target holding the packed tile output.

@@ -11,7 +11,7 @@ unicycle model, and a Chaos wheeled vehicle — plus a controller for them.
 ```python
 import tempo_sim.tempo_movement as tm
 
-tm.get_commandable_vehicles()
+tm.get_commandable_pawns()
 # Acceleration and steering are normalized from -1.0 to 1.0.
 tm.command_vehicle(vehicle="MyVehicle", acceleration=0.5, steering=0.0)
 ```
@@ -28,13 +28,18 @@ import tempo_sim.TempoCore.Geometry_pb2 as Geometry
 
 twist = Geometry.Twist()
 twist.linear.x = 2.0        # m/s forward
-twist.angular.z = 0.3       # rad/s yaw
+twist.angular.z = 0.3       # rad/s, turning left
 tm.command_velocity(pawn="MyPawn", twist=twist)
 
 accel = Geometry.Accel()    # same frame and conventions, in m/s^2 and rad/s^2
 accel.linear.x = 0.5
 tm.command_acceleration(pawn="MyPawn", accel=accel)
 ```
+
+The angular part is the right-handed angular velocity vector, so a positive `angular.z` is a
+counterclockwise, left turn seen from above — the same convention world state reports an actor's
+angular velocity in ([Angular velocity](../concepts/conventions.md#angular-velocity)). Vehicles act
+on `angular.z` alone.
 
 ### Rotation center
 
@@ -46,7 +51,7 @@ Set it when the owner's origin is not where the vehicle should pivot — a mesh 
 the rear bumper, for instance. `RotationCenter` is also the point whose velocity the motion model
 describes, so it is the point that tracks a commanded speed exactly. It is an *unscaled*
 owner-local offset (the owner's scale applies on top of it), and can be set at runtime with
-`set_vector2d_property`.
+`set_property` and a `vector2d_value`, in centimeters.
 
 For the bicycle model this is independent of `AxleRatio`. `AxleRatio` places the model's reference
 point along the wheelbase (`0` = rear axle, `1` = front axle), which sets the slip angle;
@@ -219,7 +224,7 @@ first.
 !!! note "Why a dedicated RPC for spline points"
 
     `USplineComponent`'s points are not reachable through TempoWorld's generic property API, so
-    spline geometry gets a first-class RPC rather than a `set_*_property` call.
+    spline geometry gets a first-class RPC rather than a `set_property` call.
 
 ## API reference
 

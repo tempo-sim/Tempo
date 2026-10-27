@@ -84,6 +84,23 @@ them with `--depth` / `--labels` / `--bboxes`, or per-camera from the Streams pa
 
 It works on Linux, macOS and Windows — rerun ships native viewers for all three.
 
+### Reflected API
+
+The examples above run against any Tempo sim, so they address properties by string. An example of
+the [reflected API](reflected-api.md) cannot: its whole value is naming one build's classes in code
+a type checker reads, and those classes are generated per project. So it belongs with the project
+whose classes it names.
+
+TempoSample's is `Content/Python/ExampleClients/TypedClasses.py` — spawn an actor by its class, read
+and write its properties, reach its components, call a function, batch, watch, and discover by type:
+
+```bash
+python ./Content/Python/ExampleClients/TypedClasses.py
+```
+
+[The reflected API, step by step](../guides/reflected-api.md) walks through it, and through writing the
+equivalent against your own project's classes.
+
 ### Notebook
 
 TempoSample includes `Content/Python/ExampleClients/TempoSimExamples.ipynb`:

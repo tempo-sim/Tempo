@@ -39,9 +39,11 @@ A component's name is always the result of `UActorComponent::GetName`. Component
 relative to their owning actor:
 
 ```python
+from tempo_sim.TempoWorld.WorldControl_pb2 import Value
+
 tw.get_component_properties(name="TempoCamera")
-tw.set_float_property(actor="BP_SensorRig", component="TempoCamera",
-                      property="FOVAngle", value=60.0)
+tw.set_property(actor="BP_SensorRig", component="TempoCamera",
+                property="FOVAngle", value=Value(float_value=60.0))
 ```
 
 When a property *value* refers to a component, the encoding is `ActorName:ComponentName`.
@@ -76,7 +78,7 @@ Nested addressing lets you reach inside structs, arrays and maps, to arbitrary d
 Array indices must be either already present in the array, or exactly one past its end (which
 extends it by one element). Map keys that don't exist yet are inserted. `TSet` elements cannot be
 addressed individually — a set element is its own identity, so there is nothing to address into;
-use `set_*_set_property` to replace the whole set.
+use `set_property` with a `*_set_value` to replace the whole set.
 
 Don't know the names? Ask:
 
@@ -95,8 +97,7 @@ letter follows it.
 |---|---|
 | `SpawnActor` | `spawn_actor` |
 | `SetActorScale3D` | `set_actor_scale3d` |
-| `SetVector2DProperty` | `set_vector2d_property` |
-| `SetInt64Property` | `set_int64_property` |
+| `GetComponentScale3D` | `get_component_scale3d` |
 
 The service name does not appear in the client function name — nor does the file name or the
 proto package. That brevity comes with one restriction: **RPC names must be unique within a

@@ -89,7 +89,7 @@ else
 fi
 
 # Check if requirements need installing (cache check before gen_api.py)
-if ! python "$PLUGIN_ROOT/Content/Python/check_venv_cache.py" "$PLUGIN_ROOT" "$VENV_DIR"; then
+if ! python "$PLUGIN_ROOT/Content/Python/check_venv_cache.py" "$PLUGIN_ROOT" "$VENV_DIR" "$PROJECT_ROOT"; then
   echo "[Tempo Prebuild] Installing Python dependencies to venv"
   set +e # Proceed despite errors from pip. That could just mean the user has no internet connection.
   pip install -r "$PLUGIN_ROOT/Content/Python/API/requirements.txt" --quiet --retries 0
@@ -102,7 +102,7 @@ fi
 python "$PLUGIN_ROOT/Content/Python/gen_api.py" "$PROJECT_ROOT" "$PLUGIN_ROOT"
 
 # Check if API package needs installing (cache check after gen_api.py, since it may have changed files)
-if ! python "$PLUGIN_ROOT/Content/Python/check_venv_cache.py" "$PLUGIN_ROOT" "$VENV_DIR"; then
+if ! python "$PLUGIN_ROOT/Content/Python/check_venv_cache.py" "$PLUGIN_ROOT" "$VENV_DIR" "$PROJECT_ROOT"; then
   echo "[Tempo Prebuild] Installing Tempo Python API to venv"
   # The publishable tempo-sim package (plugin-owned).
   pip install "$PLUGIN_ROOT/Content/Python/API" --no-deps --force-reinstall --quiet --retries 0
@@ -115,7 +115,7 @@ if ! python "$PLUGIN_ROOT/Content/Python/check_venv_cache.py" "$PLUGIN_ROOT" "$V
     pip install "$PROJECT_API_DIR" --no-deps --force-reinstall --quiet --retries 0
   fi
   # Update the cache after all installs
-  python "$PLUGIN_ROOT/Content/Python/update_venv_cache.py" "$PLUGIN_ROOT" "$VENV_DIR"
+  python "$PLUGIN_ROOT/Content/Python/update_venv_cache.py" "$PLUGIN_ROOT" "$VENV_DIR" "$PROJECT_ROOT"
 else
   echo "[Tempo Prebuild]  Skipping installation of Tempo Python API (no changes detected)"
 fi

@@ -112,6 +112,12 @@ else
   cp -r "$PROJECT_ROOT/Saved/Cooked/$TARGET_PLATFORM/$PROJECT_NAME/AssetRegistry.bin" "$PROJECT_ROOT/Packaged"
 fi
 
+# The clients are rebuilt from scratch below, so clear what an earlier package left. Each step only
+# replaces its own destination, and a distribution that no longer exists -- the -classes package the
+# reflected API once shipped as -- would otherwise sit there, still installed by every `pip install
+# Packaged/API/Python/*/*.whl`.
+rm -rf "$PROJECT_ROOT/Packaged/API/Python" "$PROJECT_ROOT/Packaged/API/Rust" "$PROJECT_ROOT/Packaged/API/Cpp"
+
 # Copy generated Rust crate(s) to Packaged/API/Rust/ so downstream consumers can
 # build a Rust client against this packaged build. Only ships the files that
 # `cargo package` would include — same as the publish artifact, minus target/,
@@ -149,19 +155,14 @@ PACKAGE_RUST_CRATE() {
         cp "$CRATE_DIR/$rel" "$DEST/$rel"
       fi
     done
+  # A project crate depends on tempo-sim by path and version, the path naming the source tree. The
+  # packaged copy keeps only the version, so a consumer builds it against tempo-sim from crates.io,
+  # one copy shared with their own dependency on it. Not `sed -i`, whose suffix argument BSD
+  # requires and GNU rejects.
+  sed -E '/^tempo-sim[[:space:]]*=/s/path[[:space:]]*=[[:space:]]*"[^"]*"[[:space:]]*,[[:space:]]*//' \
+    "$DEST/Cargo.toml" > "$DEST/Cargo.toml.relocated"
+  mv "$DEST/Cargo.toml.relocated" "$DEST/Cargo.toml"
 }
-
-# Only package the Rust crate(s) when Rust generation is opted in via
-# TEMPO_GEN_RUST_API (same gate as gen_rust_api.py / GenRustAPI.sh); otherwise
-# the crates are absent or stale and shouldn't be shipped.
-if [[ -n "$TEMPO_GEN_RUST_API" && "$TEMPO_GEN_RUST_API" != "0" ]]; then
-  if command -v cargo >/dev/null 2>&1; then
-    PACKAGE_RUST_CRATE "$PROJECT_ROOT/Plugins/Tempo/TempoCore/Content/Rust/API"
-    PACKAGE_RUST_CRATE "$PROJECT_ROOT/Content/Rust/API"
-  else
-    echo "Skipping Rust crate packaging: cargo not on PATH"
-  fi
-fi
 
 # Build the generated Python package(s) (sdist + wheel) into
 # Packaged/API/Python/<dist-name>/ so downstream consumers can `pip install` a
@@ -206,6 +207,95 @@ PACKAGE_PYTHON_PACKAGE() {
       echo "Warning: failed to build Python wheel for $DIST_NAME"
   fi
 }
+
+# Generate this build's reflected API before the wheels and crates are built, since they go into the
+# project's own package and crate. This walks the editor's reflection and loads every Blueprint,
+# which costs about a minute; TEMPO_SKIP_REFLECTED_API=1 skips it.
+#
+# Non-fatal by default: it runs the editor, so it can fail for reasons that have nothing to do with
+# whether the package itself is good, and a staged build without the reflected API is still a
+# working build. The failure is loud, and the classes are simply absent rather than stale.
+# TEMPO_REQUIRE_REFLECTED_API=1 makes it fatal instead, for a pipeline whose downstream jobs test the
+# reflected API: a package that went green without them fails those jobs with errors that say
+# nothing about the cause.
+#
+# Either way, classes an earlier package left in the source tree are removed rather than shipped:
+# they describe a different build. When only the C++ classes failed, the Python and Rust ones still
+# ship.
+CLEAR_REFLECTED_API() {
+  if [[ -n "$PYTHON_BIN" ]]; then
+    "$PYTHON_BIN" "$PROJECT_ROOT/Plugins/Tempo/TempoCore/Content/Python/gen_project_package.py" \
+      clear "$PROJECT_ROOT"
+  fi
+  # The C++ classes too, which build_cpp_classes.py installed beside the C++ client.
+  local CPP_API="$PROJECT_ROOT/Plugins/Tempo/TempoCore/Content/Cpp/API"
+  rm -rf "$CPP_API/include/tempo/reflected"
+  rm -f "$CPP_API"/lib/*/libtempo_reflected.a "$CPP_API"/lib/*/tempo_reflected.lib
+}
+if [[ -n "$TEMPO_SKIP_REFLECTED_API" && "$TEMPO_SKIP_REFLECTED_API" != "0" ]]; then
+  echo "Skipping the reflected API (TEMPO_SKIP_REFLECTED_API is set)"
+  CLEAR_REFLECTED_API
+else
+  REFLECTED_API_STATUS=0
+  "$SCRIPT_DIR"/GenReflectedAPI.sh || REFLECTED_API_STATUS=$?
+  if [[ $REFLECTED_API_STATUS -ne 0 ]]; then
+    if [[ -n "$TEMPO_REQUIRE_REFLECTED_API" && "$TEMPO_REQUIRE_REFLECTED_API" != "0" ]]; then
+      echo "Failed to generate the reflected API, which TEMPO_REQUIRE_REFLECTED_API requires" >&2
+      exit 1
+    fi
+    if [[ $REFLECTED_API_STATUS -eq 3 ]]; then
+      echo "Warning: failed to generate the reflected C++ API; the packaged build will include only the Python and Rust ones" >&2
+    else
+      echo "Warning: failed to generate the reflected API; the packaged build will not include them" >&2
+      CLEAR_REFLECTED_API
+    fi
+  fi
+fi
+
+# Copy the C++ client to Packaged/API/Cpp/, self-contained: its headers and archives, the reflected
+# API's archive when there is one, the vendored gRPC headers, and the shared tempogrpc library,
+# which carries OpenSSL and zlib inside it -- so a consumer needs neither this checkout nor an engine.
+# The shared library rather than the static archives beside it, as Tempo's own modules link it, and
+# at a seventh of their size. TempoConfig.cmake makes it a CMake package (find_package(Tempo)).
+PACKAGE_CPP_CLIENT() {
+  local SRC="$PROJECT_ROOT/Plugins/Tempo/TempoCore/Content/Cpp/API"
+  local GRPC="$PROJECT_ROOT/Plugins/Tempo/TempoCore/Source/ThirdParty/gRPC"
+  local DEST="$PROJECT_ROOT/Packaged/API/Cpp"
+  if [ ! -d "$SRC/lib/$HOST_PLATFORM" ]; then
+    echo "Skipping C++ client packaging: no C++ client built for $HOST_PLATFORM"
+    return
+  fi
+  echo "Packaging the C++ client -> $DEST"
+  mkdir -p "$DEST/lib/$HOST_PLATFORM" "$DEST/third_party/grpc"
+  cp -R "$SRC/include" "$DEST/include"
+  cp "$SRC/lib/$HOST_PLATFORM/"* "$DEST/lib/$HOST_PLATFORM/"
+  cp "$SRC/README.md" "$SRC/TempoConfig.cmake" "$DEST/"
+  cp -R "$GRPC/Includes" "$DEST/third_party/grpc/include"
+  case "$HOST_PLATFORM" in
+    Win64)
+      cp "$GRPC/Binaries/Windows/tempogrpc.dll" "$GRPC/Libraries/Windows/tempogrpc.lib" "$DEST/lib/$HOST_PLATFORM/" ;;
+    Mac)
+      cp "$GRPC/Libraries/Mac/libtempogrpc.dylib" "$DEST/lib/$HOST_PLATFORM/" ;;
+    *)
+      cp "$GRPC/Libraries/Linux/libtempogrpc.so" "$DEST/lib/$HOST_PLATFORM/" ;;
+  esac
+}
+
+if [[ -n "$TEMPO_GEN_CPP_API" && "$TEMPO_GEN_CPP_API" != "0" ]]; then
+  PACKAGE_CPP_CLIENT
+fi
+
+# Only package the Rust crate(s) when Rust generation is opted in via
+# TEMPO_GEN_RUST_API (same gate as gen_rust_api.py / GenRustAPI.sh); otherwise
+# the crates are absent or stale and shouldn't be shipped.
+if [[ -n "$TEMPO_GEN_RUST_API" && "$TEMPO_GEN_RUST_API" != "0" ]]; then
+  if command -v cargo >/dev/null 2>&1; then
+    PACKAGE_RUST_CRATE "$PROJECT_ROOT/Plugins/Tempo/TempoCore/Content/Rust/API"
+    PACKAGE_RUST_CRATE "$PROJECT_ROOT/Content/Rust/API"
+  else
+    echo "Skipping Rust crate packaging: cargo not on PATH"
+  fi
+fi
 
 # Package whenever any Python interpreter is available. The wheel is built either way (via `build`
 # if present, else pip); only a complete absence of Python skips it.

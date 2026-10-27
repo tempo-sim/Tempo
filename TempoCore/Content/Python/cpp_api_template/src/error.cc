@@ -26,12 +26,32 @@ TempoError TempoError::unknown(std::string message) {
     return TempoError(ErrorKind::Unknown, std::move(message), 0);
 }
 
+TempoError TempoError::protocol(std::string message) {
+    return TempoError(ErrorKind::Protocol, std::move(message), 0);
+}
+
+TempoError TempoError::batch(std::string message) {
+    return TempoError(ErrorKind::Batch, std::move(message), 0);
+}
+
+TempoError TempoError::schema_mismatch(std::string message) {
+    return TempoError(ErrorKind::SchemaMismatch, std::move(message), 0);
+}
+
+TempoError TempoError::deferred() {
+    return TempoError(ErrorKind::Deferred, "a read inside defer() is queued, not performed", 0);
+}
+
 std::string TempoError::what() const {
     switch (kind_) {
         case ErrorKind::Connection: return "Connection error: " + message_;
         case ErrorKind::Rpc:        return "RPC error (code " + std::to_string(code_) + "): " + message_;
         case ErrorKind::InvalidUri: return "Invalid URI: " + message_;
         case ErrorKind::Unknown:    return "Error: " + message_;
+        case ErrorKind::Protocol:   return "Protocol error: " + message_;
+        case ErrorKind::Batch:      return "Batch error: " + message_;
+        case ErrorKind::SchemaMismatch: return "Schema mismatch: " + message_;
+        case ErrorKind::Deferred:   return "Deferred: " + message_;
     }
     return message_;
 }

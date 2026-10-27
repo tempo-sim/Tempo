@@ -20,7 +20,7 @@ int main(int argc, char** argv) {
     tempo::set_server(host, static_cast<uint16_t>(port));
     std::printf("[WorldPlayground] connecting to %s:%d\n", host, port);
 
-    auto state = tw::get_current_actor_state(actor_name, /*include_hidden_components=*/false);
+    auto state = tw::get_current_actor_state({.actor = actor_name});
     if (!state) {
         std::fprintf(stderr, "[WorldPlayground] get_current_actor_state(%s) failed: %s\n",
                      actor_name.c_str(), state.error().what().c_str());

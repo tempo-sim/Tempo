@@ -18,6 +18,13 @@ Task-shaped documentation: how to extend Tempo, ship it, test it, and unstick it
     Define `.proto` services in your own module and get generated Python, Rust and C++ clients for
     free. Walked through end to end with the Greeter plugin.
 
+-   **[The reflected API, step by step](reflected-api.md)**
+
+    ---
+
+    Set up a Python environment where a renamed property is a type error before anything runs:
+    install, configure a checker, run the example, watch drift get caught.
+
 -   **[Packaging](packaging.md)**
 
     ---

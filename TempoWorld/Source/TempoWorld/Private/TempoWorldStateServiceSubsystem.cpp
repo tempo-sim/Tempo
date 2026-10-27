@@ -200,6 +200,13 @@ TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World, b
 	ActorStateRotation->set_p(ActorRotation.Pitch);
 	ActorStateRotation->set_y(ActorRotation.Yaw);
 
+	// Unitless, so unconverted.
+	const FVector ActorScale = Actor->GetActorScale3D();
+	TempoCore::Vector* ActorStateScale = ActorStateTransform->mutable_scale();
+	ActorStateScale->set_x(ActorScale.X);
+	ActorStateScale->set_y(ActorScale.Y);
+	ActorStateScale->set_z(ActorScale.Z);
+
 	const FVector ActorLinearVelocity = QuantityConverter<CM2M, L2R>::Convert(Actor->GetVelocity());
 	TempoCore::Twist* ActorStateVelocity = ActorState.mutable_velocity();
 	TempoCore::Vector* ActorStateLinearVel = ActorStateVelocity->mutable_linear();
@@ -231,9 +238,9 @@ TempoWorld::ActorState GetActorState(const AActor* Actor, const UWorld* World, b
 	// (TransformBy) rather than just Min/Max, which would be wrong whenever the Actor is rotated.
 	const FBox ActorWorldBounds = ActorLocalBounds.TransformBy(Actor->GetTransform());
 
-	// Local bounds with the Actor's scale baked in (the transmitted transform carries location and
-	// rotation only). A client recovers the tight oriented box from local_bounds plus the transform.
-	const FVector ActorScale = Actor->GetTransform().GetScale3D();
+	// Local bounds with the Actor's scale already baked in, so a client recovers the tight oriented
+	// box from local_bounds plus the transform's location and rotation, and must not apply the
+	// transform's scale a second time.
 	const FBox ActorScaledLocalBounds(ActorLocalBounds.Min * ActorScale, ActorLocalBounds.Max * ActorScale);
 
 	if (GDebugTempoWorld)

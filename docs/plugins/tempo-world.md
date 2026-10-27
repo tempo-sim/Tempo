@@ -19,7 +19,9 @@ or Blueprint class, any `UPROPERTY`, any `UFUNCTION` is reachable over the wire.
 
 TempoWorld can **get** (right now) or **stream** (continuously) the state of actors. State
 includes the name, transform, 6-DoF velocity (linear m/s, angular rad/s), 3D bounds, and the
-timestamp when it was captured.
+timestamp when it was captured. The angular velocity is the right-handed angular velocity vector,
+the same one [TempoMovement](tempo-movement.md#velocity-and-acceleration-commands) commands take;
+see [Angular velocity](../concepts/conventions.md#angular-velocity).
 
 ```python
 import tempo_sim.tempo_world as tw
@@ -65,6 +67,7 @@ breakdown — reach for the transform getters in
 `raycast` performs a single ray query against the physics world:
 
 ```python
+import tempo_sim.TempoCore.Geometry_pb2 as Geometry
 import tempo_sim.TempoWorld.WorldState_pb2 as WorldState
 
 hit = tw.raycast(start=Geometry.Vector(x=0.0, y=0.0, z=2.0),
@@ -85,7 +88,8 @@ from the query by name — usually the actor casting the ray.
 
 To spawn, name the `actor_type` — any C++ or Blueprint class in the project, per
 [Class names](../concepts/naming.md#classes). You may also give a transform and an actor to
-interpret it relative to.
+interpret it relative to. The transform's `scale` is applied as given, never composed through that
+actor ([Scale is unitless](../concepts/conventions.md#scale-is-unitless)).
 
 A **deferred** spawn creates the actor in an invisible, unfinished state so you can set its
 properties before finishing:
@@ -141,17 +145,20 @@ tw.set_component_transform(actor="OwnerActor", component="MyComponent",
 
 ### These are partial updates
 
-A member you don't set is left exactly as it was. `transform.location` and `transform.rotation`
-are honored independently, and scale rides alongside in its own `scale` field — so the example
-above moves `MyActor` without turning or resizing it. Setting nothing at all is a no-op.
+A member you don't set is left exactly as it was. `transform.location`, `transform.rotation` and
+`transform.scale` are honored independently, so the example above moves `MyActor` without turning
+or resizing it. Setting nothing at all is a no-op.
 
 ```python
 r = Geometry.Transform()
 r.rotation.y = 1.57
 tw.set_actor_transform(actor="MyActor", transform=r)                         # turn in place
-tw.set_actor_transform(actor="MyActor", transform=Geometry.Transform(),
-                       scale=Geometry.Vector(x=2.0, y=2.0, z=2.0))           # resize in place
+tw.set_actor_transform(actor="MyActor",
+                       transform=Geometry.Transform(scale=Geometry.Vector(x=2.0, y=2.0, z=2.0)))  # resize in place
 ```
+
+The requests' separate `scale` field is deprecated: it is honored only when `transform.scale` is
+unset, and setting both is an error.
 
 !!! important "Presence decides what gets applied, not value"
 
@@ -218,21 +225,20 @@ Every setter above has a getter, reporting in the same units, handedness and fra
 got = tw.get_actor_transform(actor="MyActor")
 got.transform.location.x    # meters, right-handed
 got.transform.rotation.y    # radians, right-handed
-got.scale.x                 # unitless
+got.transform.scale.x       # unitless
 
 tw.get_actor_location(actor="MyActor").location
 tw.get_actor_rotation(actor="MyActor").rotation
 tw.get_actor_scale3d(actor="MyActor").scale
 ```
 
-Scale rides in its own field for the same reason it does on the way in: `Geometry.Transform`
-carries a pose and nothing else.
+The response's separate `scale` field is deprecated; it holds the same value as `transform.scale`.
 
 `get_actor_transform`, `get_actor_location` and `get_actor_rotation` take `relative_to_actor` and
 divide out exactly the frame their setters compose in, so a value read in a frame can be handed
 straight back to the matching setter in that frame. `get_actor_scale3d` has no `relative_to_actor`,
 because `set_actor_scale3d` has none either — and for the same reason, `get_actor_transform`'s
-`scale` is always the world scale, whatever frame the pose is reported in.
+scale is always the world scale, whatever frame the pose is reported in.
 
 ### Choosing a component's frame
 
@@ -298,47 +304,21 @@ Or, more directly:
 tw.get_actor_properties(name="MyActor", include_components=True)
 ```
 
-Once you know the actor, component and property, set it with the RPC for its type:
+Each property's `value` is a human-readable string, Unreal-native like everything below: a vector
+reads as `{X:100.000000, Y:0.000000, Z:0.000000}` in centimeters, a rotator in degrees as stored,
+and a color with its alpha, an `FLinearColor` as linear floats. Read a value you mean to act on with
+`get_property`, which returns it typed.
 
-| Set property RPC | Unreal type |
-| --- | --- |
-| `set_bool_property` | `bool` |
-| `set_string_property` | `FString`, `FName`, or `FText` |
-| `set_enum_property` | `TEnumAsByte` or raw enum |
-| `set_int_property` | `int32` (also `int8`/`int16`/`uint16` with range check, and `TEnumAsByte`) |
-| `set_int64_property` | `int64` (also `uint32`/`uint64` with range check) |
-| `set_float_property` | `double` or `float` |
-| `set_vector_property` | `FVector` |
-| `set_vector2d_property` | `FVector2D` |
-| `set_int_vector_property` | `FIntVector` |
-| `set_int_point_property` | `FIntPoint` |
-| `set_rotator_property` | `FRotator` |
-| `set_quat_property` | `FQuat` |
-| `set_transform_property` | `FTransform` |
-| `set_color_property` | `FColor` or `FLinearColor` |
-| `set_class_property` | `UClass*`, `TSubclassOf`, or `TSoftClassPtr` (by name) |
-| `set_asset_property` | asset, `TSoftObjectPtr` (by path/name) |
-| `set_actor_property` | `AActor*` (by name) |
-| `set_component_property` | `UActorComponent*` (by name, as `ActorName:ComponentName`) |
+!!! tip "There is a typed alternative"
 
-All of the above except the struct types (`vector`, `vector2d`, `int_vector`, `int_point`,
-`rotator`, `quat`, `transform`, `color`) also have `set_*_array_property` and
-`set_*_set_property` RPCs, which replace the entire contents of a `TArray` or `TSet` in one call.
+    Everything below addresses properties by string, which nothing can check until the call runs. If
+    you are writing scenarios that have to survive a new release of the simulation, see
+    [Reflected API](../clients/reflected-api.md): the same capability with the strings replaced by
+    generated types, so a renamed or removed property is a type error rather than a runtime failure.
+    This page remains the complete and unfiltered surface, and the reflected API is built on it.
 
-Nested addressing — `MyStruct.Inner`, `MyArray[0]`, `MyMap[key]`, to arbitrary depth — is
-described under [Naming → Properties](../concepts/naming.md#properties).
-
-!!! warning "Most of these are *not* unit-converted"
-
-    Rotators, quaternions and transforms are converted from the API's radians/right-handed
-    convention. Floats and the vector-shaped types are **not** — pass centimeters if they
-    represent distances. See [the exception](../concepts/conventions.md#the-exception-set_property).
-
-### `set_property`: one call, runtime types
-
-Every RPC above is a named shorthand for the same underlying operation — write one typed value
-into one property. That operation is also available directly, carrying the type in a `Value`
-message instead of in the RPC name:
+Once you know the actor, component and property, write it with `set_property` and read it with
+`get_property`. The value travels as a `Value` message, whose variant carries its type:
 
 ```python
 from tempo_sim import tempo_world
@@ -346,67 +326,123 @@ import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
 
 tempo_world.set_property(actor="MyActor", property="MaxSpeed",
                          value=WorldControl.Value(float_value=42.0))
+speed = tempo_world.get_property(actor="MyActor", property="MaxSpeed").float_value
 ```
 
-Reach for it when the type isn't known until runtime — dispatching over a config file, or
-replaying recorded property values. When you know the type at the call site, the named
-`set_*_property` functions say the same thing more plainly.
+| `Value` variant | Unreal type |
+| --- | --- |
+| `bool_value` | `bool` |
+| `string_value` | `FString`, `FName`, or `FText` |
+| `enum_value` | `TEnumAsByte` or raw enum, by name |
+| `int_value` | `int32` (also `int8`/`int16`/`uint16` with range check, and `TEnumAsByte`) |
+| `int64_value` | `int64` (also `uint32`/`uint64` with range check) |
+| `float_value` | `double` or `float`, carried at double precision either way |
+| `vector_value` | `FVector` |
+| `vector2d_value` | `FVector2D` |
+| `int_vector_value` | `FIntVector` |
+| `int_point_value` | `FIntPoint` |
+| `rotator_value` | `FRotator` |
+| `quat_value` | `FQuat` |
+| `native_transform_value` | `FTransform` |
+| `color_value` | `FColor`, or `FLinearColor` given in 8-bit sRGB; an unset alpha `a` means 255 |
+| `linear_color_value` | `FLinearColor` |
+| `class_value` | `UClass*`, `TSubclassOf`, or `TSoftClassPtr` (by name) |
+| `asset_value` | asset, `TSoftObjectPtr` (by path/name); also `TWeakObjectPtr` |
+| `actor_value` | `AActor*` (by name) |
+| `component_value` | `UActorComponent*` (by name, as `ActorName:ComponentName`) |
+| `struct_value` | any other `USTRUCT`; see [Struct values](#struct-values) |
 
-### Batching property sets
+The scalar and reference kinds also have `*_array_value` and `*_set_value` variants, either of which
+replaces the entire contents of a `TArray` or `TSet` property; a read reports the one matching the
+property's container. `struct_array_value` carries a `TArray` of structs.
 
-`set_properties` accepts a list of any of the singular set-property ops above and runs them in
-order in a single call. Rather than build op messages by hand, the generated clients include a
-fluent `Batch` builder with one method per supported type, named after its singular counterpart.
+Nested addressing — `MyStruct.Inner`, `MyArray[0]`, `MyMap[key]`, to arbitrary depth — is
+described under [Naming → Properties](../concepts/naming.md#properties).
 
-The response contains one entry per **failed** op, by index; an empty `failures` list means every
-op succeeded.
+!!! warning "Values are Unreal-native"
 
-=== "Python"
+    Nothing is unit-converted in either direction: a distance is in centimeters, a rotator in
+    degrees, and every vector left-handed, exactly as the property stores it. See
+    [the exception](../concepts/conventions.md#the-exception-set_property).
 
-    ```python
-    from tempo_sim import tempo_world
+!!! note "The typed setters are deprecated"
 
-    response = (
-        tempo_world.batch()
-            .set_bool_property(actor="MyActor", property="bEnabled", value=True)
-            .set_float_property(actor="MyActor", property="MaxSpeed", value=42.0)
-            .set_vector_property(actor="MyActor", component="Mesh",
-                                 property="RelativeLocation", x=0.0, y=0.0, z=150.0)
-            .set_string_array_property(actor="MyActor", property="WaypointTags",
-                                       values=["alpha", "bravo", "charlie"])
-            .execute()
-    )
+    The per-type RPCs — `set_bool_property`, `set_float_property`, `set_rotator_property` and the
+    rest, with their `_array` and `_set` forms — are deprecated in v0.4.0 and will be removed in a
+    later release. Each is `set_property` with one `Value` variant, except that the rotator,
+    quaternion and transform setters convert from the API's units. See the
+    [v0.4.0 migration guide](../migration/v0.4.0.md).
 
-    for failure in response.failures:
-        print(f"op {failure.op_index} failed (code={failure.code}): {failure.error}")
-    ```
+### Struct values
 
-    Each method takes the same keyword arguments as the corresponding free function, and
-    `execute_async` is available for `await`.
+A `USTRUCT` with no first-class variant travels as a `struct_value`: its C++ name and its members by
+authored name. `get_property` returns one for a struct property, `call_function` accepts one for a
+struct parameter and returns one for a struct result, and `struct_array_value` carries a `TArray` of
+them.
 
-=== "Rust"
+```python
+value = WorldControl.Value()
+value.struct_value.struct_name = "FBodyInstance"
+field = value.struct_value.fields.add()
+field.name = "LinearDamping"
+field.value.float_value = 0.75
+tempo_world.set_property(actor="MyActor", component="Mesh", property="BodyInstance", value=value)
+```
 
-    ```rust
-    use tempo_sim::tempo_world;
+- **A write is a merge.** Only the members present are written; the rest keep what they held — the
+  property's current value, or a function parameter's default. The example above changes
+  `LinearDamping` and nothing else.
+- **A read reports every member**, inherited ones included.
+- **Only structs whose every member can travel** are carried this way. One holding a map, a
+  fixed-size array or another such struct is still reachable a member at a time, by nested address.
+  `DescribeClasses` reports which is which as `StructDescriptor.value_expressible`.
+- `struct_name` is checked: writing an `FHitResult` into an `FBodyInstance` property fails. Leave it
+  empty to skip the check.
 
-    let response = tempo_world::batch()
-        .set_bool_property("MyActor".into(), "".into(), "bEnabled".into(), true)
-        .set_float_property("MyActor".into(), "".into(), "MaxSpeed".into(), 42.0)
-        .set_vector_property("MyActor".into(), "Mesh".into(), "RelativeLocation".into(),
-                             0.0, 0.0, 150.0)
-        .set_string_array_property("MyActor".into(), "".into(), "WaypointTags".into(),
-            vec!["alpha".into(), "bravo".into(), "charlie".into()])
-        .execute()?;
+### Subsystems
 
-    for failure in &response.failures {
-        eprintln!("op {} failed (code={}): {}", failure.op_index, failure.code, failure.error);
-    }
-    ```
+`get_property`, `get_properties`, `stream_property`, `set_property` and `call_function` — and so
+the ops in a `run_batch` — can address a subsystem instead of an actor: give `subsystem`, its class
+by path or name, and leave `actor` and `component` empty. The instance is the one belonging to the
+sim's game world: its own for a world subsystem, its game instance's, the engine's, or its first
+local player's.
 
-    Args are positional and match the request message's field order
-    (`actor, component, property, value/values/...`), the same as the singular
-    `tempo_world::set_*_property` wrappers. `execute_async().await` is available for async
-    callers.
+```python
+offset = tempo_world.get_property(subsystem="/Script/TempoAgents.TempoAgentsWorldSubsystem",
+                                  property="BrightnessMeterLateralOffset")
+playing = tempo_world.call_function(subsystem="/Script/Engine.ReplaySubsystem", function="IsPlaying")
+```
+
+A class that is not a subsystem, or a subsystem that does not exist in this world, is `NOT_FOUND`;
+naming an actor as well is `FAILED_PRECONDITION`. The deprecated per-type `set_*_property` RPCs
+address actors only.
+
+### Running several operations in order
+
+`run_batch` carries property writes, property reads and function calls together, each the same
+request its own RPC takes, and runs them in order in one go on the game thread — so the whole batch
+happens between two ticks, and a read sees every write before it in the same batch.
+
+```python
+import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+response = tempo_world.run_batch(stop_on_failure=True, ops=[
+    WorldControl.BatchOp(set=WorldControl.SetPropertyRequest(
+        actor="MyActor", property="bCanBeDamaged", value=WorldControl.Value(bool_value=False))),
+    WorldControl.BatchOp(get=WorldControl.GetPropertyRequest(actor="MyActor", property="bCanBeDamaged")),
+    WorldControl.BatchOp(call=WorldControl.CallFunctionRequest(actor="MyActor", function="ActorHasTag",
+        args=[WorldControl.FunctionArg(name="Tag", value=WorldControl.Value(string_value="x"))])),
+])
+read_back = response.results[1].value.bool_value
+```
+
+There is one result per op, failed or not, because a read's value is found by position. With
+`stop_on_failure`, the first failure ends the batch and every later op comes back `ABORTED` without
+having run; without it, every op runs regardless. The
+[reflected API](../clients/reflected-api.md#one-call-instead-of-twenty) is built on this.
+
+`set_properties`, the older batch of typed writes, and the `batch()` builder over it are deprecated
+in v0.4.0. `run_batch` with set ops does everything they do.
 
 ## Calling functions
 
@@ -450,17 +486,17 @@ with one `*_arg` method per supported type:
     #include <tempo.h>
 
     auto result = tempo::tempo_world::call("MyActor", "", "ApplyDamage")
-        .float_arg("Amount", 42.5f)
+        .float_arg("Amount", 42.5)
         .vector_arg("Location", 0.0, 0.0, 150.0)
         .enum_arg("DamageType", "Explosive")
         .actor_arg("Instigator", "BP_Player_C_0")
         .execute();
     ```
 
-`execute_async` is available for `await` in Python and Rust. Each `*_arg` method takes the same
-arguments as the corresponding `set_*_property` function, minus the property name — so
-`vector_arg` takes `x`/`y`/`z` and `transform_arg` takes a whole `Transform`. The same conversion
-caveats apply.
+`execute_async` is available for `await` in Python and Rust. In Rust, `.subsystem(...)` on the
+builder addresses a [subsystem](#subsystems) instead, with the actor and component left empty. Each
+`*_arg` method fills one `Value` variant, so an argument is Unreal-native exactly as a property
+value is: `vector_arg` takes centimeters, and a rotator argument takes degrees.
 
 A few rules worth knowing:
 
@@ -469,11 +505,11 @@ A few rules worth knowing:
   same in the Editor and in a packaged build. Out parameters and the return value must *not* be
   supplied. Naming part of a parameter (`"MyStruct.Inner"`) counts as supplying it, and the rest
   of that parameter keeps its zero value.
-- **Return values and out parameters come back as strings.** The response carries one
+- **Return values and out parameters come back typed.** The response carries one
   `FunctionResult` per value the function handed back — its return value (which Unreal names
-  `ReturnValue`) and any out parameters, in declaration order. `property_type` and `value` use
-  exactly the same vocabulary and string format as `get_*_properties`, since they share the same
-  code. Results are Unreal-native and *not* unit-converted, the same way property values aren't.
+  `ReturnValue`) and any out parameters, in declaration order. `typed_value` is the same `Value`
+  `get_property` returns, Unreal-native; `property_type` and the human-readable `value` string use
+  the same vocabulary and format as `get_*_properties`.
 - **Latent functions, C-style array parameters, and delegate parameters are rejected**, since
   there is no meaningful way to supply them over the API.
 
@@ -494,6 +530,7 @@ response = tempo_world.call(actor="MyActor", function="GetDistanceTo") \
 for result in response.results:
     print(f"{result.name} ({result.property_type}) = {result.value}")
 # ReturnValue (float) = 500.0
+distance_cm = response.results[0].typed_value.float_value
 ```
 
 ## Discovering functions

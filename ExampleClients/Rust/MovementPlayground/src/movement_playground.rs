@@ -165,7 +165,12 @@ async fn flow_command_vehicle() {
         }
     };
 
-    match tempo_movement::command_vehicle_async(pawn.clone(), acceleration, steering).await {
+    match tempo_movement::command_vehicle_async(tempo_movement::NormalizedDrivingCommand {
+        vehicle: pawn.clone(),
+        acceleration,
+        steering,
+    })
+    .await {
         Ok(_) => println!(
             "\n  Sent NormalizedDrivingCommand to {}: accel={:.3}, steer={:.3}",
             pawn, acceleration, steering
@@ -202,7 +207,11 @@ async fn flow_command_velocity() {
         angular: Some(Vector { x: v[3], y: v[4], z: v[5] }),
     };
 
-    match tempo_movement::command_velocity_async(pawn.clone(), twist).await {
+    match tempo_movement::command_velocity_async(tempo_movement::VelocityCommand {
+        pawn: pawn.clone(),
+        twist: Some(twist),
+    })
+    .await {
         Ok(_) => println!("\n  Sent VelocityCommand to {}", pawn),
         Err(e) => println!("  Error commanding velocity: {}", e),
     }
@@ -236,7 +245,11 @@ async fn flow_command_acceleration() {
         angular: Some(Vector { x: v[3], y: v[4], z: v[5] }),
     };
 
-    match tempo_movement::command_acceleration_async(pawn.clone(), accel).await {
+    match tempo_movement::command_acceleration_async(tempo_movement::AccelerationCommand {
+        pawn: pawn.clone(),
+        accel: Some(accel),
+    })
+    .await {
         Ok(_) => println!("\n  Sent AccelerationCommand to {}", pawn),
         Err(e) => println!("  Error commanding acceleration: {}", e),
     }
@@ -284,7 +297,12 @@ async fn flow_move_to_location() {
         xyz[2],
         if relative { "relative" } else { "absolute" }
     );
-    match tempo_movement::pawn_move_to_location_async(pawn, location, relative).await {
+    match tempo_movement::pawn_move_to_location_async(tempo_movement::PawnMoveToLocationRequest {
+        pawn,
+        location: Some(location),
+        relative,
+    })
+    .await {
         Ok(resp) => println!("  Result: {}", move_to_result_string(resp.result)),
         Err(e) => println!("  Error during move-to-location: {}", e),
     }

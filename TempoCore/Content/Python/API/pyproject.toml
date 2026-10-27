@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tempo-sim"
-version = "0.3.3"
+version = "0.4.0"
 description = "Python client API for the Tempo simulation server. Generated gRPC wrappers with sync and async surfaces."
 readme = "README.md"
 # PEP 639 SPDX expression (string form). The deprecated `{ text = ... }` table form and the
@@ -73,3 +73,8 @@ Repository = "https://github.com/tempo-sim/Tempo"
 # artifact. Discover the tempo_sim package and all its nested module subpackages.
 [tool.setuptools.packages.find]
 include = ["tempo_sim", "tempo_sim.*"]
+
+# py.typed is what makes a checker use this package's types at all (PEP 561) -- without it the
+# hand-written stubs are there to be ignored. The stubs are not .py, so they have to be named too.
+[tool.setuptools.package-data]
+"*" = ["py.typed", "*.pyi"]

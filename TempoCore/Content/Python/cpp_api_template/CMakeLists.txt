@@ -45,7 +45,11 @@ target_compile_definitions(tempo PUBLIC
     GPR_FORBID_UNREACHABLE_CODE=1
     GRPC_ALLOW_EXCEPTIONS=0
     PROTOBUF_ENABLE_DEBUG_LOGGING_MAY_LEAK_PII=0
-    GOOGLE_PROTOBUF_INTERNAL_DONATE_STEAL_INLINE=0)
+    GOOGLE_PROTOBUF_INTERNAL_DONATE_STEAL_INLINE=0
+    # A consumer links the shared tempogrpc library rather than the static archives beside it, as
+    # Tempo's own modules do, so it compiles the headers as a DLL consumer the way they do.
+    PROTOBUF_USE_DLLS
+    ABSL_CONSUME_DLL)
 
 if(MSVC)
     # /GR- disables RTTI, matching how the vendored protobuf was built. The

@@ -1,0 +1,21 @@
+# Copyright Tempo Simulation, LLC. All Rights Reserved
+
+# Test crate for the typed Rust class surface. Separate from ../Cargo.toml because it needs a
+# second path dependency -- the project's own crate, which carries this build's generated classes --
+# whose package name is the host project's (tempo-sample), and a generic test crate cannot name
+# that. TestRustAPI.sh vendors it as `project`, rewriting the one line in its manifest, so the tests
+# below can refer to it.
+[package]
+name = "tempo-classes-tests"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+tempo-sim = { path = "vendor/tempo-sim" }
+project = { path = "vendor/project" }
+
+# The project crate depends on tempo-sim from crates.io, as a consumer's does. These tests are of the
+# packaged tempo-sim, so it stands in for the registry's everywhere in the graph.
+[patch.crates-io]
+tempo-sim = { path = "vendor/tempo-sim" }

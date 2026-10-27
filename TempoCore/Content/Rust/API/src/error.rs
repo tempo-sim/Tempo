@@ -22,4 +22,24 @@ pub enum TempoError {
     /// The requested transport is not available on this platform.
     #[error("Unsupported transport: {0}")]
     UnsupportedTransport(String),
+
+    /// The linked generated classes were made from a different build than the sim is running.
+    #[error("{0}")]
+    SchemaMismatch(String),
+
+    /// The server's answer was not the one this call's type says it must be. Raised by the typed
+    /// World API, where the expected `Value` variant is fixed when the accessor is generated, so a
+    /// mismatch means the stubs and the sim disagree about a property.
+    #[error("{0}")]
+    Protocol(String),
+
+    /// An op in a batch failed, or was not run because an earlier one failed. Names which.
+    #[error("{0}")]
+    Batch(String),
+
+    /// What a read inside `unreal::defer` returns in place of its value, which does not exist yet.
+    /// `defer` turns it into the `Deferred` it hands back, so it is not seen outside one.
+    #[doc(hidden)]
+    #[error("a read was deferred into a batch")]
+    Deferred,
 }

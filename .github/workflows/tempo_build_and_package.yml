@@ -40,6 +40,9 @@ jobs:
       allow_unsafe_pr_checkout: true
       gen_rust_api: true
       gen_cpp_api: true
+      # The reflected API's test jobs below need it in the package; a package without them is
+      # a failure here, not four misleading ones there.
+      require_reflected_api: true
       automation_test_filter: Tempo.
       # Upload the packaged build so the Python API test jobs below can fan out against it.
       upload_artifact: true
@@ -62,6 +65,15 @@ jobs:
       matrix:
         unreal_version: [ "5.7", "5.8" ]
         group: [ "contract", "core", "world", "movement" ]
+        # The codegen group tests this repository's own tooling -- the reflected API generators for
+        # all three clients, the runtime that serves the Python one, and the schema tools -- against
+        # a fixture schema. It needs no sim, so one entry rather than one per engine version:
+        # nothing it checks depends on the engine. It rides this job to inherit the fork-PR gating
+        # and checkout handling below; from the artifact it takes only the tempo-sim wheel, for the
+        # generated proto modules a checkout lacks until it has been built.
+        include:
+          - unreal_version: "5.8"
+            group: "codegen"
     uses: ./.github/workflows/test_packaged.yml
     with:
       # Must match the name build_and_package.yml uploads:
@@ -71,6 +83,9 @@ jobs:
       test_command: Scripts/TestPythonAPI.sh ${{ matrix.group }}
       unreal_version: ${{ matrix.unreal_version }}
       runner: ubuntu-24.04
+      # The Rust half of the codegen group compiles what the Rust generator emits, and skips
+      # without cargo; the other groups have no use for it.
+      setup_rust: ${{ matrix.group == 'codegen' }}
       checkout_path: TempoSample/Plugins/Tempo
       allow_unsafe_pr_checkout: true
       # Gate fork PRs behind manual approval, same as the build job (this job runs PR code).
@@ -104,7 +119,9 @@ jobs:
     secrets: inherit
 
   # Fan-out (Rust): the same artifact, the same sim, exercised through the generated Rust client.
-  # "contract" compiles the crate (surface check, no sim); "integration" runs against a live sim.
+  # "contract" compiles the crate (surface check, no sim); "integration" runs against a live sim;
+  # "typed" drives the reflected API, whose crate the packaged build has to contain --
+  # which it does, because the package job sets TEMPO_GEN_RUST_API.
   test_packaged_rust_api:
     name: Test Packaged Rust API
     needs: build_and_package
@@ -114,7 +131,7 @@ jobs:
       fail-fast: false
       matrix:
         unreal_version: [ "5.7", "5.8" ]
-        group: [ "contract", "integration" ]
+        group: [ "contract", "integration", "typed" ]
     uses: ./.github/workflows/test_packaged.yml
     with:
       artifact_name: ${{ format('{0}-ubuntu-24.04-{1}-{2}', github.event.repository.name, matrix.unreal_version, github.sha) }}
@@ -124,6 +141,29 @@ jobs:
       runner: ubuntu-24.04
       python_version: ''     # Rust groups don't need Python
       setup_rust: true
+      checkout_path: TempoSample/Plugins/Tempo
+      allow_unsafe_pr_checkout: true
+      environment: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository && 'fork-pr-environment' || '' }}
+    secrets: inherit
+
+  test_packaged_cpp_api:
+    name: Test Packaged C++ API
+    needs: build_and_package
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        unreal_version: [ "5.7", "5.8" ]
+        group: [ "contract", "integration", "typed" ]
+    uses: ./.github/workflows/test_packaged.yml
+    with:
+      artifact_name: ${{ format('{0}-ubuntu-24.04-{1}-{2}', github.event.repository.name, matrix.unreal_version, github.sha) }}
+      name: cpp-${{ matrix.group }}
+      test_command: Scripts/TestCppAPI.sh ${{ matrix.group }}
+      unreal_version: ${{ matrix.unreal_version }}
+      runner: ubuntu-24.04
+      python_version: ''     # C++ groups need only cmake and a compiler, both in the runner image
       checkout_path: TempoSample/Plugins/Tempo
       allow_unsafe_pr_checkout: true
       environment: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository && 'fork-pr-environment' || '' }}

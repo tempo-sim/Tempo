@@ -104,9 +104,9 @@ Run `python -m RerunPlayground --help` for the full list.
   truth, and images stay in their 2D views. When enabled, the camera's local axis
   convention is assumed forward-left-up (`camera_xyz` in `loggers/image.py`).
 - **No native widgets in rerun** — controls live in the Gradio panel by design.
-  Property reads/writes go through `set_*_property`, which operate on raw
-  UProperties in Unreal-native units (cm/degrees), independent of the
-  right-handed streaming frame.
+  Property reads go through `get_*_properties` and writes through
+  `set_property`, which operate on raw UProperties in Unreal-native units
+  (cm/degrees), independent of the right-handed streaming frame.
 
 ## Layout
 

@@ -21,11 +21,13 @@ from pathlib import Path
 import google.protobuf.descriptor as gpd
 import jinja2
 
+from gen_naming import build_jobs, host_platform_name
 from gen_common import (
     INFRA_PACKAGE,
     gather_enums,
     gather_messages,
     gather_services,
+    is_proto_module,
     package_import_name,
     pascal_to_snake,
     project_package_name,
@@ -48,18 +50,6 @@ SCALAR_TYPES = {
     gpd.FieldDescriptor.TYPE_SINT32,
     gpd.FieldDescriptor.TYPE_SINT64,
 }
-
-
-def host_platform_name() -> str:
-    """Folder name under lib/ for the current build host."""
-    system = platform.system()
-    if system == "Darwin":
-        return "Mac"
-    if system == "Windows":
-        return "Win64"
-    if system == "Linux":
-        return "Linux"
-    raise RuntimeError(f"Unsupported host platform for C++ API build: {system}")
 
 
 def descriptor_pbh_path(descriptor) -> str:
@@ -98,66 +88,110 @@ def cpp_type_for_field(field) -> str:
     return protobuf_types_to_cpp_types.get(field.proto_type, "/* unknown */")
 
 
-def cpp_param_type(field) -> str:
-    """C++ parameter type (with const& and vector wrapping for repeated)."""
-    inner = cpp_type_for_field(field)
-    is_repeated = field.label == "repeated"
-    pass_by_ref = field.proto_type in (
-        gpd.FieldDescriptor.TYPE_MESSAGE,
-        gpd.FieldDescriptor.TYPE_STRING,
-        gpd.FieldDescriptor.TYPE_BYTES,
-    )
-    if is_repeated:
-        return f"const std::vector<{inner}>&"
-    # Singular message fields have presence in proto3, so accept std::optional<T>:
-    # callers can pass a T (implicit conversion) or std::nullopt to leave the
-    # field unset (e.g. AddComponent with no transform for a non-scene component).
-    if field.proto_type == gpd.FieldDescriptor.TYPE_MESSAGE:
-        return f"const std::optional<{inner}>&"
-    if pass_by_ref:
-        return f"const {inner}&"
-    return inner
+EMPTY_REQUEST = "TempoCore.Empty"
+
+MIGRATION_URL = "https://tempo-sim.readthedocs.io/en/latest/migration/v0.4.0/"
 
 
-def setter_lines(field) -> list:
-    """C++ statements that copy a parameter into the protobuf request struct.
+def args_struct_name(message_name: str) -> str:
+    """The wrapper argument struct for a request message: FooRequest -> FooArgs, Foo -> FooArgs."""
+    if message_name.endswith("Request"):
+        return message_name[: -len("Request")] + "Args"
+    return message_name + "Args"
 
-    The generated request variable is named `request`; the parameter shares the
-    field's name.
+
+def cpp_raw_type_name(descriptor) -> str:
+    """The protoc C++ name of a raw message or enum descriptor: Package::Outer_Inner."""
+    package = descriptor.file.package
+    relative = descriptor.full_name[len(package) + 1:] if package else descriptor.full_name
+    return "::".join((package.split(".") if package else []) + [relative.replace(".", "_")])
+
+
+def cpp_raw_element_type(field) -> str:
+    """C++ type of one element of a raw field descriptor."""
+    if field.type == gpd.FieldDescriptor.TYPE_MESSAGE:
+        return cpp_raw_type_name(field.message_type)
+    if field.type == gpd.FieldDescriptor.TYPE_ENUM:
+        return cpp_raw_type_name(field.enum_type)
+    cpp = protobuf_types_to_cpp_types.get(field.type)
+    if cpp is None:
+        raise RuntimeError(f"No C++ type for field {field.full_name} (proto type {field.type})")
+    return cpp
+
+
+def is_deprecated(descriptor) -> bool:
+    return descriptor.GetOptions().deprecated
+
+
+def args_member(field) -> str:
+    """The args struct member for one request field.
+
+    What has presence on the wire -- a message, a oneof member, a proto3 `optional` -- is a
+    std::optional, so leaving it out leaves the field unset; the rest are their zero.
     """
+    if field.message_type is not None and field.message_type.GetOptions().map_entry:
+        raise RuntimeError(f"Map field {field.full_name} has no C++ wrapper mapping")
+    inner = cpp_raw_element_type(field)
+    if field.label == gpd.FieldDescriptor.LABEL_REPEATED:
+        return f"std::vector<{inner}> {field.name};"
+    if field.has_presence:
+        return f"std::optional<{inner}> {field.name};"
+    if field.type in (gpd.FieldDescriptor.TYPE_STRING, gpd.FieldDescriptor.TYPE_BYTES):
+        return f"std::string {field.name};"
+    return f"{inner} {field.name}{{}};"
+
+
+def args_setter_lines(field) -> list:
+    """C++ statements that copy one args member into the protobuf request, named `request`."""
     name = field.name
-    is_repeated = field.label == "repeated"
-    is_message = field.proto_type == gpd.FieldDescriptor.TYPE_MESSAGE
+    is_message = field.type == gpd.FieldDescriptor.TYPE_MESSAGE
 
-    if is_repeated and is_message:
+    if field.label == gpd.FieldDescriptor.LABEL_REPEATED:
+        add = f"*request.add_{name}() = __item;" if is_message else f"request.add_{name}(__item);"
         return [
-            f"for (const auto& __item : {name}) {{",
-            f"    *request.add_{name}() = __item;",
+            f"for (const auto& __item : args.{name}) {{",
+            f"    {add}",
             f"}}",
         ]
-    if is_repeated:
+    if field.has_presence:
+        assign = (f"*request.mutable_{name}() = *args.{name};" if is_message
+                  else f"request.set_{name}(*args.{name});")
         return [
-            f"for (const auto& __item : {name}) {{",
-            f"    request.add_{name}(__item);",
+            f"if (args.{name}.has_value()) {{",
+            f"    {assign}",
             f"}}",
         ]
-    if is_message:
-        return [
-            f"if ({name}.has_value()) {{",
-            f"    *request.mutable_{name}() = *{name};",
-            f"}}",
-        ]
-    return [f"request.set_{name}({name});"]
+    return [f"request.set_{name}(args.{name});"]
 
 
-def cpp_builder_param_type(field) -> str:
+def args_fields(message_descriptor) -> list:
+    """The request fields a wrapper offers: all of them in declaration order, less the deprecated.
+
+    A deprecated field has a replacement, and offering it would have every wrapper call touch an
+    accessor protoc marks [[deprecated]].
+    """
+    return [field for field in message_descriptor.fields if not is_deprecated(field)]
+
+
+def walk_messages(descriptors):
+    """Every message descriptor, nested ones included, by proto full name."""
+    found = {}
+    for descriptor in descriptors:
+        found[descriptor.full_name] = descriptor
+        found.update(walk_messages(descriptor.nested_types))
+    return found
+
+
+def cpp_builder_param_type(field, optional=False) -> str:
     """C++ parameter type for a builder argument.
 
-    Same as cpp_param_type except singular message fields are not wrapped in
-    std::optional: a oneof variant either holds its message or is not selected at all,
-    so there is no "set but absent" state to express.
+    A singular message is not wrapped in std::optional: a oneof variant either holds its message or
+    is not selected at all, so there is no "set but absent" state to express. `optional` is a
+    scalar with presence of its own (a proto3 `optional`), which the caller may leave unset.
     """
     inner = cpp_type_for_field(field)
+    if optional:
+        return f"std::optional<{inner}>"
     if field.label == "repeated":
         return f"const std::vector<{inner}>&"
     if field.proto_type in (gpd.FieldDescriptor.TYPE_MESSAGE,
@@ -167,7 +201,7 @@ def cpp_builder_param_type(field) -> str:
     return inner
 
 
-def builder_setter_lines(field, target, proto_field=None) -> list:
+def builder_setter_lines(field, target, proto_field=None, optional=False) -> list:
     """C++ statements that copy a builder parameter into `target` (a pointer expression).
 
     `proto_field` overrides the protobuf field name when the parameter is named
@@ -178,6 +212,8 @@ def builder_setter_lines(field, target, proto_field=None) -> list:
     is_repeated = field.label == "repeated"
     is_message = field.proto_type == gpd.FieldDescriptor.TYPE_MESSAGE
 
+    if optional:
+        return [f"if ({name}.has_value()) {target}->set_{dest}(*{name});"]
     if is_repeated and is_message:
         return [
             f"for (const auto& __item : {name}) {{",
@@ -201,6 +237,7 @@ HEADER_TEMPLATE = """// Copyright Tempo Simulation, LLC. All Rights Reserved
 
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -215,20 +252,24 @@ HEADER_TEMPLATE = """// Copyright Tempo Simulation, LLC. All Rights Reserved
 
 namespace tempo::{{ ns }} {
 
-{% for rpc in rpcs %}
+{% for args in args_structs -%}
+/// The fields of {{ args.request_full_name }}. A member left out is sent unset.
+struct {{ args.name }} {
+{%- for member in args.members %}
+    {{ member }}
+{%- endfor %}
+};
+
+{% endfor %}
+{%- for rpc in rpcs %}
 /// {{ rpc.original_name }}
+{% if rpc.deprecated -%}
+[[deprecated("{{ rpc.original_name }} is deprecated; see {{ migration_url }}")]]
+{% endif -%}
 {% if rpc.server_streaming -%}
-Result<ServerStream<{{ rpc.response_cpp }}>> {{ rpc.name }}({% if rpc.fields %}
-{%- for field in rpc.fields %}
-    {{ field.cpp_param_type }} {{ field.name }}{{ "," if not loop.last else "" }}
-{%- endfor %}
-{% endif %});
+Result<ServerStream<{{ rpc.response_cpp }}>> {{ rpc.name }}({% if rpc.args %}const {{ rpc.args }}& args = {}{% endif %});
 {%- else -%}
-Result<{{ rpc.response_cpp }}> {{ rpc.name }}({% if rpc.fields %}
-{%- for field in rpc.fields %}
-    {{ field.cpp_param_type }} {{ field.name }}{{ "," if not loop.last else "" }}
-{%- endfor %}
-{% endif %});
+Result<{{ rpc.response_cpp }}> {{ rpc.name }}({% if rpc.args %}const {{ rpc.args }}& args = {}{% endif %});
 {%- endif %}
 
 {% endfor %}
@@ -243,7 +284,7 @@ public:
     Call(std::string actor, std::string component, std::string function);
 
 {% for method in call_builder.methods %}
-    Call& {{ method.name }}(const std::string& name{% for field in method.fields %}, {{ field.cpp_param_type }} {{ field.name }}{% endfor %});
+    Call& {{ method.name }}(const std::string& name{% for field in method.fields %}, {{ field.cpp_param_type }} {{ field.name }}{% if field.default %} = {{ field.default }}{% endif %}{% endfor %});
 {% endfor %}
     Result<{{ call_builder.response_cpp }}> execute();
 
@@ -280,11 +321,7 @@ namespace tempo::{{ ns }} {
 
 {% for rpc in rpcs %}
 {% if rpc.server_streaming -%}
-Result<ServerStream<{{ rpc.response_cpp }}>> {{ rpc.name }}({% if rpc.fields %}
-{%- for field in rpc.fields %}
-    {{ field.cpp_param_type }} {{ field.name }}{{ "," if not loop.last else "" }}
-{%- endfor %}
-{% endif %}) {
+Result<ServerStream<{{ rpc.response_cpp }}>> {{ rpc.name }}({% if rpc.args %}const {{ rpc.args }}& args{% endif %}) {
     auto channel_result = TempoContext::instance().channel();
     if (!channel_result) return std::move(channel_result).error();
     auto channel = std::move(channel_result).value();
@@ -292,10 +329,8 @@ Result<ServerStream<{{ rpc.response_cpp }}>> {{ rpc.name }}({% if rpc.fields %}
     auto stub = {{ rpc.client_cpp }}::NewStub(channel);
 
     {{ rpc.request_cpp }} request;
-{%- for field in rpc.fields %}
-{%- for line in field.setter_lines %}
+{%- for line in rpc.setter_lines %}
     {{ line }}
-{%- endfor %}
 {%- endfor %}
 
     auto context = std::make_unique<grpc::ClientContext>();
@@ -304,11 +339,7 @@ Result<ServerStream<{{ rpc.response_cpp }}>> {{ rpc.name }}({% if rpc.fields %}
         std::move(channel), std::move(context), std::move(reader));
 }
 {%- else -%}
-Result<{{ rpc.response_cpp }}> {{ rpc.name }}({% if rpc.fields %}
-{%- for field in rpc.fields %}
-    {{ field.cpp_param_type }} {{ field.name }}{{ "," if not loop.last else "" }}
-{%- endfor %}
-{% endif %}) {
+Result<{{ rpc.response_cpp }}> {{ rpc.name }}({% if rpc.args %}const {{ rpc.args }}& args{% endif %}) {
     auto channel_result = TempoContext::instance().channel();
     if (!channel_result) return std::move(channel_result).error();
     auto channel = std::move(channel_result).value();
@@ -316,10 +347,8 @@ Result<{{ rpc.response_cpp }}> {{ rpc.name }}({% if rpc.fields %}
     auto stub = {{ rpc.client_cpp }}::NewStub(channel);
 
     {{ rpc.request_cpp }} request;
-{%- for field in rpc.fields %}
-{%- for line in field.setter_lines %}
+{%- for line in rpc.setter_lines %}
     {{ line }}
-{%- endfor %}
 {%- endfor %}
 
     {{ rpc.response_cpp }} response;
@@ -384,9 +413,12 @@ UMBRELLA_TEMPLATE = """// Copyright Tempo Simulation, LLC. All Rights Reserved
 #pragma once
 
 #include "tempo/context.h"
+#include "tempo/conversion.h"
 #include "tempo/error.h"
 #include "tempo/result.h"
 #include "tempo/streaming.h"
+#include "tempo/unreal.h"
+#include "tempo/world.h"
 
 {% for module in modules -%}
 #include "tempo/{{ module }}.h"
@@ -459,6 +491,9 @@ class CppApiGenerator:
         all_enums = {}
         all_messages = {}
         all_services = {}
+        # The raw descriptors, for what gen_common's do not carry: options and field presence.
+        self.raw_messages = {}
+        self.deprecated_rpcs = set()
 
         # Module dirs across both packages: tempo_sim/<Module> and
         # <project>/<Module>. {module: (namespace, dir)}.
@@ -468,7 +503,7 @@ class CppApiGenerator:
             if not pb2_root.exists():
                 continue
             for d in sorted(pb2_root.iterdir()):
-                if d.is_dir() and d.name != "__pycache__":
+                if is_proto_module(d):
                     if d.name in module_dirs:
                         raise RuntimeError(
                             f"Module name collision: {d.name!r} exists in both the "
@@ -497,14 +532,18 @@ class CppApiGenerator:
                     all_messages.update(
                         gather_messages(module_name, descriptor, protobuf_types_to_cpp_types))
                     all_services.update(gather_services(module_name, descriptor))
+                    self.raw_messages.update(walk_messages(descriptor.message_types_by_name.values()))
+                    for service_descriptor in descriptor.services_by_name.values():
+                        for method in service_descriptor.methods:
+                            if is_deprecated(method):
+                                self.deprecated_rpcs.add(method.full_name)
 
         for msg in all_messages.values():
             msg.resolve_names(all_messages | all_enums)
 
         return all_enums, all_messages, all_services
 
-    @staticmethod
-    def _call_builder_render(tempo_module, services, all_messages, proto_includes):
+    def _call_builder_render(self, tempo_module, services, all_messages, proto_includes):
         """Gather the Call builder rendering for a module, or None if it has no Value oneof."""
         value_desc = next(
             (m for m in all_messages.values()
@@ -530,25 +569,31 @@ class CppApiGenerator:
             variant_field = fields_by_name[entry["name"]]
             wrapper_desc = all_messages.get(entry["message_proto_full_name"])
             # Flatten a wrapper message's fields into the method signature when they are all
-            # scalars, mirroring how set_vector_property takes x/y/z rather than a Vector. A
-            # wrapper with message-typed fields (Transform) is passed through whole instead.
+            # scalars, so vector_arg takes x/y/z rather than a Vector. A wrapper with
+            # message-typed fields (NativeTransform) is passed through whole instead.
             if wrapper_desc is not None and all(
                     f.proto_type != gpd.FieldDescriptor.TYPE_MESSAGE for f in wrapper_desc.fields):
                 proto_includes.add(descriptor_pbh_path(wrapper_desc))
-                fields = [_FieldRender(name=f.name, cpp_param_type=cpp_builder_param_type(f),
-                                       setter_lines=[]) for f in wrapper_desc.fields]
+                raw_fields = self.raw_messages[entry["message_proto_full_name"]].fields_by_name
+                # A field with presence of its own (Color's alpha) may be left unset, and defaults
+                # to unset when it trails the parameter list.
+                optional = [raw_fields[f.name].has_presence for f in wrapper_desc.fields]
+                fields = [_FieldRender(name=f.name, cpp_param_type=cpp_builder_param_type(f, opt))
+                          for f, opt in zip(wrapper_desc.fields, optional)]
+                for field, opt in zip(reversed(fields), reversed(optional)):
+                    if not opt:
+                        break
+                    field.default = "std::nullopt"
                 setter_lines = []
-                for f in wrapper_desc.fields:
-                    setter_lines.extend(builder_setter_lines(f, "wrapper"))
+                for f, opt in zip(wrapper_desc.fields, optional):
+                    setter_lines.extend(builder_setter_lines(f, "wrapper", optional=opt))
                 wrapper_cpp = "::".join(
                     [wrapper_desc.module_name.split(".")[0], wrapper_desc.object_name])
             else:
-                # Name the parameter `value`, as the singular set_*_property wrappers do.
                 value_field = copy.copy(variant_field)
                 value_field.name = "value"
                 fields = [_FieldRender(name="value",
-                                       cpp_param_type=cpp_builder_param_type(variant_field),
-                                       setter_lines=[])]
+                                       cpp_param_type=cpp_builder_param_type(variant_field))]
                 setter_lines = builder_setter_lines(
                     value_field, "arg->mutable_value()", proto_field=entry["name"])
                 wrapper_cpp = None
@@ -605,12 +650,15 @@ class CppApiGenerator:
             proto_includes = set()
             grpc_includes = set()
             has_streaming = False
+            # Args struct name -> its rendering, in first-use order.
+            args_structs = {}
 
             for service in services:
                 grpc_includes.add(descriptor_grpc_pbh_path(service))
                 proto_includes.add(descriptor_pbh_path(service))
 
                 client_cpp = "::".join(service.module_name.split(".")[:1] + [service.object_name])
+                service_full_name = f"{tempo_module}.{service.object_name}"
                 # Service namespace is derived from the proto package, which after
                 # decoration is just the tempo module name.
 
@@ -631,13 +679,21 @@ class CppApiGenerator:
                     response_cpp = "::".join(
                         [response_desc.module_name.split(".")[0], response_desc.object_name])
 
-                    fields = []
-                    for field in request_desc.fields:
-                        fields.append(_FieldRender(
-                            name=field.name,
-                            cpp_param_type=cpp_param_type(field),
-                            setter_lines=setter_lines(field),
-                        ))
+                    if rpc.request_type == EMPTY_REQUEST:
+                        args, setter = None, []
+                    else:
+                        raw_request = self.raw_messages[rpc.request_type]
+                        args = args_struct_name(raw_request.name)
+                        fields = args_fields(raw_request)
+                        known = args_structs.setdefault(args, _ArgsRender(
+                            name=args, request_full_name=rpc.request_type,
+                            members=[args_member(field) for field in fields]))
+                        if known.request_full_name != rpc.request_type:
+                            raise RuntimeError(
+                                f"C++ args struct name collision in tempo::{ns}: "
+                                f"{known.request_full_name} and {rpc.request_type} both make "
+                                f"{args}. Rename one of the messages.")
+                        setter = [line for field in fields for line in args_setter_lines(field)]
 
                     if rpc.server_streaming:
                         has_streaming = True
@@ -652,7 +708,9 @@ class CppApiGenerator:
                         response_cpp=response_cpp,
                         client_cpp=client_cpp,
                         server_streaming=rpc.server_streaming,
-                        fields=fields,
+                        deprecated=f"{service_full_name}.{rpc.name}" in self.deprecated_rpcs,
+                        args=args,
+                        setter_lines=setter,
                     ))
 
             if not rpc_renderings:
@@ -668,6 +726,8 @@ class CppApiGenerator:
             ctx = {
                 "ns": ns,
                 "rpcs": rpc_renderings,
+                "args_structs": list(args_structs.values()),
+                "migration_url": MIGRATION_URL,
                 "call_builder": call_builder,
                 "has_streaming": has_streaming,
                 "proto_includes": sorted(proto_includes),
@@ -763,18 +823,29 @@ class CppApiGenerator:
         subprocess.run(configure_cmd, check=True)
 
         build_cmd = ["cmake", "--build", str(self.cmake_build_dir),
-                     "--config", "Release", "--parallel"]
+                     "--config", "Release", "--parallel", str(build_jobs())]
         print(f"[Tempo Prebuild] Building C++ wrapper", flush=True)
         subprocess.run(build_cmd, check=True)
 
     def copy_artifacts(self, generated_modules):
         """Copy headers, library, README, and decorated protos to Content/Cpp/API/."""
-        # Wipe & recreate include/, lib/<platform>/
+        # Wipe & recreate include/, lib/<platform>/ -- all but the reflected API, which is built at
+        # package time rather than here (build_cpp_classes.py) and would otherwise be lost to every
+        # rebuild after a package.
+        reflected = self.include_dir / "tempo" / "reflected"
+        kept = self.build_dir / "kept_reflected"
+        # A run that died between the two moves leaves kept behind, and a move into a directory that
+        # exists nests inside it rather than replacing it.
+        shutil.rmtree(kept, ignore_errors=True)
+        if reflected.exists():
+            shutil.move(str(reflected), str(kept))
         if self.include_dir.exists():
             shutil.rmtree(self.include_dir)
         self.include_dir.mkdir(parents=True)
         (self.include_dir / "tempo").mkdir()
         (self.include_dir / "proto").mkdir()
+        if kept.exists():
+            shutil.move(str(kept), str(reflected))
 
         # Wrapper + hand-written headers from build/source/include/tempo/
         for h in (self.source_dir / "include/tempo").glob("*.h"):
@@ -790,10 +861,14 @@ class CppApiGenerator:
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(pbh, dest)
 
-        # Library archive(s)
-        if self.lib_dir.exists():
-            shutil.rmtree(self.lib_dir)
-        self.lib_dir.mkdir(parents=True)
+        # Library archive(s), again keeping the reflected API's.
+        self.lib_dir.mkdir(parents=True, exist_ok=True)
+        for stale in self.lib_dir.iterdir():
+            if "tempo_reflected" not in stale.name:
+                if stale.is_dir():
+                    shutil.rmtree(stale)
+                else:
+                    stale.unlink()
         # CMake puts archives under <build>/lib/ (we set ARCHIVE_OUTPUT_DIRECTORY).
         # Multi-config generators (MSVC) insert <Config>/, so we glob.
         archive_root = self.cmake_build_dir / "lib"
@@ -804,8 +879,9 @@ class CppApiGenerator:
         for arc in archives:
             shutil.copy2(arc, self.lib_dir / arc.name)
 
-        # README (static; copied verbatim)
+        # README and the CMake package config (static; copied verbatim)
         shutil.copy2(self.template_dir / "README.md", self.api_dir / "README.md")
+        shutil.copy2(self.template_dir / "TempoConfig.cmake", self.api_dir / "TempoConfig.cmake")
 
         print(f"[Tempo Prebuild] C++ API written to {self.api_dir}")
         print(f"[Tempo Prebuild]   modules: {', '.join(generated_modules)}")
@@ -833,26 +909,36 @@ class CppApiGenerator:
 
 class _RpcRender:
     __slots__ = ("name", "original_name", "request_cpp", "response_cpp",
-                 "client_cpp", "server_streaming", "fields")
+                 "client_cpp", "server_streaming", "deprecated", "args", "setter_lines")
 
     def __init__(self, name, original_name, request_cpp, response_cpp,
-                 client_cpp, server_streaming, fields):
+                 client_cpp, server_streaming, deprecated, args, setter_lines):
         self.name = name
         self.original_name = original_name
         self.request_cpp = request_cpp
         self.response_cpp = response_cpp
         self.client_cpp = client_cpp
         self.server_streaming = server_streaming
-        self.fields = fields
+        self.deprecated = deprecated
+        # The args struct's name, or None for an RPC that takes no argument.
+        self.args = args
+        self.setter_lines = setter_lines
 
 
 class _FieldRender:
-    __slots__ = ("name", "cpp_param_type", "setter_lines")
+    __slots__ = ("name", "cpp_param_type", "default")
 
-    def __init__(self, name, cpp_param_type, setter_lines):
+    def __init__(self, name, cpp_param_type, default=None):
         self.name = name
         self.cpp_param_type = cpp_param_type
-        self.setter_lines = setter_lines
+        self.default = default
+
+
+class _ArgsRender:
+    def __init__(self, name, request_full_name, members):
+        self.name = name
+        self.request_full_name = request_full_name
+        self.members = members
 
 
 class _CallMethodRender:

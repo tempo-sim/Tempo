@@ -196,7 +196,7 @@ protected:
 
 	static void AssignId(UPrimitiveComponent* Component, FInstanceSemanticIdPair IdPair);
 
-	UPROPERTY(VisibleAnywhere)
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	UDataTable* SemanticLabelTable;
 
 	UPROPERTY(VisibleAnywhere)
