@@ -1,6 +1,6 @@
 # Reflected API
 
-The property API addresses everything by string:
+`TempoWorld`'s property API addresses everything by string:
 
 ```python
 from tempo_sim.TempoWorld.WorldControl_pb2 import Value
@@ -12,7 +12,7 @@ Nothing checks that spelling until the call runs. Rename `MaxSpeed` in C++ or in
 nothing breaks until a scenario reaches that line, mid-simulation, and gets `NOT_FOUND`.
 
 The **reflected API** is the same capability with the strings removed, generated from Unreal's own
-reflection of your build:
+reflection on your project:
 
 ```python
 from tempo_sim import world
@@ -26,12 +26,6 @@ Every name there is a declared member of a generated type. A misspelling, a prop
 removed, one whose type changed, one that became read-only — each is an error from your type checker
 before anything runs.
 
-!!! info "This is for catching drift, not for saving keystrokes"
-
-    The reason to use it is that **a new release of the simulation makes scenarios that used removed
-    or changed API fail under Pyright**, instead of failing at runtime days later. Completion and
-    hover documentation come along for free, but they are not the point.
-
 !!! tip "Setting this up for the first time"
 
     [The reflected API, step by step](../guides/reflected-api.md) walks from packaging to a type checker
@@ -39,23 +33,20 @@ before anything runs.
 
 ## Before you start
 
-Five things about the reflected API catch people out. Each has a section below.
+Five things about the reflected API to note..
 
-1. **It speaks Unreal's units, not Tempo's.** Centimetres, degrees and a left-handed frame, like
-   the property and function RPCs it is built on and unlike the rest of Tempo's API. Its value types are Unreal's own — `FVector`, `FRotator`,
-   `FTransform` — shaped as Unreal's are, and `tempo_sim.conversion` converts to and from SI. See
-   [Units](#units).
+1. **It speaks Unreal's units and conventions, not Tempo's.** Centimeters, degrees and a left-handed frame, like
+   the TempoWorld property and function RPCs it is built on and unlike the rest of Tempo's API. Its value types are Unreal's — `FVector`, `FRotator`, `FTransform` — shaped as Unreal's are, and `tempo_sim.conversion` converts to and from SI. See [Units](#units).
 2. **It comes from your packaged build.** The classes are generated per project, from the build
    they describe — its exact engine version, plugins, C++ and Blueprints — so they exist only once
    you have packaged it. `pip install tempo-sim` alone gives you none. See [Installing](#installing).
 3. **A class offers only what it exposes to Blueprint.** A property needs `BlueprintReadWrite` or
    `BlueprintReadOnly`, and a function needs `BlueprintCallable` or `BlueprintPure`. Without one of
-   those it is absent, however it is declared otherwise. See
+   those it is absent. See
    [What a class offers](#what-a-class-offers).
-4. **Two packages carry it.** `tempo-sim` has the runtime, and your project's own package has the
-   classes of your build, including its Blueprints and its asset catalog. See
-   [What comes from where](#what-comes-from-where).
-5. **It does not replace an RPC.** Calling a function through it is a quick way to reach
+4. **Two packages carry it.** `tempo-sim` has the runtime, and your project's own package its classes,
+including its Blueprints and its asset catalog. See [What comes from where](#what-comes-from-where).
+7. **It doesn't replace all RPCs.** Calling a function through it is a quick way to reach
    something, not a way to design an API. Something that streams, or that finishes later than the
    call, wants an RPC. See [When to write an RPC instead](#when-to-write-an-rpc-instead).
 
@@ -130,7 +121,7 @@ it is. After changing a `UPROPERTY` or a Blueprint, package again (or run
 
 ## Finding things
 
-Prefer discovery **by type**. There is no unchecked string in it at all:
+Prefer discovery **by type**:
 
 ```python
 trucks = world.get_actors(BP_Truck_C)      # list[BP_Truck_C], including subclasses
