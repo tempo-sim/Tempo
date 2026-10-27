@@ -50,9 +50,14 @@ tc.quit()
 |---|---|
 | `set_main_viewport_render_enabled` | Turn the main viewport's rendering off to save GPU when only sensors matter. |
 | `set_engine_scalability` | Change Unreal's scalability settings at runtime. |
-| `set_console_variable` / `get_console_variable` | Set or read any console variable (`r.ScreenPercentage`, `t.MaxFPS`, …) by name, with the value as text. Works in the editor, with or without a play session, and in a packaged build. A value set this way has the console's priority, so it also overrides later scalability changes. |
+| `set_console_variable` / `get_console_variable` | Set or read any console variable (`r.ScreenPercentage`, `t.MaxFPS`, …) by name, with the value as text. A value set this way has the console's priority, so later scalability changes don't override it. |
+| `exec_console_command` | Run any console command (`stat unit`, `ShowFlag.PostProcessing 0`, …) as if typed into the console, and get back what it printed. |
+| `get_engine_info` | Describe the running sim: engine version, project, build configuration, editor or packaged, platform and graphics RHI. |
 | `set_control_mode` | Switch the control mode. |
 | `get_sim_time` | Read the current simulation time, in seconds. |
+
+The console and engine-info RPCs work in the editor with or without a play session, as well as in a
+packaged build. The others need a game running: in the editor, that means a play session.
 
 `advance_steps(steps=N)` advances several fixed steps in one call.
 
