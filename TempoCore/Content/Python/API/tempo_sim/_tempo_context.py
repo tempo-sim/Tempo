@@ -1,6 +1,8 @@
 # Copyright Tempo Simulation, LLC. All Rights Reserved
 
 import asyncio
+import contextlib
+import contextvars
 from curio.meta import awaitable
 import grpc
 import os
@@ -159,6 +161,60 @@ async def set_socket(path=""):
     await tempo_context().set_socket(path)
 
 
+# A deadline on every unary RPC, so a wedged server fails a call instead of hanging it. Never on a
+# server stream: a gRPC deadline bounds the whole call, and a stream is meant to outlive any one
+# request -- a camera stream for the length of a run, a horn stream through long silences.
+_request_timeout = None
+_request_timeout_override = contextvars.ContextVar("tempo_request_timeout_override")
+
+
+def set_request_timeout(seconds=None):
+    """
+    Give every unary RPC a deadline of this many seconds, or none (the default). Process-wide, like
+    the connection.
+    """
+    global _request_timeout
+    _request_timeout = seconds
+
+
+def request_timeout():
+    """
+    The deadline, in seconds, a unary RPC made here and now gets: the innermost
+    with_request_timeout's, else the process-wide one.
+    """
+    try:
+        return _request_timeout_override.get()
+    except LookupError:
+        return _request_timeout
+
+
+@contextlib.contextmanager
+def with_request_timeout(seconds):
+    """
+    Within this block, unary RPCs get `seconds` in place of the process-wide deadline: longer for a
+    call known to be slow, shorter for one that must not stall, None for none. Follows the code
+    into the coroutines it awaits, sync or async, but not into a task it starts.
+    """
+    token = _request_timeout_override.set(seconds)
+    try:
+        yield
+    finally:
+        _request_timeout_override.reset(token)
+
+
+class _RequestTimeoutInterceptor(grpc.aio.UnaryUnaryClientInterceptor):
+    """
+    Puts the current deadline on every unary-unary call that does not name its own. Unary-unary
+    only, so streams never see one.
+    """
+
+    async def intercept_unary_unary(self, continuation, client_call_details, request):
+        timeout = request_timeout()
+        if client_call_details.timeout is None and timeout is not None:
+            client_call_details = client_call_details._replace(timeout=timeout)
+        return await continuation(client_call_details, request)
+
+
 class _Connection(object):
     """
     One channel and the stubs made from it. Bound to the loop that opened it, as a channel is, and
@@ -171,7 +227,8 @@ class _Connection(object):
         self.channel = grpc.aio.insecure_channel(target,
                                                  options=[
                                                      ('grpc.max_receive_message_length', 1000000000), # 1Gb
-                                                 ]
+                                                 ],
+                                                 interceptors=[_RequestTimeoutInterceptor()],
                                                  )
 
 

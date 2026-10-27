@@ -238,8 +238,8 @@ pub async fn {{ name }}_async(''' + request_param_fragment + ''') -> Result<{{ r
         .max_decoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE)
         .max_encoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE);''' + request_build_fragment + '''
 
-    ''' + allow_deprecated_fragment + '''let response = client.{{ method_name }}(request).await?;
-    Ok(response.into_inner())
+    ''' + allow_deprecated_fragment + '''let response = {{ infra }}::context::send(request, |request| client.{{ method_name }}(request)).await?;
+    Ok(response)
 }
 
 /// Synchronous version of {{ name }}''' + deprecated_fragment + '''
@@ -327,8 +327,7 @@ impl Batch {
             .max_encoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE);
 
         let request = {{ request_rust_type }} { ops: self.ops };
-        let response = client.set_properties(request).await?;
-        Ok(response.into_inner())
+        {{ infra }}::context::send(request, |request| client.set_properties(request)).await
     }
 
     pub fn execute(
@@ -431,8 +430,7 @@ impl Call {
             args: self.args,
             subsystem: self.subsystem,
         };
-        let response = client.call_function(request).await?;
-        Ok(response.into_inner())
+        {{ infra }}::context::send(request, |request| client.call_function(request)).await
     }
 
     pub fn execute(
@@ -809,7 +807,10 @@ pub mod unreal;
 pub mod world;
 
 // Re-export commonly used items
-pub use context::{set_server, set_server_async, set_socket, set_socket_async, tempo_context, TempoContext};
+pub use context::{
+    set_request_timeout, set_server, set_server_async, set_socket, set_socket_async, tempo_context,
+    with_request_timeout, with_request_timeout_sync, TempoContext,
+};
 pub use error::TempoError;
 pub use streaming::SyncStreamIterator;
 

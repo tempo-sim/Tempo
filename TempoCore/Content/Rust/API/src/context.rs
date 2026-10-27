@@ -6,8 +6,10 @@
 //! connection to the Tempo server, similar to Python's `_tempo_context.py`.
 
 use once_cell::sync::Lazy;
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::runtime::Runtime;
 use tokio::sync::RwLock;
 use tonic::transport::Channel;
@@ -281,6 +283,69 @@ pub fn set_socket<P: AsRef<Path>>(path: P) {
     RUNTIME.block_on(set_socket_async(path));
 }
 
+// -- request timeout ------------------------------------------------------------------------------
+//
+// A deadline on every unary RPC, so a wedged server fails a call instead of hanging it. Never on a
+// server stream: a gRPC deadline bounds the whole call, and a stream is meant to outlive any one
+// request -- a camera stream for the length of a run, a horn stream through long silences.
+
+/// The process-wide default, which [`with_request_timeout`] overrides for a stretch of calls.
+static REQUEST_TIMEOUT: std::sync::RwLock<Option<Duration>> = std::sync::RwLock::new(None);
+
+tokio::task_local! {
+    static REQUEST_TIMEOUT_OVERRIDE: Option<Duration>;
+}
+
+/// Give every unary RPC this deadline, or none (the default). Process-wide, like the connection.
+pub fn set_request_timeout(timeout: Option<Duration>) {
+    *REQUEST_TIMEOUT.write().unwrap_or_else(|e| e.into_inner()) = timeout;
+}
+
+/// The deadline a unary RPC made here and now gets: the innermost [`with_request_timeout`]'s,
+/// else the process-wide one.
+pub fn request_timeout() -> Option<Duration> {
+    REQUEST_TIMEOUT_OVERRIDE
+        .try_with(|timeout| *timeout)
+        .unwrap_or_else(|_| *REQUEST_TIMEOUT.read().unwrap_or_else(|e| e.into_inner()))
+}
+
+/// Run `calls` with `timeout` in place of the process-wide deadline: longer for a call known to be
+/// slow, shorter for one that must not stall, `None` for none. Seen by every RPC `calls` makes,
+/// sync or async, but not by a task it spawns.
+pub async fn with_request_timeout<F: Future>(timeout: Option<Duration>, calls: F) -> F::Output {
+    REQUEST_TIMEOUT_OVERRIDE.scope(timeout, calls).await
+}
+
+/// [`with_request_timeout`] for blocking calls.
+pub fn with_request_timeout_sync<R>(timeout: Option<Duration>, calls: impl FnOnce() -> R) -> R {
+    REQUEST_TIMEOUT_OVERRIDE.sync_scope(timeout, calls)
+}
+
+/// Send one unary request under the current deadline. The deadline goes to the server as
+/// `grpc-timeout` and is enforced here too, so a call that exceeds it fails with
+/// `DEADLINE_EXCEEDED` whether or not the server noticed, and is dropped mid-flight.
+///
+/// Every generated unary wrapper sends through this.
+pub async fn send<Req, Resp, Fut>(
+    message: Req,
+    call: impl FnOnce(tonic::Request<Req>) -> Fut,
+) -> Result<Resp, TempoError>
+where
+    Fut: Future<Output = Result<tonic::Response<Resp>, tonic::Status>>,
+{
+    let mut request = tonic::Request::new(message);
+    let Some(timeout) = request_timeout() else {
+        return Ok(call(request).await?.into_inner());
+    };
+    request.set_timeout(timeout);
+    match tokio::time::timeout(timeout, call(request)).await {
+        Ok(response) => Ok(response?.into_inner()),
+        Err(_) => Err(TempoError::Rpc(tonic::Status::deadline_exceeded(format!(
+            "no response within {timeout:?}"
+        )))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -335,5 +400,48 @@ mod tests {
         // Going back to TCP drops the socket.
         ctx.set_server(DEFAULT_ADDRESS, DEFAULT_PORT);
         assert_eq!(ctx.socket_path(), None);
+    }
+
+    fn rt() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap()
+    }
+
+    // One test, because the default is process-wide and tests run in parallel.
+    #[test]
+    fn test_request_timeout() {
+        assert_eq!(request_timeout(), None);
+
+        set_request_timeout(Some(Duration::from_secs(5)));
+        assert_eq!(request_timeout(), Some(Duration::from_secs(5)));
+
+        // An override wins inside, sync or async, and is gone after.
+        with_request_timeout_sync(None, || assert_eq!(request_timeout(), None));
+        rt().block_on(with_request_timeout(Some(Duration::from_millis(7)), async {
+            assert_eq!(request_timeout(), Some(Duration::from_millis(7)));
+        }));
+        assert_eq!(request_timeout(), Some(Duration::from_secs(5)));
+
+        // A call slower than its deadline fails with DEADLINE_EXCEEDED, and one within it does not.
+        let slow = |_: tonic::Request<()>| async {
+            std::future::pending::<Result<tonic::Response<()>, tonic::Status>>().await
+        };
+        let error = rt()
+            .block_on(with_request_timeout(Some(Duration::from_millis(20)), send((), slow)))
+            .unwrap_err();
+        match error {
+            TempoError::Rpc(status) => assert_eq!(status.code(), tonic::Code::DeadlineExceeded),
+            other => panic!("expected DEADLINE_EXCEEDED, got {other:?}"),
+        }
+        let seen = rt()
+            .block_on(send((), |request: tonic::Request<()>| async move {
+                // The deadline also travels to the server, as grpc-timeout.
+                assert!(request.metadata().get("grpc-timeout").is_some());
+                Ok(tonic::Response::new(42))
+            }))
+            .unwrap();
+        assert_eq!(seen, 42);
+
+        set_request_timeout(None);
+        assert_eq!(request_timeout(), None);
     }
 }

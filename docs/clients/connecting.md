@@ -152,6 +152,42 @@ overrides the environment.
     the socket's directory bind-mounted (and a matching uid); a client on another machine needs TCP.
     Windows has no support for this transport in Tempo's gRPC build — use a port there.
 
+## Request timeout
+
+By default a call waits as long as the server takes. A process that must not hang on a wedged sim
+can give every call a deadline, after which it fails with `DEADLINE_EXCEEDED` (and the server is
+told, through `grpc-timeout`). The setting is process-wide, like the connection, and can be
+overridden for a stretch of calls -- longer for one known to be slow, such as a level load.
+
+Only unary calls get a deadline. A gRPC deadline bounds a whole call, and a stream (camera frames,
+lidar scans, state updates) is meant to outlive any one request, so streams never get one.
+
+=== "Python"
+
+    ```python
+    import tempo_sim
+
+    tempo_sim.set_request_timeout(120.0)        # seconds; None for no deadline
+
+    with tempo_sim.with_request_timeout(600.0):  # this block only, sync or async calls
+        tempo_sim.tempo_core.load_level("/Game/Maps/Big")
+    ```
+
+=== "Rust"
+
+    ```rust
+    use std::time::Duration;
+    use tempo_sim::{set_request_timeout, with_request_timeout, with_request_timeout_sync};
+
+    set_request_timeout(Some(Duration::from_secs(120)));
+
+    // Async calls inside the future, or blocking calls inside the closure.
+    with_request_timeout(Some(Duration::from_secs(600)), async { /* ... */ }).await;
+    with_request_timeout_sync(Some(Duration::from_secs(600)), || { /* ... */ });
+    ```
+
+    An override is seen by every call its future or closure makes, but not by a task it spawns.
+
 ## Compression
 
 `Server Compression Level` controls how Tempo compresses server messages. When the client is on

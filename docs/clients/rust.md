@@ -73,7 +73,8 @@ RPC's function is marked `#[deprecated]`. The fluent `call()` builder is the exc
 [TempoWorld](../plugins/tempo-world.md#calling-functions).
 
 Re-exported at the crate root: `set_server`, `set_server_async`, `set_socket`, `set_socket_async`,
-`tempo_context`, `TempoContext`,
+`set_request_timeout`, `with_request_timeout`, `with_request_timeout_sync` (see
+[Request timeout](connecting.md#request-timeout)), `tempo_context`, `TempoContext`,
 `TempoError`, `SyncStreamIterator`.
 
 ## Publishing your own crate
