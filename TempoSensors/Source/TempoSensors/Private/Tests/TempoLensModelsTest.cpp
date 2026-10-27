@@ -467,7 +467,12 @@ bool FTempoLensSolveFOVTest::RunTest(const FString& Parameters)
 	UnitSphere.Xi = 0.0f;
 	UnitSphere.Alpha = 1.0f;
 
-	// Every solution realizes the focal length, renders cleanly, and lies where the focal length still falls.
+	auto RendersExceptCorners = [&SizeXY](const FTempoLensParameters& Params, double FOV)
+	{
+		return !FindFOVProblems(Params, SizeXY, FOV).ContainsByPredicate([](const FTempoFOVProblem& Problem) { return !Problem.bCornersOnly; });
+	};
+
+	// Every solution realizes the focal length, renders (if not always its corners), and lies where the focal length still falls.
 	auto CheckSolution = [&](const TCHAR* Name, const FTempoLensParameters& Params, double FocalLength, double FOV)
 	{
 		const double Solved = Focal(Params, FOV);
@@ -475,9 +480,9 @@ bool FTempoLensSolveFOVTest::RunTest(const FString& Parameters)
 		{
 			AddError(FString::Printf(TEXT("%s: FOV %.6f gives focal %.6f, not %.6f"), Name, FOV, Solved, FocalLength));
 		}
-		if (!FindFOVProblems(Params, SizeXY, FOV).IsEmpty())
+		if (!RendersExceptCorners(Params, FOV))
 		{
-			AddError(FString::Printf(TEXT("%s: FOV %.6f for focal %.6f doesn't render cleanly"), Name, FOV, FocalLength));
+			AddError(FString::Printf(TEXT("%s: FOV %.6f for focal %.6f doesn't render"), Name, FOV, FocalLength));
 		}
 		if (!(Focal(Params, FOV - 1e-3) > Solved))
 		{
@@ -517,12 +522,16 @@ bool FTempoLensSolveFOVTest::RunTest(const FString& Parameters)
 	}
 
 	double Solved = 0.0;
-	// K1 = -0.3 renders cleanly only to about 85 degrees, and its focal length bottoms out near 93
-	// before rising again. A focal length the lens reaches only between those has no answer.
-	TestFalse(TEXT("Barrel: focal length only reachable at the fold"), SolveFOVForFocalLength(Barrel, SizeXY, Focal(Barrel, 95.0), Solved));
-	TestFalse(TEXT("Barrel: focal length below the clean branch"), SolveFOVForFocalLength(Barrel, SizeXY, 0.99 * Focal(Barrel, 85.0), Solved));
+	// K1 = -0.3's focal length bottoms out near 93 degrees, where the lens folds back, and rises again
+	// past it. It renders cleanly only to about 85; beyond that its corners can't be inverted.
+	TestFalse(TEXT("Barrel: focal length below the branch's minimum"), SolveFOVForFocalLength(Barrel, SizeXY, 0.99 * Focal(Barrel, 93.0), Solved));
+	TestTrue(TEXT("Barrel: focal length just past the fold solves"), SolveFOVForFocalLength(Barrel, SizeXY, Focal(Barrel, 95.0), Solved));
+	TestTrue(TEXT("Barrel: focal length just past the fold solves before it"), Solved < 93.0);
 	TestTrue(TEXT("Barrel: focal length reachable on both branches solves"), SolveFOVForFocalLength(Barrel, SizeXY, Focal(Barrel, 115.0), Solved));
 	TestTrue(TEXT("Barrel: focal length reachable on both branches solves below the fold"), Solved < 85.0);
+	// Between 85 and 93 degrees the image renders but its corners can't be inverted; the calibration is still realized.
+	TestTrue(TEXT("Barrel: focal length with uninvertible corners solves"), SolveFOVForFocalLength(Barrel, SizeXY, Focal(Barrel, 89.0), Solved));
+	TestNearlyEqual(TEXT("Barrel: focal length with uninvertible corners solves to its FOV"), Solved, 89.0, 1e-3);
 
 	// The unit sphere's focal length at 240 degrees is also its focal length at 120, on the physical branch.
 	TestTrue(TEXT("UnitSphere: focal length of 240 degrees solves"), SolveFOVForFocalLength(UnitSphere, SizeXY, Focal(UnitSphere, 240.0), Solved));
@@ -534,6 +543,24 @@ bool FTempoLensSolveFOVTest::RunTest(const FString& Parameters)
 	Singular.Xi = -0.5f;
 	Singular.Alpha = 0.0f;
 	TestTrue(TEXT("DoubleSphere: no focal length where the projection is singular"), Focal(Singular, 120.0) <= 0.0);
+
+	// cam_f_f, a portrait Entron fisheye at quarter resolution: its K1-K4 peak at theta_d 1.685, inside the
+	// image (the farthest corner is at 1.733). The corners render as out-of-domain; the calibration still holds.
+	{
+		const FIntPoint PortraitXY(540, 960);
+		FTempoLensParameters Fisheye = Lens(ETempoLensModel::KannalaBrandt);
+		Fisheye.K1 = 0.00585150048f;
+		Fisheye.K2 = -0.0050607579f;
+		Fisheye.K3 = -0.00198001581f;
+		Fisheye.K4 = 0.000104815609f;
+		Fisheye.PrincipalPoint = PrincipalPointFromPixels(PortraitXY, FVector2D(265.2, 480.885));
+		const double FocalLength = 319.4625;
+		TestTrue(TEXT("Fisheye with uninvertible corners solves"), SolveFOVForFocalLength(Fisheye, PortraitXY, FocalLength, Solved));
+		TestNearlyEqual(TEXT("Fisheye with uninvertible corners keeps its focal length"),
+			CreateLensModel(Fisheye, 0.0, 0.0)->ComputeFOutputForFullImage(PortraitXY, Solved), FocalLength, FocalLength * 1e-5);
+		const TArray<FTempoFOVProblem> Problems = FindFOVProblems(Fisheye, PortraitXY, Solved);
+		TestTrue(TEXT("Fisheye with uninvertible corners is reported"), Problems.Num() == 1 && Problems[0].bCornersOnly);
+	}
 
 	// The principal point must lie inside the image.
 	FTempoLensParameters OffCenter = Lens(ETempoLensModel::Pinhole);

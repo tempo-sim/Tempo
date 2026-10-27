@@ -574,6 +574,9 @@ struct FTempoFOVProblem
 {
 	int32 Key = 0;
 	FString Message;
+	// The image still renders, but pixels near its corners lie past where the lens's distortion can
+	// be inverted, and render as out-of-domain. Real wide-angle calibrations often do this.
+	bool bCornersOnly = false;
 };
 
 // Every rule a camera with these lens parameters, image size and horizontal FOV (degrees) breaks:
@@ -585,7 +588,8 @@ TEMPOSENSORS_API TArray<FTempoFOVProblem> FindFOVProblems(const FTempoLensParame
 
 // The horizontal FOV (degrees) at which the lens model's own ComputeFOutputForFullImage gives
 // FocalLength (pixels) for an image SizeXY wide. Only the lens's physical branch is searched: the
-// FOVs from zero up to where the focal length stops falling or FindFOVProblems reports a problem.
-// Returns false when no FOV on that branch realizes FocalLength.
+// FOVs from zero up to where the focal length stops falling or FindFOVProblems reports a problem
+// other than a corners-only one. A calibration whose corners can't be inverted still solves, as the
+// camera renders it. Returns false when no FOV on that branch realizes FocalLength.
 TEMPOSENSORS_API bool SolveFOVForFocalLength(const FTempoLensParameters& LensParameters,
 	const FIntPoint& SizeXY, double FocalLength, double& OutFOVAngle);

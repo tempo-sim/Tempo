@@ -1202,9 +1202,9 @@ FDistortionRenderConfig FDoubleSphereDistortion::ComputeRenderConfig(const FIntP
 TArray<FTempoFOVProblem> FindFOVProblems(const FTempoLensParameters& LensParameters, const FIntPoint& SizeXY, double FOVAngle)
 {
 	TArray<FTempoFOVProblem> Problems;
-	auto Report = [&Problems](int32 Key, FString&& Message)
+	auto Report = [&Problems](int32 Key, FString&& Message, bool bCornersOnly = false)
 	{
-		Problems.Add(FTempoFOVProblem{ Key, MoveTemp(Message) });
+		Problems.Add(FTempoFOVProblem{ Key, MoveTemp(Message), bCornersOnly });
 	};
 
 	if (LensParameters.IsSingleCapture())
@@ -1242,7 +1242,7 @@ TArray<FTempoFOVProblem> FindFOVProblems(const FTempoLensParameters& LensParamet
 			const double MaxFOVDeg = 2.0 * FMath::RadiansToDegrees(FMath::Atan(MaxHorizSourceRad));
 			if (FOVAngle > MaxFOVDeg)
 			{
-				Report(7, FString::Printf(TEXT("%s FOVAngle %.2f exceeds parameter-implied max %.2f. Inverse distortion (Newton-Raphson) cannot converge for some pixels with the current K coefficients."), ModelName, FOVAngle, MaxFOVDeg));
+				Report(7, FString::Printf(TEXT("%s FOVAngle %.2f exceeds parameter-implied max %.2f. Inverse distortion (Newton-Raphson) cannot converge for some pixels with the current K coefficients."), ModelName, FOVAngle, MaxFOVDeg), /*bCornersOnly=*/ true);
 			}
 		}
 	}
@@ -1294,12 +1294,12 @@ TArray<FTempoFOVProblem> FindFOVProblems(const FTempoLensParameters& LensParamet
 				if (Model.ThetaMax < UE_DOUBLE_PI)
 				{
 					Report(9, FString::Printf(TEXT("Equidistant K1-K4 peak at theta_d %.4f (theta %.4f rad), inside the image (farthest corner theta_d %.4f). Pixels beyond the peak have no physical inverse and render as out-of-domain."),
-						Model.ThetaDMax, Model.ThetaMax, CornerThetaD));
+						Model.ThetaDMax, Model.ThetaMax, CornerThetaD), /*bCornersOnly=*/ true);
 				}
 				else
 				{
 					Report(9, FString::Printf(TEXT("Equidistant FOVAngle %.2f at %dx%d puts the farthest image corner at theta_d %.4f, past the 180-degree limit (theta_d %.4f). Pixels beyond it render as out-of-domain; reduce FOVAngle or the aspect ratio."),
-						FOVAngle, SizeXY.X, SizeXY.Y, CornerThetaD, Model.ThetaDMax));
+						FOVAngle, SizeXY.X, SizeXY.Y, CornerThetaD, Model.ThetaDMax), /*bCornersOnly=*/ true);
 				}
 			}
 		}
@@ -1327,13 +1327,14 @@ bool SolveFOVForFocalLength(const FTempoLensParameters& LensParameters, const FI
 	const TUniquePtr<FLensModel> Model = CreateLensModel(LensParameters, 0.0, 0.0);
 	auto Focal = [&Model, &SizeXY](double FOV) { return Model->ComputeFOutputForFullImage(SizeXY, FOV); };
 	// The physical branch is where the focal length still falls as the FOV grows and the camera
-	// renders cleanly. Past it a barrel lens folds back and Double Sphere's projection turns down, so
+	// renders the image, if not always its corners. Past it a barrel lens folds back and Double Sphere's projection turns down, so
 	// the same focal length recurs at a FOV that renders the wrong image.
 	constexpr double SlopeStepDeg = 1e-4;
 	auto OnBranch = [&](double FOV)
 	{
 		const double F = Focal(FOV);
-		return F > 0.0 && Focal(FOV + SlopeStepDeg) < F && FindFOVProblems(LensParameters, SizeXY, FOV).IsEmpty();
+		return F > 0.0 && Focal(FOV + SlopeStepDeg) < F
+			&& !FindFOVProblems(LensParameters, SizeXY, FOV).ContainsByPredicate([](const FTempoFOVProblem& Problem) { return !Problem.bCornersOnly; });
 	};
 	// Stop once the FOV no longer changes as a float, the precision the camera stores it at.
 	auto Bisect = [](double Low, double High, auto&& IsLow)

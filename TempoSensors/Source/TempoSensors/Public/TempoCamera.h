@@ -309,8 +309,10 @@ public:
 	 * and the lens. The principal point is in OpenCV's pixel convention, which puts pixel centers on integers,
 	 * so a centered one is ((W-1)/2, (H-1)/2). The horizontal FOV is the one at which the lens model's own
 	 * projection gives FocalLength, on the lens's physical branch, so GetIntrinsics reports the calibration it
-	 * was given. It can be called on a running camera. Returns false, changing nothing, when the principal point
-	 * is outside the image or no FOV the camera renders cleanly realizes FocalLength with this lens.
+	 * was given. A calibration whose corners lie past where the lens's distortion can be inverted is accepted, and
+	 * those corners render as out-of-domain, as ValidateFOV reports. It can be called on a running camera. Returns
+	 * false, changing nothing, when the principal point is outside the image or no FOV the camera can render
+	 * realizes FocalLength with this lens.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Tempo")
 	bool SetCalibratedIntrinsics(const FIntPoint& InSizeXY, double FocalLength, const FVector2D& PrincipalPoint, const FTempoLensParameters& InLensParameters);

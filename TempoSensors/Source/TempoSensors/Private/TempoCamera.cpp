@@ -990,7 +990,7 @@ bool UTempoCamera::SetCalibratedIntrinsics(const FIntPoint& InSizeXY, double Foc
 	double NewFOVAngle = 0.0;
 	if (!SolveFOVForFocalLength(NewLensParameters, InSizeXY, FocalLength, NewFOVAngle))
 	{
-		UE_LOG(LogTempoSensors, Error, TEXT("SetCalibratedIntrinsics: no FOV this lens renders cleanly gives a %d pixel wide image a focal length of %f"),
+		UE_LOG(LogTempoSensors, Error, TEXT("SetCalibratedIntrinsics: no FOV this lens can render gives a %d pixel wide image a focal length of %f"),
 			InSizeXY.X, FocalLength);
 		return false;
 	}
