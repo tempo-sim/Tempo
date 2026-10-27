@@ -447,7 +447,7 @@ protected:
 	// VerticalFOV grid. Array length determines the beam count; VerticalFOV is derived
 	// automatically as a symmetric FOV that encloses all configured elevation angles.
 	// Entries are in channel index order (need not be sorted by elevation).
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TArray<FLidarBeamCalibration> BeamCalibration;
 
 	// Simulate participating media, meaning fog, dust and smoke, along each beam. Whatever the

@@ -157,9 +157,11 @@ struct TTextureRead<FCameraPixelNoDepth> : TTextureReadBase<FCameraPixelNoDepth>
 
 struct TEMPOSENSORS_API FTempoCameraIntrinsics
 {
-	// PrincipalPoint is a normalized offset from the image center (X right, Y down, in fractions of
-	// width/height); (0,0) places the principal point (Cx, Cy) at the image center.
-	FTempoCameraIntrinsics(const FIntPoint& SizeXY, float HorizontalFOV, const FVector2D& PrincipalPoint = FVector2D::ZeroVector);
+	// FocalLength is in pixels; a non-positive one (a lens the camera can't render at its FOV) is
+	// reported as 0, ROS's "uncalibrated". PrincipalPoint is a normalized offset from the image center
+	// (X right, Y down, in fractions of width/height). (Cx, Cy) follow OpenCV's pixel convention (see
+	// PrincipalPointToPixels), so a centered principal point is ((W-1)/2, (H-1)/2).
+	FTempoCameraIntrinsics(const FIntPoint& SizeXY, double FocalLength, const FVector2D& PrincipalPoint = FVector2D::ZeroVector);
 	const float Fx;
 	const float Fy;
 	const float Cx;
@@ -301,6 +303,17 @@ public:
 	void RequestMeasurement(const TempoSensors::VideoRequest& Request, const TResponseDelegate<TempoSensors::VideoFrame>& ResponseContinuation);
 
 	FTempoCameraIntrinsics GetIntrinsics() const;
+
+	/**
+	 * Configure the camera from a calibration: the image size, the focal length and principal point in pixels,
+	 * and the lens. The principal point is in OpenCV's pixel convention, which puts pixel centers on integers,
+	 * so a centered one is ((W-1)/2, (H-1)/2). The horizontal FOV is the one at which the lens model's own
+	 * projection gives FocalLength, on the lens's physical branch, so GetIntrinsics reports the calibration it
+	 * was given. It can be called on a running camera. Returns false, changing nothing, when the principal point
+	 * is outside the image or no FOV the camera renders cleanly realizes FocalLength with this lens.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Tempo")
+	bool SetCalibratedIntrinsics(const FIntPoint& InSizeXY, double FocalLength, const FVector2D& PrincipalPoint, const FTempoLensParameters& InLensParameters);
 
 	// Begin ITempoSensorInterface
 	virtual TOptional<TFuture<void>> SendMeasurements() override;
