@@ -314,6 +314,18 @@ bool ATempoWorldSettings::Step(int32 NumSteps, TFunction<void(ETempoStepResult)>
 		return true;
 	}
 
+	// Anything else (several steps at once) steps frame by frame, which can only start at a frame boundary.
+	if (bInSubstepLoop)
+	{
+		return DeferToFrameBoundary([this, NumSteps, OnComplete = MoveTemp(OnComplete)]() mutable
+		{
+			if (!Step(NumSteps, OnComplete) && OnComplete)
+			{
+				OnComplete(ETempoStepResult::AbortedByTimeSettingsChanged);
+			}
+		});
+	}
+
 	if (OnComplete && PendingStepCompletion)
 	{
 		return false;
