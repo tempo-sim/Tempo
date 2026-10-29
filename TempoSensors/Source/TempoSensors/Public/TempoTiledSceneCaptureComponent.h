@@ -47,6 +47,7 @@ public:
 	virtual void BlockUntilMeasurementsReady() const override;
 	virtual TOptional<TFuture<void>> SendMeasurements() { return TOptional<TFuture<void>>(); }
 	virtual void ExecutePendingCapture() override;
+	virtual TOptional<double> GetSecondsUntilNextCapture() const override;
 	// End ITempoSensorInterface
 
 protected:

@@ -12,6 +12,7 @@
 
 #include "TempoCoreSettings.h"
 #include "TempoSensorsSettings.h"
+#include "TempoWorldSettings.h"
 
 #include "Components/SceneCaptureComponent.h"
 #include "Engine/GameViewportClient.h"
@@ -70,11 +71,20 @@ void UTempoSensorServiceSubsystem::Initialize(FSubsystemCollectionBase& Collecti
 	FWorldDelegates::OnWorldTickStart.AddUObject(this, &UTempoSensorServiceSubsystem::OnWorldTickStart);
 	FWorldDelegates::OnWorldTickEnd.AddUObject(this, &UTempoSensorServiceSubsystem::OnWorldTickEnd);
 	FCoreDelegates::OnEndFrameRT.AddUObject(this, &UTempoSensorServiceSubsystem::OnRenderFrameCompleted);
+
+	ATempoWorldSettings::GetSecondsUntilNextCapture.BindUObject(this, &UTempoSensorServiceSubsystem::GetSecondsUntilNextCapture);
+	SubstepLoopPollHandle = ATempoWorldSettings::OnSubstepLoopPoll.AddUObject(this, &UTempoSensorServiceSubsystem::OnSubstepLoopPoll);
 }
 
 void UTempoSensorServiceSubsystem::Deinitialize()
 {
 	Super::Deinitialize();
+
+	if (ATempoWorldSettings::GetSecondsUntilNextCapture.IsBoundToObject(this))
+	{
+		ATempoWorldSettings::GetSecondsUntilNextCapture.Unbind();
+	}
+	ATempoWorldSettings::OnSubstepLoopPoll.Remove(SubstepLoopPollHandle);
 
 	FTempoServer::Get().DeactivateService<SensorService>();
 }
@@ -149,20 +159,118 @@ void UTempoSensorServiceSubsystem::OnWorldTickStart(UWorld* World, ELevelTick Ti
 			});
 		}
 
-		TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsSendMeasurements);
-		TArray<TFuture<void>> SendMeasurementsTasks;
-		ForEachActiveSensor([&SendMeasurementsTasks](ITempoSensorInterface* Sensor)
-		{
-			if (TOptional<TFuture<void>> Future = Sensor->SendMeasurements())
-			{
-				SendMeasurementsTasks.Add(MoveTemp(Future.GetValue()));
-			}
-		});
+		SendCompletedMeasurements();
+	}
+}
 
-		for (const TFuture<void>& SendMeasurementsTask : SendMeasurementsTasks)
+void UTempoSensorServiceSubsystem::SendCompletedMeasurements()
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsSendMeasurements);
+	TArray<TFuture<void>> SendMeasurementsTasks;
+	ForEachActiveSensor([&SendMeasurementsTasks](ITempoSensorInterface* Sensor)
+	{
+		if (TOptional<TFuture<void>> Future = Sensor->SendMeasurements())
 		{
-			SendMeasurementsTask.Wait();
+			SendMeasurementsTasks.Add(MoveTemp(Future.GetValue()));
 		}
+	});
+
+	// The decode tasks respond to their gRPC requests from worker threads, so they must finish before
+	// the game thread handles gRPC events again.
+	for (const TFuture<void>& SendMeasurementsTask : SendMeasurementsTasks)
+	{
+		SendMeasurementsTask.Wait();
+	}
+}
+
+TOptional<double> UTempoSensorServiceSubsystem::GetSecondsUntilNextCapture(UWorld* World) const
+{
+	if (World != GetWorld())
+	{
+		return TOptional<double>();
+	}
+
+	TOptional<double> Soonest;
+	ForEachActiveSensor([&Soonest](const ITempoSensorInterface* Sensor)
+	{
+		const TOptional<double> SecondsUntilCapture = Sensor->GetSecondsUntilNextCapture();
+		if (SecondsUntilCapture.IsSet() && (!Soonest.IsSet() || SecondsUntilCapture.GetValue() < Soonest.GetValue()))
+		{
+			Soonest = SecondsUntilCapture;
+		}
+	});
+	return Soonest;
+}
+
+void UTempoSensorServiceSubsystem::OnSubstepLoopPoll(UWorld* World)
+{
+	if (World != GetWorld())
+	{
+		return;
+	}
+
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsSubstepLoopPoll);
+
+	if (SubstepSensorsFrame != GFrameCounter)
+	{
+		SubstepSensorsFrame = GFrameCounter;
+		SubstepSensors.Reset();
+		ForEachActiveSensor([this](ITempoSensorInterface* Sensor)
+		{
+			SubstepSensors.Add(Cast<UActorComponent>(Sensor));
+		});
+	}
+
+	TArray<ITempoSensorInterface*> Sensors;
+	for (const TWeakObjectPtr<UActorComponent>& Component : SubstepSensors)
+	{
+		if (ITempoSensorInterface* Sensor = Cast<ITempoSensorInterface>(Component.Get()))
+		{
+			Sensors.Add(Sensor);
+		}
+	}
+
+	// Readbacks are otherwise polled only at the render thread's end of frame, and the loop holds the
+	// next frame off for many steps. Poll from a render command instead; it is non-blocking, exactly
+	// like the end-of-frame poll. A sensor is only destroyed after the render thread has drained the
+	// commands queued before its destruction began, so the raw pointers outlive this command.
+	if (!SubstepReadbackPollInFlight->load())
+	{
+		TArray<ITempoSensorInterface*> AwaitingRender;
+		for (ITempoSensorInterface* Sensor : Sensors)
+		{
+			if (Sensor->IsAwaitingRender())
+			{
+				AwaitingRender.Add(Sensor);
+			}
+		}
+		if (!AwaitingRender.IsEmpty())
+		{
+			SubstepReadbackPollInFlight->store(true);
+			ENQUEUE_RENDER_COMMAND(TempoSubstepReadbackPoll)(
+				[AwaitingRender = MoveTemp(AwaitingRender), InFlight = SubstepReadbackPollInFlight](FRHICommandListImmediate&)
+				{
+					TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsSubstepReadbackPoll);
+					for (ITempoSensorInterface* Sensor : AwaitingRender)
+					{
+						Sensor->OnRenderCompleted();
+					}
+					InFlight->store(false);
+				});
+		}
+	}
+
+	TArray<TFuture<void>> SendMeasurementsTasks;
+	for (ITempoSensorInterface* Sensor : Sensors)
+	{
+		if (TOptional<TFuture<void>> Future = Sensor->SendMeasurements())
+		{
+			SendMeasurementsTasks.Add(MoveTemp(Future.GetValue()));
+		}
+	}
+	for (const TFuture<void>& SendMeasurementsTask : SendMeasurementsTasks)
+	{
+		SendMeasurementsTask.Wait();
 	}
 }
 

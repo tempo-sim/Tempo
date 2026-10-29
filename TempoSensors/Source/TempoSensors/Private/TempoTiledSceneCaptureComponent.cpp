@@ -230,6 +230,19 @@ void UTempoTiledSceneCaptureComponent::ExecutePendingCapture()
 	RenderCapture();
 }
 
+TOptional<double> UTempoTiledSceneCaptureComponent::GetSecondsUntilNextCapture() const
+{
+	// Not gated on HasPendingRequests: a streaming client re-requests only after its last response
+	// has been written, which may land after the loop asks. Ending the loop for a capture nobody
+	// reads costs one frame; missing one a client is waiting for costs a whole capture period.
+	const UWorld* World = GetWorld();
+	if (World == nullptr || !World->GetTimerManager().IsTimerActive(TimerHandle))
+	{
+		return TOptional<double>();
+	}
+	return World->GetTimerManager().GetTimerRemaining(TimerHandle);
+}
+
 void UTempoTiledSceneCaptureComponent::RestartCaptureTimer()
 {
 	if (UWorld* World = GetWorld())

@@ -4,7 +4,13 @@
 
 #include "TempoCore.h"
 #include "TempoCoreSettings.h"
+#include "TempoServer.h"
 #include "EngineUtils.h"
+#include "HAL/IConsoleManager.h"
+#include "HAL/PlatformMisc.h"
+#include "Misc/CommandLine.h"
+#include "Misc/CoreDelegates.h"
+#include "Misc/Parse.h"
 #include "UnrealClient.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Kismet/GameplayStatics.h"
@@ -17,8 +23,63 @@
 
 #include <cmath>
 
+FTempoSubstepLoopPollDelegate ATempoWorldSettings::OnSubstepLoopPoll;
+FTempoSecondsUntilNextCaptureDelegate ATempoWorldSettings::GetSecondsUntilNextCapture;
+
 namespace
 {
+	TAutoConsoleVariable<int32> CVarMaxStepsPerFrame(
+		TEXT("Tempo.MaxStepsPerFrame"), 1,
+		TEXT("FixedStep only. Above 1, Step RPCs run between frames, up to this many per frame, instead of one per frame. ")
+		TEXT("The TEMPO_MAX_STEPS_PER_FRAME environment variable or -TempoMaxStepsPerFrame= raise the default."));
+
+	TAutoConsoleVariable<float> CVarSubstepQuietTimeoutMs(
+		TEXT("Tempo.SubstepQuietTimeoutMs"), 50.0f,
+		TEXT("How long the substep loop waits for the client's next Step before letting the frame finish."));
+
+	TAutoConsoleVariable<float> CVarSubstepPollIntervalMs(
+		TEXT("Tempo.SubstepPollIntervalMs"), 1.0f,
+		TEXT("How often the substep loop polls sensor readbacks while waiting for the client."));
+
+	// PROTOTYPE(substep-rpc): where substep-mode wall clock goes, logged every LogEverySteps steps.
+	struct FSubstepProfile
+	{
+		static constexpr int32 LogEverySteps = 1000;
+		int32 Steps = 0;
+		int32 Loops = 0;
+		int32 CaptureBreaks = 0;
+		int32 MaxStepBreaks = 0;
+		int32 QuietBreaks = 0;
+		double StepSeconds = 0.0;
+		double PumpSeconds = 0.0;
+		double PollSeconds = 0.0;
+		double InPumpPollSeconds = 0.0;
+		double OutsideLoopSeconds = 0.0;
+		double LastLoopEndSeconds = -1.0;
+		double HandleSecondsAtStart = 0.0;
+	};
+	FSubstepProfile SubstepProfile;
+
+	int32 GetMaxStepsPerFrame()
+	{
+		static const int32 LaunchValue = []()
+		{
+			int32 Value = 0;
+			const FString EnvValue = FPlatformMisc::GetEnvironmentVariable(TEXT("TEMPO_MAX_STEPS_PER_FRAME"));
+			if (!EnvValue.IsEmpty())
+			{
+				LexFromString(Value, *EnvValue);
+			}
+			FParse::Value(FCommandLine::Get(), TEXT("TempoMaxStepsPerFrame="), Value);
+			if (Value > 1)
+			{
+				UE_LOG(LogTempoCore, Display, TEXT("Substep loop enabled: up to %d steps per frame in FixedStep mode."), Value);
+			}
+			return Value;
+		}();
+		return FMath::Max(CVarMaxStepsPerFrame.GetValueOnGameThread(), LaunchValue);
+	}
+
 	// These values result in relatively consistent perceived brightness across a huge range of scene intensity.
 	constexpr float ExposureBiasToBrightnessScale = 3.93342962372f;
 	constexpr float ExposureBiasToBrightnessOffset = -34.1331407526f;
@@ -30,6 +91,10 @@ void ATempoWorldSettings::BeginPlay()
 
 	SettingsChangedHandle = GetMutableDefault<UTempoCoreSettings>()->TempoCoreTimeSettingsChangedEvent.AddUObject(this, &ATempoWorldSettings::OnTimeSettingsChanged);
 	SyncFixedPointTime();
+
+	BeginFrameHandle = FCoreDelegates::OnBeginFrame.AddUObject(this, &ATempoWorldSettings::OnBeginFrame);
+	PreActorTickHandle = FWorldDelegates::OnWorldPreActorTick.AddUObject(this, &ATempoWorldSettings::OnWorldPreActorTick);
+	SubstepTickEndHandle = FWorldDelegates::OnWorldTickEnd.AddUObject(this, &ATempoWorldSettings::OnSubstepWorldTickEnd);
 
 	if (!bManualDefaultAutoExposureBias)
 	{
@@ -54,6 +119,18 @@ void ATempoWorldSettings::BeginPlay()
 void ATempoWorldSettings::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	Super::EndPlay(EndPlayReason);
+
+	FCoreDelegates::OnBeginFrame.Remove(BeginFrameHandle);
+	FWorldDelegates::OnWorldPreActorTick.Remove(PreActorTickHandle);
+	FWorldDelegates::OnWorldTickEnd.Remove(SubstepTickEndHandle);
+	if (bSubstepRequested)
+	{
+		bSubstepRequested = false;
+		if (TFunction<void(ETempoStepResult)> Completion = MoveTemp(SubstepCompletion))
+		{
+			Completion(ETempoStepResult::AbortedByExternalPause);
+		}
+	}
 
 	if (PendingStepCompletion)
 	{
@@ -89,6 +166,8 @@ void ATempoWorldSettings::EndPlay(const EEndPlayReason::Type EndPlayReason)
 float ATempoWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealDeltaSeconds)
 {
 	check(GetWorld());
+
+	bFrameStepsPhysics = false;
 
 	// Don't override in non-game worlds or when paused.
 	if (!GetWorld()->IsGameWorld() || GetWorld()->IsPaused())
@@ -158,7 +237,19 @@ float ATempoWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealDelta
 		}
 	case ETimeMode::FixedStep:
 		{
-			const float FixedStepDeltaSeconds = static_cast<double>(++FixedStepsCount) / Settings->GetSimulatedStepsPerSecond() - SimTime;
+			// A frame after the substep loop advances world time over the steps the loop already ran,
+			// and runs none of its own.
+			if (bCatchUpFrame)
+			{
+				FixedStepsCount += LoopStepsAheadOfWorldTime;
+				LoopStepsAheadOfWorldTime = 0;
+			}
+			else
+			{
+				++FixedStepsCount;
+				bFrameStepsPhysics = true;
+			}
+			const float FixedStepDeltaSeconds = static_cast<double>(FixedStepsCount) / Settings->GetSimulatedStepsPerSecond() - SimTime;
 			if (ensureAlwaysMsgf(FixedStepDeltaSeconds >= 0.0, TEXT("FixedStepDeltaSeconds was not positive: %f"), FixedStepDeltaSeconds))
 			{
 				return FixedStepDeltaSeconds;
@@ -183,6 +274,15 @@ void ATempoWorldSettings::OnTimeSettingsChanged()
 		FirePendingStepCompletion(ETempoStepResult::AbortedByTimeSettingsChanged);
 	}
 
+	if (bSubstepRequested && !bInSubstepLoop)
+	{
+		bSubstepRequested = false;
+		if (TFunction<void(ETempoStepResult)> Completion = MoveTemp(SubstepCompletion))
+		{
+			Completion(ETempoStepResult::AbortedByTimeSettingsChanged);
+		}
+	}
+
 	SyncFixedPointTime();
 }
 
@@ -201,6 +301,31 @@ void ATempoWorldSettings::SyncFixedPointTime()
 
 bool ATempoWorldSettings::Step(int32 NumSteps, TFunction<void(ETempoStepResult)> OnComplete)
 {
+	if (NumSteps == 1 && IsSubstepModeActive())
+	{
+		if (bSubstepRequested)
+		{
+			return false;
+		}
+		// Inside the loop this is the next step; from a frame's RPC pump it runs first thing in the
+		// next loop (see OnBeginFrame).
+		bSubstepRequested = true;
+		SubstepCompletion = MoveTemp(OnComplete);
+		return true;
+	}
+
+	// Anything else (several steps at once) steps frame by frame, which can only start at a frame boundary.
+	if (bInSubstepLoop)
+	{
+		return DeferToFrameBoundary([this, NumSteps, OnComplete = MoveTemp(OnComplete)]() mutable
+		{
+			if (!Step(NumSteps, OnComplete) && OnComplete)
+			{
+				OnComplete(ETempoStepResult::AbortedByTimeSettingsChanged);
+			}
+		});
+	}
+
 	if (OnComplete && PendingStepCompletion)
 	{
 		return false;
@@ -382,6 +507,222 @@ void ATempoWorldSettings::MirrorPauseToEditor(bool bPaused)
 	}
 }
 #endif
+
+double ATempoWorldSettings::GetSimTime() const
+{
+	check(GetWorld());
+	if (LoopStepsAheadOfWorldTime == 0)
+	{
+		return GetWorld()->GetTimeSeconds();
+	}
+	return GetWorld()->GetTimeSeconds() + static_cast<double>(LoopStepsAheadOfWorldTime) / GetDefault<UTempoCoreSettings>()->GetSimulatedStepsPerSecond();
+}
+
+bool ATempoWorldSettings::DeferToFrameBoundary(TFunction<void()> Action)
+{
+	if (!bInSubstepLoop)
+	{
+		return false;
+	}
+	FrameBoundaryActions.Add(MoveTemp(Action));
+	bEndSubstepLoop = true;
+	return true;
+}
+
+bool ATempoWorldSettings::IsSubstepModeActive() const
+{
+	const UWorld* World = GetWorld();
+	return World != nullptr && World->IsGameWorld()
+		&& GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep
+		&& !StepsToSimulate.IsSet()
+		&& GetMaxStepsPerFrame() > 1;
+}
+
+void ATempoWorldSettings::OnBeginFrame()
+{
+	if (!(bSubstepRequested || bSubstepSessionActive) || bInSubstepLoop || !IsSubstepModeActive())
+	{
+		bSubstepSessionActive = false;
+		return;
+	}
+
+	RunSubstepLoop();
+}
+
+void ATempoWorldSettings::RunSubstepLoop()
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoSubstepLoop);
+
+	UWorld* World = GetWorld();
+	check(World);
+
+	const int32 StepsPerSecond = GetDefault<UTempoCoreSettings>()->GetSimulatedStepsPerSecond();
+	const float StepSeconds = 1.0 / StepsPerSecond;
+	const int32 MaxSteps = GetMaxStepsPerFrame();
+
+	// Stop at the step a capture is due at, so the capture gets a frame whose world time is that
+	// step's. World time doesn't move inside the loop, so this holds for the whole loop. The small
+	// slack absorbs float error in the timer's remaining time; a timer that still misses by a hair
+	// fires one step late, exactly as it would one frame late outside the loop.
+	int32 StepsUntilCapture = MAX_int32;
+	if (GetSecondsUntilNextCapture.IsBound())
+	{
+		if (const TOptional<double> SecondsUntilCapture = GetSecondsUntilNextCapture.Execute(World))
+		{
+			StepsUntilCapture = FMath::Max(1, FMath::CeilToInt32(SecondsUntilCapture.GetValue() * StepsPerSecond - 0.01));
+		}
+	}
+
+	const double QuietTimeoutSeconds = CVarSubstepQuietTimeoutMs.GetValueOnGameThread() / 1000.0;
+	const double PollIntervalSeconds = CVarSubstepPollIntervalMs.GetValueOnGameThread() / 1000.0;
+
+	FTempoServer& Server = FTempoServer::Get();
+	TGuardValue<bool> InLoopGuard(bInSubstepLoop, true);
+	Server.SetHoldFrameBoundaryRequests(true);
+	bEndSubstepLoop = false;
+
+	FSubstepProfile& Profile = SubstepProfile;
+	const double LoopStartSeconds = FPlatformTime::Seconds();
+	if (Profile.LastLoopEndSeconds >= 0.0)
+	{
+		Profile.OutsideLoopSeconds += LoopStartSeconds - Profile.LastLoopEndSeconds;
+	}
+	++Profile.Loops;
+
+	int32 StepsThisLoop = 0;
+	while (true)
+	{
+		if (!bSubstepRequested)
+		{
+			const double PumpStart = FPlatformTime::Seconds();
+			Server.PumpEvents(
+				[this, &Server]() { return bSubstepRequested || bEndSubstepLoop || Server.HasHeldRequests(); },
+				QuietTimeoutSeconds, PollIntervalSeconds,
+				[World, &Profile]()
+				{
+					const double PollStart = FPlatformTime::Seconds();
+					OnSubstepLoopPoll.Broadcast(World);
+					const double PollElapsed = FPlatformTime::Seconds() - PollStart;
+					Profile.PollSeconds += PollElapsed;
+					Profile.InPumpPollSeconds += PollElapsed;
+				});
+			Profile.PumpSeconds += FPlatformTime::Seconds() - PumpStart;
+			if (!bSubstepRequested)
+			{
+				++Profile.QuietBreaks;
+				break;
+			}
+		}
+
+		bSubstepRequested = false;
+		TFunction<void(ETempoStepResult)> Completion = MoveTemp(SubstepCompletion);
+		SubstepCompletion = nullptr;
+		{
+			TRACE_CPUPROFILER_EVENT_SCOPE(TempoSubstep);
+			const double StepStart = FPlatformTime::Seconds();
+			OnFixedStep.Broadcast(World, StepSeconds);
+			Profile.StepSeconds += FPlatformTime::Seconds() - StepStart;
+		}
+		++LoopStepsAheadOfWorldTime;
+		++StepsThisLoop;
+		if (Completion)
+		{
+			Completion(ETempoStepResult::Completed);
+		}
+
+		const double PollStart = FPlatformTime::Seconds();
+		OnSubstepLoopPoll.Broadcast(World);
+		Profile.PollSeconds += FPlatformTime::Seconds() - PollStart;
+
+		if (++Profile.Steps % FSubstepProfile::LogEverySteps == 0)
+		{
+			const double HandleSeconds = Server.PumpHandleSeconds - Profile.HandleSecondsAtStart;
+			const double N = Profile.Steps;
+			UE_LOG(LogTempoCore, Display,
+				TEXT("SUBSTEP_PROFILE steps=%d loops=%d (capture=%d max=%d quiet=%d) per-step ms: agx_step=%.2f pump=%.2f [handlers=%.2f sensor_poll=%.2f idle=%.2f] outside_loop=%.2f"),
+				Profile.Steps, Profile.Loops, Profile.CaptureBreaks, Profile.MaxStepBreaks, Profile.QuietBreaks,
+				1e3 * Profile.StepSeconds / N, 1e3 * Profile.PumpSeconds / N, 1e3 * HandleSeconds / N, 1e3 * Profile.PollSeconds / N,
+				1e3 * (Profile.PumpSeconds - HandleSeconds - Profile.InPumpPollSeconds) / N, 1e3 * Profile.OutsideLoopSeconds / N);
+		}
+
+		if (LoopStepsAheadOfWorldTime >= StepsUntilCapture)
+		{
+			++Profile.CaptureBreaks;
+			break;
+		}
+		if (StepsThisLoop >= MaxSteps)
+		{
+			++Profile.MaxStepBreaks;
+			break;
+		}
+		if (bEndSubstepLoop || Server.HasHeldRequests())
+		{
+			break;
+		}
+	}
+	Profile.LastLoopEndSeconds = FPlatformTime::Seconds();
+
+	Server.SetHoldFrameBoundaryRequests(false);
+	bSubstepSessionActive = StepsThisLoop > 0 && !bEndSubstepLoop && !Server.HasHeldRequests();
+	bEndSubstepLoop = false;
+
+	if (LoopStepsAheadOfWorldTime > 0)
+	{
+		bCatchUpFrame = true;
+		if (World->IsPaused())
+		{
+			SetPaused(false);
+		}
+	}
+	else
+	{
+		const TArray<TFunction<void()>> Actions = MoveTemp(FrameBoundaryActions);
+		FrameBoundaryActions.Reset();
+		for (const TFunction<void()>& Action : Actions)
+		{
+			Action();
+		}
+	}
+}
+
+void ATempoWorldSettings::OnWorldPreActorTick(UWorld* World, ELevelTick TickType, float DeltaSeconds)
+{
+	if (World != GetWorld() || TickType != LEVELTICK_All || !bFrameStepsPhysics)
+	{
+		return;
+	}
+
+	// PROTOTYPE(substep-rpc): the same per-step physics timing as the substep loop's, for the A/B.
+	static int32 FrameSteps = 0;
+	static double FrameStepSeconds = 0.0;
+	const double StepStart = FPlatformTime::Seconds();
+	OnFixedStep.Broadcast(World, DeltaSeconds);
+	FrameStepSeconds += FPlatformTime::Seconds() - StepStart;
+	if (++FrameSteps % FSubstepProfile::LogEverySteps == 0)
+	{
+		UE_LOG(LogTempoCore, Display, TEXT("FRAMESTEP_PROFILE steps=%d per-step ms: agx_step=%.2f"), FrameSteps, 1e3 * FrameStepSeconds / FrameSteps);
+	}
+}
+
+void ATempoWorldSettings::OnSubstepWorldTickEnd(UWorld* World, ELevelTick TickType, float DeltaSeconds)
+{
+	if (World != GetWorld() || !bCatchUpFrame)
+	{
+		return;
+	}
+
+	// Hold the world until the client's next Step, as the end of an ordinary stepped frame does. The
+	// next substep loop unpauses it again.
+	bCatchUpFrame = false;
+	SetPaused(true);
+
+	const TArray<TFunction<void()>> Actions = MoveTemp(FrameBoundaryActions);
+	FrameBoundaryActions.Reset();
+	for (const TFunction<void()>& Action : Actions)
+	{
+		Action();
+	}
+}
 
 void ATempoWorldSettings::SetDefaultAutoExposureBias()
 {
