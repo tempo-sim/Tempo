@@ -122,6 +122,8 @@ def compare(old, new):
     old_structs, new_structs = _named(old.get("structs", [])), _named(new.get("structs", []))
     for name in sorted(set(old_structs) - set(new_structs)):
         breaking.append((name, "struct removed"))
+    for name in sorted(set(new_structs) - set(old_structs)):
+        additions.append((name, "struct added"))
     for name in sorted(set(old_structs) & set(new_structs)):
         # Every function taking one is withheld once it cannot travel whole, and its value type with
         # them -- as breaking as removing each of those.
@@ -130,6 +132,8 @@ def compare(old, new):
         was, now = _named(old_structs[name].get("members", [])), _named(new_structs[name].get("members", []))
         for member in sorted(set(was) - set(now)):
             breaking.append((name, "struct member {} removed".format(member)))
+        for member in sorted(set(now) - set(was)):
+            additions.append((name, "struct member {} added".format(member)))
         for member in sorted(set(was) & set(now)):
             if was[member].get("type") != now[member].get("type"):
                 breaking.append((name, "struct member {}: {} -> {}".format(
@@ -142,6 +146,8 @@ def compare(old, new):
     old_enums, new_enums = _named(old.get("enums", [])), _named(new.get("enums", []))
     for name in sorted(set(old_enums) - set(new_enums)):
         breaking.append((name, "enum removed"))
+    for name in sorted(set(new_enums) - set(old_enums)):
+        additions.append((name, "enum added"))
     for name in sorted(set(old_enums) & set(new_enums)):
         was = set(old_enums[name].get("enumerators", []))
         now = set(new_enums[name].get("enumerators", []))
