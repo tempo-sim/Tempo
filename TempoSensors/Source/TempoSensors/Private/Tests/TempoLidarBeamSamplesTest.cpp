@@ -181,6 +181,35 @@ bool FTempoLidarBeamSamplesConsistencyTest::RunTest(const FString& Parameters)
 				return false;
 			}
 
+			// The decode rebuilds the neighbors' points from this pixel's ray plus the tile's image
+			// plane step, so that must land on the next column's and next row's pixels, which a sign
+			// or axis mix-up in the step would not.
+			const FVector NearestRay = NearestDirection / Sample.DepthToDistanceDivisor;
+			const int32 Column = Sample.PixelIndex % Tile.SizeXY.X;
+			const int32 Row = Sample.PixelIndex / Tile.SizeXY.X;
+			if (Column < Tile.SizeXY.X - 1)
+			{
+				const FVector Stepped = (NearestRay + FVector(0.0, Tile.ImagePlanePixelStep.X, 0.0)).GetSafeNormal();
+				const FVector Expected = DirectionOfPixel(Tile, EffectiveVFOV, Sample.PixelIndex + 1);
+				if (!Stepped.Equals(Expected, UnitTol))
+				{
+					AddError(FString::Printf(TEXT("%s: a column step lands on (%f, %f, %f), not the next column's pixel (%f, %f, %f)"),
+						*Where, Stepped.X, Stepped.Y, Stepped.Z, Expected.X, Expected.Y, Expected.Z));
+					return false;
+				}
+			}
+			if (Row < Tile.SizeXY.Y - 1)
+			{
+				const FVector Stepped = (NearestRay + FVector(0.0, 0.0, -Tile.ImagePlanePixelStep.Y)).GetSafeNormal();
+				const FVector Expected = DirectionOfPixel(Tile, EffectiveVFOV, Sample.PixelIndex + Tile.SizeXY.X);
+				if (!Stepped.Equals(Expected, UnitTol))
+				{
+					AddError(FString::Printf(TEXT("%s: a row step lands on (%f, %f, %f), not the next row's pixel (%f, %f, %f)"),
+						*Where, Stepped.X, Stepped.Y, Stepped.Z, Expected.X, Expected.Y, Expected.Z));
+					return false;
+				}
+			}
+
 			// The reported angles must belong to this entry's own ray.
 			double RayAzimuthDeg, RayElevationDeg;
 			AnglesOfDirection(RayDirection, RayAzimuthDeg, RayElevationDeg);

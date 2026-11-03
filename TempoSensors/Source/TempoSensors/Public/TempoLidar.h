@@ -183,6 +183,38 @@ struct FTempoLidarEcho
 TEMPOSENSORS_API void SelectLidarReturns(ETempoLidarReturnMode Mode, const FTempoLidarEcho& Surface, const FTempoLidarEcho& Medium,
 	FTempoLidarEcho& OutPrimary, FTempoLidarEcho& OutSecondary);
 
+// How much of a pixel's surface normal EstimateLidarSurfaceNormal could take from the geometry.
+enum class ETempoLidarSurfaceFit : uint8
+{
+	// Both image axes had a continuous neighbor: the normal is entirely the geometry's.
+	Plane,
+	// Only one axis did: the geometry fixes one tangent, and the shading normal supplies the rest.
+	Tangent,
+	// Neither did: the shading normal, unchanged.
+	None,
+};
+
+// The normal a beam's range and incidence cutoff should use for the surface a lidar pixel saw. The
+// rendered (shading) normal includes the material's normal map, so a plane through the pixel built
+// on it is tilted by every bump, and a beam that falls between pixel centers gets a range off by the
+// bump's tilt times the beam's offset. The surface's real orientation is in the depths instead: the
+// points of the pixel and its neighbors lie on the geometry.
+//
+// Center is the pixel's point, and Neighbors its four neighbors' points, in the order column - 1,
+// column + 1, row - 1, row + 1, with nullptr for a neighbor off the edge of the tile. All are in the
+// same frame as the sensor, which sits at the origin. Along each image axis the estimate takes the
+// less steep of the two tangents to the neighbors, so that at a silhouette it uses the side on the
+// same surface. A tangent steeper than the incidence cutoff (more nearly along the line of sight
+// than SinMaxAngleOfIncidence) is taken to be a jump between surfaces, not a surface: from depths
+// alone the two cannot be told apart, and either way it must not set the normal. Where that leaves
+// an axis without a tangent (a feature a pixel wide, a surface past the cutoff, a pixel among sky)
+// the shading normal fills in the direction the geometry left undetermined.
+//
+// A Plane or Tangent normal faces the sensor. A None normal is ShadingNormal normalized, facing
+// whichever way it faced. Pure, so it can be tested without a lidar.
+TEMPOSENSORS_API ETempoLidarSurfaceFit EstimateLidarSurfaceNormal(const FVector& Center, const FVector* const Neighbors[4],
+	const FVector& ShadingNormal, double SinMaxAngleOfIncidence, FVector& OutNormal);
+
 // Everything about one beam that depends only on the sensor's configuration and not on anything
 // rendered: two spherical/perspective conversions, a spherical-to-cartesian for the beam ray and
 // another for the sampled pixel, and the depth-to-distance cosines, a dozen or so transcendentals
@@ -287,6 +319,12 @@ struct FTempoLidarTile
 	// Per-beam geometry for this tile, rebuilt whenever the tile is configured. Shared with every
 	// read captured against this configuration; see FTempoLidarBeamSample.
 	TSharedPtr<const TArray<FTempoLidarBeamSample>> BeamSamples;
+
+	// How far one pixel moves along each axis of the tile's image plane (the plane one unit ahead of
+	// the tile). Pixel (column, row)'s point is depth * (1, X, -Y) at image plane location (X, Y), so
+	// a neighbor's point is the same expression one step over, which is how the decode rebuilds the
+	// geometry around a beam from depths alone. Set with BeamSamples.
+	FVector2D ImagePlanePixelStep = FVector2D::ZeroVector;
 
 	// One-shot camera-cut flag consumed by the next multi-view render.
 	bool bCameraCut = false;
@@ -562,14 +600,14 @@ struct TLidarTextureReadBase : TTextureReadBase<PixelType>
 		double MinOutputElevationDegIn, double MaxOutputElevationDegIn,
 		double IntensitySaturationDistanceIn, double MaxAngleOfIncidenceIn,
 		int32 NumCaptureComponentsIn, double RelativeYawIn, float MinDepthIn, float MaxDepthIn, double MinDistanceIn, double MaxDistanceIn,
-		TSharedPtr<const TArray<FTempoLidarBeamSample>> BeamSamplesIn)
+		TSharedPtr<const TArray<FTempoLidarBeamSample>> BeamSamplesIn, const FVector2D& ImagePlanePixelStepIn)
 		: TTextureReadBase<PixelType>(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
 			CaptureTransform(CaptureTransformIn), HorizontalFOV(HorizontalFOVIn), HorizontalBeams(HorizontalBeamsIn),
 			VerticalBeams(VerticalBeamsIn), MinOutputElevationDeg(MinOutputElevationDegIn), MaxOutputElevationDeg(MaxOutputElevationDegIn),
 			IntensitySaturationDistance(IntensitySaturationDistanceIn),
 			MaxAngleOfIncidence(MaxAngleOfIncidenceIn), NumCaptureComponents(NumCaptureComponentsIn), RelativeYaw(RelativeYawIn),
 			MinDepth(MinDepthIn), MaxDepth(MaxDepthIn), MinDistance(MinDistanceIn), MaxDistance(MaxDistanceIn),
-			BeamSamples(MoveTemp(BeamSamplesIn))
+			BeamSamples(MoveTemp(BeamSamplesIn)), ImagePlanePixelStep(ImagePlanePixelStepIn)
 	{
 	}
 
@@ -592,6 +630,8 @@ struct TLidarTextureReadBase : TTextureReadBase<PixelType>
 	// Per-beam geometry for the configuration this read was captured under. Held by shared pointer
 	// so a reconfigure mid-decode cannot invalidate it.
 	TSharedPtr<const TArray<FTempoLidarBeamSample>> BeamSamples;
+	// The tile's FTempoLidarTile::ImagePlanePixelStep, captured with BeamSamples.
+	FVector2D ImagePlanePixelStep;
 
 	// The participating media results for this slice, one per pixel of Image, or empty when
 	// participating media were not simulated for this capture.
