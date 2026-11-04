@@ -66,10 +66,50 @@ Use Fixed Step for reproducible runs, dataset generation, and any test that asse
 | `pause()` | Stop advancing sim time. |
 | `play()` | Resume advancing sim time. |
 | `step()` | Advance one step (Fixed Step mode). |
+| `substep()` | Advance one substep (Fixed Step mode; see [Substeps](#substeps)). |
 
 In the Editor, Tempo's pause and Unreal's own PIE pause are kept in sync, and the "Advance Single
 Frame" toolbar button is wired to Tempo's `step` — so the Editor controls and the API controls
 agree rather than fighting each other.
+
+## Substeps
+
+A Fixed Step step can be divided into `SubstepsPerStep` evenly-spaced **substeps**. The frame rate
+stays `sim_steps_per_second`: a step's frame still ticks once, over the whole step. Substeps are
+for what must advance more finely than that, such as a physics plugin, and for a client that
+needs to act between those finer steps.
+
+```python
+tc.set_time_mode(Time.TM_FIXED_STEP)
+tc.set_sim_steps_per_second(10)
+tc.set_substeps_per_step(10)
+tc.pause()
+
+while True:
+    tc.substep()
+    # ... sim time has advanced 0.01 s; read state and send commands for the next substep
+```
+
+`substep()` advances one substep, and `step()` advances to the end of the current step: a whole
+step at a step boundary, or the rest of the step part-way through one. Either way, steps begin and
+end on the same grid no matter how the client advances them, or how long it takes to do so.
+
+Between substeps, the world is between frames:
+
+- **Sim time moves.** `get_sim_time` and every timestamp the server reports (actor state, sensor
+  transmission time) give the latest substep's time.
+- **Nothing else does.** Actors don't tick, timers don't fire, and sensors don't capture until
+  the step's frame ticks, over all of its substeps at once. Code that must run every substep
+  subscribes to `ATempoWorldSettings::OnSubstep`.
+- **Some RPCs wait for the step boundary.** Time settings, level loads and console commands run
+  the rest of the step's substeps and are handled once its frame has ticked.
+
+!!! warning "Chaos only follows substeps through its own settings"
+
+    Tempo can't step Chaos between frames, so Chaos integrates each step in its own substeps,
+    from the physics settings' `bSubstepping`, `MaxSubstepDeltaTime` and `MaxSubsteps`. Tempo
+    warns when those are coarser than its substeps or would drop time. Async physics
+    (`bTickPhysicsAsync`) runs on its own clock, so Tempo ignores `SubstepsPerStep` when it's on.
 
 ## Why this matters downstream
 
@@ -90,4 +130,4 @@ Fixed Step mode is what makes the rest of the API deterministic:
 ## Settings
 
 See the [settings reference](../reference/settings.md#tempo-core) for `TimeMode`,
-`SimulatedStepsPerSecond`, and `MaxWallClockTimeStep`.
+`SimulatedStepsPerSecond`, `SubstepsPerStep`, and `MaxWallClockTimeStep`.

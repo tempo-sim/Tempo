@@ -8,6 +8,8 @@
 
 #include "CoreMinimal.h"
 
+#include <atomic>
+
 #include "TempoSensorServiceSubsystem.generated.h"
 
 namespace TempoCore
@@ -69,6 +71,24 @@ public:
 
 protected:
 	void OnRenderFrameCompleted() const;
+
+	// Sends every measurement whose readback has completed, waiting for the decode tasks.
+	void SendCompletedMeasurements();
+
+	// Polled between the substeps a client drives; see ATempoWorldSettings::OnSubstepLoopPoll.
+	void OnSubstepLoopPoll(UWorld* World);
+
+	// Set while a substep readback poll is queued on the render thread, so OnSubstepLoopPoll (which
+	// runs far more often than the render thread drains) never queues a second.
+	TSharedRef<std::atomic<bool>> SubstepReadbackPollInFlight = MakeShared<std::atomic<bool>>(false);
+
+	FDelegateHandle SubstepLoopPollHandle;
+
+	// The active sensors, gathered once per engine frame: OnSubstepLoopPoll runs every millisecond or
+	// so and ForEachActiveSensor walks every actor component. No frame passes between substeps, so the
+	// set can't change under it.
+	TArray<TWeakObjectPtr<UActorComponent>> SubstepSensors;
+	uint64 SubstepSensorsFrame = MAX_uint64;
 
 	template <typename RequestType, typename ResponseType>
 	void RequestImages(const RequestType& Request, const TResponseDelegate<ResponseType>& ResponseContinuation) const;

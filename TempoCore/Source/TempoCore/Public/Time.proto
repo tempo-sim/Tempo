@@ -21,6 +21,12 @@ message SetSimStepsPerSecondRequest {
   int32 sim_steps_per_second = 1;
 }
 
+message SetSubstepsPerStepRequest {
+  // Number of evenly-spaced substeps each sim step is divided into (used in FIXED_STEP mode).
+  // 1, the default, means no substeps.
+  int32 substeps_per_step = 1;
+}
+
 message AdvanceStepsRequest {
   // Number of sim steps to advance while paused.
   int32 steps = 1;
@@ -42,6 +48,10 @@ service TimeService {
 
   rpc SetSimStepsPerSecond(SetSimStepsPerSecondRequest) returns (TempoCore.Empty);
 
+  // Divides each FIXED_STEP step into this many substeps. Takes effect at the next step
+  // boundary.
+  rpc SetSubstepsPerStep(SetSubstepsPerStepRequest) returns (TempoCore.Empty);
+
   // Advances the simulation by `steps` steps while otherwise leaving it paused. Returns
   // after the final step's OnWorldTickEnd, then re-pauses.
   //
@@ -52,6 +62,9 @@ service TimeService {
   //
   // Only one AdvanceSteps/Step RPC may be in flight at a time. If you need to do other
   // work while waiting, use the async client API.
+  //
+  // Called part-way through a step's substeps, the first step advanced is the rest of
+  // that step.
   rpc AdvanceSteps(AdvanceStepsRequest) returns (TempoCore.Empty);
 
   rpc Play (TempoCore.Empty) returns (TempoCore.Empty);
@@ -61,6 +74,18 @@ service TimeService {
   // Advances the simulation by one step. Same return semantics and concurrency rule
   // as AdvanceSteps.
   rpc Step(TempoCore.Empty) returns (TempoCore.Empty);
+
+  // Advances the simulation by one substep (FIXED_STEP mode only), pausing it first if it
+  // is playing. Returns once the substep has run or, for the substep that ends a step,
+  // once that step's frame has ticked.
+  //
+  // Substeps run between frames. Sim time advances by one substep each time, and other
+  // RPCs sent between substeps are handled between them, but nothing else that a frame
+  // does happens until the step's frame ticks over all of its substeps: actors don't
+  // tick, timers don't fire, and sensors don't capture. RPCs that need a step boundary
+  // (time settings, level loads, console commands) instead run the rest of the step's
+  // substeps and are handled once its frame has ticked.
+  rpc Substep(TempoCore.Empty) returns (TempoCore.Empty);
 
   // Returns the current simulation time in seconds.
   rpc GetSimTime(TempoCore.Empty) returns (GetSimTimeResponse);

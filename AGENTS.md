@@ -81,6 +81,16 @@ To add or understand a service:
 Reference implementations: `UTempoTimeServiceSubsystem`, `UTempoCoreServiceSubsystem`,
 `UTempoWorldControlServiceSubsystem`, `UTempoSensorServiceSubsystem`.
 
+**A handler can run between frames.** In FixedStep with `SubstepsPerStep > 1`, a client can drive
+a step one `Substep` RPC at a time, and `ATempoWorldSettings` handles its other RPCs between the
+substeps, between frames. World time and delta seconds are the latest substep's, so a handler reads
+the right time with plain `GetWorld()->GetTimeSeconds()`. Nothing else moves: actors don't tick,
+timers don't fire, Chaos doesn't step and `GFrameCounter` stays put, until the step's frame ticks
+over all of its substeps. An RPC that changes the step grid, loads a level or changes engine state
+declares `.AtStepBoundary()` at registration; while a step is part-way through, its requests are
+held, the step runs to its end, and they're handled in that step's frame. Per-substep work belongs
+on `ATempoWorldSettings::OnSubstep`.
+
 ---
 
 ## 4. Codegen pipeline

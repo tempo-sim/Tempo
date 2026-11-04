@@ -18,6 +18,7 @@ Tempo's plugin settings live in **Project Settings → Plugins**, and are stored
 |---|---|---|---|
 | `TimeMode` | enum | `WallClock` | `WallClock` or `FixedStep`. See [Time](../concepts/time.md). |
 | `SimulatedStepsPerSecond` | `int32` | `10` | Evenly-spaced steps per simulated second executed in Fixed Step mode. Clamped ≥ 1. |
+| `SubstepsPerStep` | `int32` | `1` | Evenly-spaced substeps each Fixed Step step is divided into. See [Substeps](../concepts/time.md#substeps). Clamped ≥ 1. |
 | `MaxWallClockTimeStep` | `double` | `0.0` | Largest time step allowed in Wall Clock mode; `0.0` means no limit. **Non-zero violates Wall Clock's strict guarantee** at the step that would have exceeded the maximum. |
 
 ### Server

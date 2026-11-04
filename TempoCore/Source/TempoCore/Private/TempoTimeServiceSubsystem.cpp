@@ -21,6 +21,7 @@ using TimeAsyncService = TempoCore::TimeService::AsyncService;
 using TempoEmpty = TempoCore::Empty;
 using TimeModeRequest = TempoCore::TimeModeRequest;
 using SetSimStepsPerSecondRequest = TempoCore::SetSimStepsPerSecondRequest;
+using SetSubstepsPerStepRequest = TempoCore::SetSubstepsPerStepRequest;
 using AdvanceStepsRequest = TempoCore::AdvanceStepsRequest;
 using GetSimTimeResponse = TempoCore::GetSimTimeResponse;
 
@@ -44,12 +45,14 @@ namespace
 void UTempoTimeServiceSubsystem::RegisterServices(FTempoServer& Server)
 {
 	Server.RegisterService<TimeService>(
-		SimpleRequestHandler(&TimeAsyncService::RequestSetTimeMode, &UTempoTimeServiceSubsystem::SetTimeMode),
-		SimpleRequestHandler(&TimeAsyncService::RequestSetSimStepsPerSecond, &UTempoTimeServiceSubsystem::SetSimStepsPerSecond),
+		SimpleRequestHandler(&TimeAsyncService::RequestSetTimeMode, &UTempoTimeServiceSubsystem::SetTimeMode).AtStepBoundary(),
+		SimpleRequestHandler(&TimeAsyncService::RequestSetSimStepsPerSecond, &UTempoTimeServiceSubsystem::SetSimStepsPerSecond).AtStepBoundary(),
+		SimpleRequestHandler(&TimeAsyncService::RequestSetSubstepsPerStep, &UTempoTimeServiceSubsystem::SetSubstepsPerStep).AtStepBoundary(),
 		SimpleRequestHandler(&TimeAsyncService::RequestAdvanceSteps, &UTempoTimeServiceSubsystem::AdvanceSteps),
 		SimpleRequestHandler(&TimeAsyncService::RequestPlay, &UTempoTimeServiceSubsystem::Play),
 		SimpleRequestHandler(&TimeAsyncService::RequestPause, &UTempoTimeServiceSubsystem::Pause),
 		SimpleRequestHandler(&TimeAsyncService::RequestStep, &UTempoTimeServiceSubsystem::Step),
+		SimpleRequestHandler(&TimeAsyncService::RequestSubstep, &UTempoTimeServiceSubsystem::Substep),
 		SimpleRequestHandler(&TimeAsyncService::RequestGetSimTime, &UTempoTimeServiceSubsystem::GetSimTime)
 		);
 }
@@ -136,6 +139,27 @@ void UTempoTimeServiceSubsystem::Play(const TempoEmpty& Request, const TResponse
 	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
 }
 
+void UTempoTimeServiceSubsystem::SetSubstepsPerStep(const SetSubstepsPerStepRequest& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
+{
+	const int32 RequestedSubstepsPerStep = Request.substeps_per_step();
+
+	if (RequestedSubstepsPerStep < 1)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::OUT_OF_RANGE, "Substeps per step must be >= 1"));
+		return;
+	}
+
+	if (!Cast<ATempoWorldSettings>(GetWorld()->GetWorldSettings()))
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "SetSubstepsPerStep has no effect unless using TempoWorldSettings"));
+		return;
+	}
+
+	GetMutableDefault<UTempoCoreSettings>()->SetSubstepsPerStep(RequestedSubstepsPerStep);
+
+	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
+}
+
 void UTempoTimeServiceSubsystem::AdvanceSteps(const AdvanceStepsRequest& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
 {
 	const int32 RequestedSteps = Request.steps();
@@ -199,6 +223,33 @@ void UTempoTimeServiceSubsystem::Step(const TempoEmpty& Request, const TResponse
 	if (!bAccepted)
 	{
 		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Another step is already in progress"));
+	}
+}
+
+void UTempoTimeServiceSubsystem::Substep(const TempoEmpty& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
+{
+	ATempoWorldSettings* WorldSettings = Cast<ATempoWorldSettings>(GetWorld()->GetWorldSettings());
+	if (!WorldSettings)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Substep is only supported when using TempoWorldSettings"));
+		return;
+	}
+
+	if (GetDefault<UTempoCoreSettings>()->GetTimeMode() != ETimeMode::FixedStep)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Substep is only supported in FixedStep time mode"));
+		return;
+	}
+
+	const TResponseDelegate<TempoEmpty> Continuation = ResponseContinuation;
+	const bool bAccepted = WorldSettings->Substep([Continuation](ETempoStepResult Result)
+	{
+		Continuation.ExecuteIfBound(TempoEmpty(), StepResultToStatus(Result));
+	});
+
+	if (!bAccepted)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Another substep or step is already in progress"));
 	}
 }
 

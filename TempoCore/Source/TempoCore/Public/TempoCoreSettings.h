@@ -33,9 +33,11 @@ public:
 	// Time Settings.
 	void SetTimeMode(ETimeMode TimeModeIn);
 	void SetSimulatedStepsPerSecond(int32 SimulatedStepsPerSecondIn);
+	void SetSubstepsPerStep(int32 SubstepsPerStepIn);
 	ETimeMode GetTimeMode() const { return TimeMode; }
 	double GetMaxWallClockTimeStep() const { return MaxWallClockTimeStep; }
 	int32 GetSimulatedStepsPerSecond() const { return SimulatedStepsPerSecond; }
+	int32 GetSubstepsPerStep() const { return SubstepsPerStep; }
 	FTempoCoreTimeSettingsChanged TempoCoreTimeSettingsChangedEvent;
 	FTempoCoreRenderingSettingsChanged TempoCoreRenderingSettingsChanged;
 
@@ -76,6 +78,13 @@ private:
 	// The number of evenly-spaced steps per simulated second that will be executed in FixedStep time mode.
 	UPROPERTY(EditAnywhere, Config, Category="Time|FixedStep", meta=(ClampMin=1, UIMin=1, UIMax=100))
 	int32 SimulatedStepsPerSecond = 10;
+
+	// The number of evenly-spaced substeps each FixedStep step is divided into. ATempoWorldSettings::OnSubstep
+	// fires once per substep, each at its own sim time, and a client can advance one substep at a time
+	// (the Substep RPC), with its other RPCs handled between them. A step's frame still ticks once,
+	// over all of its substeps.
+	UPROPERTY(EditAnywhere, Config, Category="Time|FixedStep", meta=(ClampMin=1, UIMin=1, UIMax=100))
+	int32 SubstepsPerStep = 1;
 
 	// The largest time step allowed in WallClock time mode. No limit if 0.0. Note that setting this to non-zero violates
 	// WallClock time mode's guarantee of strictly advancing along with wall clock at the step that would have exceeded the max.

@@ -7,6 +7,9 @@
 
 #include "TempoWorldSettings.generated.h"
 
+DECLARE_MULTICAST_DELEGATE_ThreeParams(FTempoSubstepDelegate, UWorld* /*World*/, float /*DeltaSeconds*/, double /*SimTime*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FTempoSubstepLoopPollDelegate, UWorld* /*World*/);
+
 UENUM()
 enum class ETempoStepResult : uint8
 {
@@ -29,6 +32,28 @@ public:
 	// simulated tick ends or if the wait is aborted. Returns false if a waited step is
 	// already in progress (only one waited step may be in flight at a time).
 	bool Step(int32 NumSteps = 1, TFunction<void(ETempoStepResult)> OnComplete = {});
+
+	// Advance one substep (UTempoCoreSettings::SubstepsPerStep) in FixedStep mode, pausing first if
+	// the world is playing. Substeps run between frames, and RPCs that arrive between them are handled
+	// between them too. OnComplete fires once the substep has run or, for the substep that ends its
+	// step, once that step's frame has ticked. Returns false if a substep or a step is already in
+	// progress.
+	bool Substep(TFunction<void(ETempoStepResult)> OnComplete = {});
+
+	// Fires once per substep in FixedStep mode, in order, with the substep's length and its end time.
+	// While it fires, world time (GetTimeSeconds) is that end time and GetDeltaSeconds is that length.
+	// The substeps a client drives with Substep run between frames, and the rest run just before the
+	// step's frame ticks; with one substep per step (the default) that is once per frame.
+	//
+	// Only world time and delta seconds move from substep to substep. No actor or component ticks,
+	// no timer fires, Chaos does not step and GFrameCounter does not advance until the step's frame
+	// ticks, over all of its substeps at once. The same holds for an RPC handled between substeps
+	// (see ITempoServiceProvider).
+	FTempoSubstepDelegate OnSubstep;
+
+	// Polled between the substeps a client drives and while the world waits for its next one, so
+	// sensors can read back and send measurements without waiting for a frame to end.
+	static FTempoSubstepLoopPollDelegate OnSubstepLoopPoll;
 
 	virtual void SetPauserPlayerState(APlayerState* PlayerState) override;
 
@@ -74,6 +99,27 @@ private:
 
 	void FirePendingStepCompletion(ETempoStepResult Result);
 
+	// UTempoCoreSettings::SubstepsPerStep, or 1 if Chaos ticks asynchronously.
+	int32 GetSubstepsPerStep() const;
+
+	// Warns when Chaos's own settings will integrate a step more coarsely than Tempo's substeps, drop
+	// time, or tick on their own clock.
+	void CheckPhysicsSettings() const;
+
+	// While a client is driving substeps, serves its RPCs between frames and runs each substep it
+	// asks for, until the step is done, the client goes quiet, or a request needs the step boundary.
+	void OnBeginFrame();
+
+	void RunClientSubsteps();
+
+	// Runs the step's next substep: moves world time to its end and fires OnSubstep.
+	void RunSubstep();
+
+	// Runs whatever substeps the step has left, from FixupDeltaSeconds.
+	void RunSubstepsToStepEnd();
+
+	void UpdateStepBoundaryHold() const;
+
 #if WITH_EDITOR
 	// Bridges Tempo's game pause (the pauser player state) and the editor's PIE pause
 	// (UWorld::bDebugPauseExecution). Both feed UWorld::IsPaused(), but each set of controls
@@ -109,6 +155,26 @@ private:
 	TFunction<void(ETempoStepResult)> PendingStepCompletion;
 
 	bool bSelfPausing = false;
+
+	// Substeps of the current step that have run. Nonzero only between frames, while a client drives
+	// the step one substep at a time; the step's frame then ticks over all of them.
+	int32 SubstepsIntoStep = 0;
+
+	// World time when the current step's first substep ran.
+	double StepStartTime = 0.0;
+
+	bool bInSubstepLoop = false;
+
+	// Whether the last frame's RunClientSubsteps ran a substep. Each frame then starts by waiting for
+	// the client's next one, rather than leaving it to land in the frame's RPC pump.
+	bool bClientSubstepping = false;
+
+	bool bSubstepRequested = false;
+	TFunction<void(ETempoStepResult)> SubstepCompletion;
+
+	mutable bool bWarnedNoSubstepSubscriber = false;
+
+	FDelegateHandle BeginFrameHandle;
 
 	FDelegateHandle SettingsChangedHandle;
 	FDelegateHandle TickEndHandle;
