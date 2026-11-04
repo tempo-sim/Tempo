@@ -57,6 +57,19 @@ struct TRequestHandler
 		AcceptDelegate.BindRaw(Service, AcceptFunc);
 	}
 
+	// Marks an RPC that may only run at a step boundary, inside a world tick: one that changes the step
+	// grid, loads or leaves a level, or changes engine state. While a step is part-way through its
+	// substeps, its requests are held; the step then runs to its end, and they are handled in that
+	// step's frame.
+	TRequestHandler AtStepBoundary() const
+	{
+		TRequestHandler Handler(*this);
+		Handler.bAtStepBoundary = true;
+		return Handler;
+	}
+
+	bool IsAtStepBoundary() const { return bAtStepBoundary; }
+
 	void AcceptRequests(grpc::ServerContext* Context, RequestType* Request, ResponderType<ResponseType>* Responder, grpc::ServerCompletionQueue* CompletionQueue, void* Tag)
 	{
 		check(AcceptDelegate.IsBound());
@@ -99,6 +112,7 @@ private:
 	TDelegate<void(const RequestType&, const TResponseDelegate<ResponseType>&)> HandleDelegate;
 	TDelegate<void(grpc::ServerContext*, RequestType*, ResponderType<ResponseType>*, grpc::CompletionQueue*, grpc::ServerCompletionQueue*, void*)> AcceptDelegate;
 	FWeakObjectPtr ActiveObject;
+	bool bAtStepBoundary = false;
 };
 
 template <class ServiceType, class RequestType, class ResponseType, class UserObjectType, bool Const>
@@ -153,6 +167,7 @@ struct FRequestManager : TSharedFromThis<FRequestManager>
 	virtual void HandleAndRespond() = 0;
 	virtual FRequestManager* Duplicate(int32 NewTag) const = 0;
 	virtual const FName GetServiceName() const = 0;
+	virtual bool IsAtStepBoundary() const = 0;
 	virtual void Activate(UObject* Object) = 0;
 	virtual void Deactivate() = 0;
 	virtual const FWeakObjectPtr& GetActiveObject() const = 0;
@@ -182,6 +197,11 @@ public:
 	virtual const FName GetServiceName() const override
 	{
 		return ServiceName;
+	}
+
+	virtual bool IsAtStepBoundary() const override
+	{
+		return Handler->IsAtStepBoundary();
 	}
 
 	virtual void Activate(UObject* Object) override
@@ -368,6 +388,18 @@ public:
 		DeactivateService(ServiceName);
 	}
 
+	// Handles gRPC events on the game thread until ShouldStop returns true, or until no event has
+	// arrived for QuietTimeoutSeconds. While the queue is idle, OnPoll runs every PollIntervalSeconds.
+	// Returns whether ShouldStop ended it. This is how ATempoWorldSettings serves RPCs between the
+	// substeps a client drives between frames, outside TickInternal.
+	bool PumpEvents(TFunctionRef<bool()> ShouldStop, double QuietTimeoutSeconds, double PollIntervalSeconds, TFunctionRef<void()> OnPoll);
+
+	// While set, a new request to an RPC declared AtStepBoundary is held back rather than handled.
+	// TickInternal handles held requests first, once this is cleared.
+	void SetHoldStepBoundaryRequests(bool bHold) { bHoldStepBoundaryRequests = bHold; }
+
+	bool HasHeldRequests() const { return !HeldRequestTags.IsEmpty(); }
+
 protected:
 	void Initialize();
 	void Deinitialize();
@@ -433,6 +465,9 @@ protected:
 	void HandleEventForTag(int32 Tag, bool bOk);
 
 	bool bIsInitialized = false;
+
+	bool bHoldStepBoundaryRequests = false;
+	TArray<int32> HeldRequestTags;
 
 	int32 TagAllocator = 0;
 	TMap<int32, TSharedPtr<FRequestManager>> RequestManagers;
