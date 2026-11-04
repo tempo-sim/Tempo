@@ -243,8 +243,8 @@ private:
 
 	// The most render-thread frames of GPU work that may be outstanding when a frame ends. Must stay
 	// below r.Vulkan.NumFramesToWaitForResourceDelete, which the plugin's Config/Engine.ini raises
-	// from the engine's 2 to 40 to make room for this default; the sensor subsystem warns at startup
-	// if the two are out of step. A bound of 1 is what a viewport present enforces and is safe
+	// from the engine's 2 to 40 to make room for this default; the module warns whenever the two are
+	// out of step. A bound of 1 is what a viewport present enforces and is safe
 	// against the engine default, but it counts the cheap frames between two captures: a sensor at
 	// 5 Hz in a sim stepping at 100 Hz has nineteen of them, and the GPU then idles through every one
 	// (measured: 62% GPU utilization and 38% fewer images per second than unthrottled). 32 lets the

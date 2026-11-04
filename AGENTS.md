@@ -359,8 +359,11 @@ gRPC. Functional/rendering/agents/ROS layers are still not built.
 
 - Tests are plain `.cpp` files under each module's `Private/Tests/`, guarded by
   `#if WITH_DEV_AUTOMATION_TESTS`, using `IMPLEMENT_SIMPLE_AUTOMATION_TEST` with flags
-  `EditorContext | EngineFilter`. They live in the module they test (no separate test module),
-  so they need no `*.Build.cs` change as long as the deps are already present.
+  `EditorContext | EngineFilter`. A test that needs nothing from the editor may add `ClientContext`,
+  which lets a packaged Development game run it too
+  (`-ExecCmds="Automation RunTests Tempo.Sensors.GPUFrameThrottle" -TestExit="Automation Test Queue Empty" -nullrhi`),
+  handy on a machine with a package but no editor build. They live in the module they test (no
+  separate test module), so they need no `*.Build.cs` change as long as the deps are already present.
 - **Naming:** `Tempo.<Plugin>.<Area>.<Case>` (e.g. `Tempo.Core.Conversion.UnitFactors`,
   `Tempo.Sensors.LensModels.DoubleSphere`, `Tempo.Movement.Kinematics.BicycleForward`).
 - **Run:** `Scripts/Test.sh` (all `Tempo.` tests) or `Scripts/Test.sh Tempo.Movement` (prefix

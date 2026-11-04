@@ -41,7 +41,7 @@ int32 FTempoGPUFrameThrottle::MeasureLag(uint64 Frame, int32 Window, TFunctionRe
 void FTempoGPUFrameThrottle::Configure(bool bLimitFramesInFlight, int32 MaxFramesInFlight)
 {
 	bLimitFramesInFlight_Config.store(bLimitFramesInFlight, std::memory_order_relaxed);
-	MaxFramesInFlight_Config.store(FMath::Clamp(MaxFramesInFlight, 1, MeasureWindow), std::memory_order_relaxed);
+	MaxFramesInFlight_Config.store(ClampBound(MaxFramesInFlight), std::memory_order_relaxed);
 }
 
 bool FTempoGPUFrameThrottle::IsFrameComplete(uint64 Frame) const
@@ -58,6 +58,13 @@ bool FTempoGPUFrameThrottle::IsFrameComplete(uint64 Frame) const
 		return true;
 	}
 	return Slot.Fence->Poll();
+}
+
+bool FTempoGPUFrameThrottle::IsFrameTranslated(uint64 Frame) const
+{
+	const FSlot& Slot = Slots[SlotForFrame(Frame)];
+	// Without an RHI thread there is no fence and the write ran when it was dispatched.
+	return Slot.Frame != Frame || !Slot.RHIThreadFence.IsValid() || Slot.RHIThreadFence->IsComplete();
 }
 
 void FTempoGPUFrameThrottle::WaitForFrame(FRHICommandListImmediate& RHICmdList, uint64 Frame)
@@ -84,11 +91,27 @@ void FTempoGPUFrameThrottle::WaitForFrame(FRHICommandListImmediate& RHICmdList, 
 	}
 	Slot.Fence->Wait(RHICmdList, FRHIGPUMask::All());
 
-	const double Seconds = FPlatformTime::Seconds() - Start;
-	++NumWaits;
-	WaitSeconds += Seconds;
 	++WaitsSinceReport;
-	WaitSecondsSinceReport += Seconds;
+	WaitSecondsSinceReport += FPlatformTime::Seconds() - Start;
+}
+
+void FTempoGPUFrameThrottle::WriteFence(FRHICommandListImmediate& RHICmdList, uint64 Frame)
+{
+	FSlot& Slot = Slots[SlotForFrame(Frame)];
+	Slot.Frame = Frame;
+	// A fence whose previous write has signaled is cleared and rewritten, so steady state allocates
+	// nothing. One still pending (the slot's frame is older than the window, so only with the bound
+	// off and the GPU that far behind) is left to finish on its own and replaced.
+	if (Slot.Fence.IsValid() && Slot.Fence->Poll())
+	{
+		Slot.Fence->Clear();
+	}
+	else
+	{
+		Slot.Fence = RHICreateGPUFence(TEXT("TempoGPUFrameThrottle"));
+	}
+	RHICmdList.WriteGPUFence(Slot.Fence);
+	Slot.RHIThreadFence = RHICmdList.RHIThreadFence();
 }
 
 void FTempoGPUFrameThrottle::OnEndFrameRT(FRHICommandListImmediate& RHICmdList)
@@ -109,12 +132,18 @@ void FTempoGPUFrameThrottle::OnEndFrameRT(FRHICommandListImmediate& RHICmdList)
 	const bool bLimit = bLimitFramesInFlight_Config.load(std::memory_order_relaxed);
 	const int32 MaxFramesInFlight = MaxFramesInFlight_Config.load(std::memory_order_relaxed);
 
-	// Measure before waiting: this is the lag the GPU actually reached, bound or no bound.
-	const int32 Lag = MeasureLag(Frame, MeasureWindow, [this](uint64 EarlierFrame) { return IsFrameComplete(EarlierFrame); });
+	// Measure before waiting: this is the lag the GPU actually reached, bound or no bound. The
+	// outstanding frames are the oldest still on the GPU plus the newest the RHI thread has not yet
+	// translated; only the former is GPU lag, and the latter is reported on its own so a log read to
+	// tune the bound is not inflated by a slow RHI thread in front of an idle GPU.
+	const int32 Outstanding = MeasureLag(Frame, MeasureWindow, [this](uint64 EarlierFrame) { return IsFrameComplete(EarlierFrame); });
+	const int32 RHIBacklog = MeasureLag(Frame, Outstanding, [this](uint64 EarlierFrame) { return IsFrameTranslated(EarlierFrame); });
+	const int32 GPULag = Outstanding - RHIBacklog;
 	++FramesSinceReport;
-	LagSumSinceReport += Lag;
-	MaxLagSinceReport = FMath::Max(MaxLagSinceReport, Lag);
-	if (Lag > MaxFramesInFlight)
+	GPULagSumSinceReport += GPULag;
+	MaxGPULagSinceReport = FMath::Max(MaxGPULagSinceReport, GPULag);
+	MaxRHIBacklogSinceReport = FMath::Max(MaxRHIBacklogSinceReport, RHIBacklog);
+	if (GPULag > MaxFramesInFlight)
 	{
 		++FramesOverBoundSinceReport;
 	}
@@ -129,11 +158,7 @@ void FTempoGPUFrameThrottle::OnEndFrameRT(FRHICommandListImmediate& RHICmdList)
 
 	// This frame's fence, behind everything the frame rendered. Written last so the wait above never
 	// has to translate this frame's commands to find the one it needs.
-	FSlot& Slot = Slots[SlotForFrame(Frame)];
-	Slot.Frame = Frame;
-	Slot.Fence = RHICreateGPUFence(TEXT("TempoGPUFrameThrottle"));
-	RHICmdList.WriteGPUFence(Slot.Fence);
-	Slot.RHIThreadFence = RHICmdList.RHIThreadFence();
+	WriteFence(RHICmdList, Frame);
 
 	Report(MaxFramesInFlight, bLimit);
 }
@@ -151,13 +176,13 @@ void FTempoGPUFrameThrottle::Report(int32 MaxFramesInFlight, bool bLimitFramesIn
 		return;
 	}
 
-	const double MeanLag = static_cast<double>(LagSumSinceReport) / static_cast<double>(FramesSinceReport);
+	const double MeanGPULag = static_cast<double>(GPULagSumSinceReport) / static_cast<double>(FramesSinceReport);
 	// Worth a line at Log level only when the bound mattered: it was enforced, or it would have been.
 	const bool bNotable = WaitsSinceReport > 0 || FramesOverBoundSinceReport > 0;
 	const FString Summary = FString::Printf(
-		TEXT("GPU frame throttle (%s, bound %d): over %llu frames the GPU was behind by up to %d frames (mean %.2f), over the bound on %llu; waited %llu times, %.1f ms total."),
+		TEXT("GPU frame throttle (%s, bound %d): over %llu frames the GPU was behind by up to %d frames (mean %.2f), over the bound on %llu, with the RHI thread behind by up to %d more; waited %llu times, %.1f ms total."),
 		bLimitFramesInFlight ? TEXT("on") : TEXT("measuring only"), MaxFramesInFlight,
-		FramesSinceReport, MaxLagSinceReport, MeanLag, FramesOverBoundSinceReport,
+		FramesSinceReport, MaxGPULagSinceReport, MeanGPULag, FramesOverBoundSinceReport, MaxRHIBacklogSinceReport,
 		WaitsSinceReport, WaitSecondsSinceReport * 1000.0);
 	if (bNotable)
 	{
@@ -170,8 +195,9 @@ void FTempoGPUFrameThrottle::Report(int32 MaxFramesInFlight, bool bLimitFramesIn
 
 	LastReportSeconds = Now;
 	FramesSinceReport = 0;
-	LagSumSinceReport = 0;
-	MaxLagSinceReport = 0;
+	GPULagSumSinceReport = 0;
+	MaxGPULagSinceReport = 0;
+	MaxRHIBacklogSinceReport = 0;
 	FramesOverBoundSinceReport = 0;
 	WaitsSinceReport = 0;
 	WaitSecondsSinceReport = 0.0;

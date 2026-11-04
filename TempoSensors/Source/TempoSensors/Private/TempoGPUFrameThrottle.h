@@ -19,11 +19,11 @@ class FRHICommandListImmediate;
 // hands the RHI thread frame after frame and the GPU gets to them whenever it can. Several Vulkan RHI
 // heuristics assume the lag is bounded: uniform-buffer memory (FMemoryManager::FreeUniformBuffer),
 // descriptor pools and buffer-pool pages are recycled a fixed number of *render-thread* frames
-// (r.Vulkan.NumFramesToWaitForResourceDelete, 2) after release, with no GPU sync point, unlike
-// buffers and images, which go through the end-of-pipe deferred deletion queue. Once the GPU is three
-// or more frames behind, a queued draw reads memory that has been handed to someone else: on NVIDIA a
+// (r.Vulkan.NumFramesToWaitForResourceDelete) after release, with no GPU sync point, unlike buffers
+// and images, which go through the end-of-pipe deferred deletion queue. Once the GPU is further
+// behind than that, a queued draw reads memory that has been handed to someone else: on NVIDIA a
 // VK_ERROR_DEVICE_LOST with a READ_INVALID page fault, which the fleet saw in the camera's stitch
-// merge draw (each Canvas flush creates and destroys a vertex factory whose uniform buffer carries the
+// draws (each Canvas flush creates and destroys a vertex factory whose uniform buffer carries the
 // bindless vertex-fetch indices), or a hang where the recycled memory merely held garbage.
 //
 // With pipelined rendering nothing on the Tempo side waits for the GPU either, and in FixedStep mode
@@ -33,6 +33,9 @@ class FRHICommandListImmediate;
 // wait costs nothing while the GPU keeps up and stalls the render thread only when it would otherwise
 // be issuing work against memory about to be recycled. Whether or not the wait is enabled, the lag is
 // measured every frame and summarized to the log, so a fleet log says how far behind the GPU ran.
+//
+// Process-wide, owned by the module: GPU lag does not reset with the world, and a bound that lapsed
+// across a level change would let a GPU already behind at the change exceed the recycling delay.
 class FTempoGPUFrameThrottle
 {
 public:
@@ -41,6 +44,11 @@ public:
 	// captures: a sensor at 5 Hz in a sim stepping at 100 Hz has nineteen of them, and a bound below
 	// that idles the GPU between captures.
 	static constexpr int32 MeasureWindow = 64;
+
+	// The bound the throttle enforces for a configured value: the setting's editor clamp does not
+	// apply to an ini, so the same clamp is applied here, and whoever compares the bound against the
+	// RHI's recycling delay must compare this.
+	static int32 ClampBound(int32 MaxFramesInFlight) { return FMath::Clamp(MaxFramesInFlight, 1, MeasureWindow); }
 
 	// Which frame a frame that is ending must see complete before it ends: the one MaxFramesInFlight
 	// frames earlier, once that many have been issued. Pure, for the unit test.
@@ -65,21 +73,23 @@ public:
 	// Render thread. Drop the fences.
 	void Release();
 
-	// Render thread. How many times the bound has been enforced with an actual wait.
-	uint64 GetNumWaits() const { return NumWaits; }
-
 private:
 	struct FSlot
 	{
 		uint64 Frame = 0;
+		// Created once and rewritten each time the slot comes around, unless the previous write is
+		// still pending (only possible with the bound off), when it is replaced instead.
 		FGPUFenceRHIRef Fence;
 		// Completes once the RHI thread has translated the fence write, which is when the fence can
-		// be waited on at all (a Vulkan fence has no sync point before that).
+		// be waited on at all (a Vulkan fence has no sync point before that). Until then the frame is
+		// RHI-thread backlog, not GPU lag.
 		FGraphEventRef RHIThreadFence;
 	};
 
 	bool IsFrameComplete(uint64 Frame) const;
+	bool IsFrameTranslated(uint64 Frame) const;
 	void WaitForFrame(FRHICommandListImmediate& RHICmdList, uint64 Frame);
+	void WriteFence(FRHICommandListImmediate& RHICmdList, uint64 Frame);
 	void Report(int32 MaxFramesInFlight, bool bLimitFramesInFlight);
 
 	TArray<FSlot> Slots;
@@ -88,12 +98,11 @@ private:
 	std::atomic<bool> bLimitFramesInFlight_Config{true};
 	std::atomic<int32> MaxFramesInFlight_Config{1};
 
-	// Measurement, render thread only.
-	uint64 NumWaits = 0;
-	double WaitSeconds = 0.0;
+	// Measurement since the last report, render thread only.
 	uint64 FramesSinceReport = 0;
-	uint64 LagSumSinceReport = 0;
-	int32 MaxLagSinceReport = 0;
+	uint64 GPULagSumSinceReport = 0;
+	int32 MaxGPULagSinceReport = 0;
+	int32 MaxRHIBacklogSinceReport = 0;
 	uint64 FramesOverBoundSinceReport = 0;
 	uint64 WaitsSinceReport = 0;
 	double WaitSecondsSinceReport = 0.0;

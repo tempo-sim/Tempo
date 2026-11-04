@@ -446,12 +446,14 @@ someone else — `VK_ERROR_DEVICE_LOST` with a `READ_INVALID` fault in the camer
 saturated GPU with a sim stepping faster than its cameras capture, the lag reaches thirty-plus frames
 and the device is lost within minutes. The throttle writes a GPU fence each render-thread frame and,
 before a frame ends, waits on the one from `Max GPU Frames In Flight` frames earlier; the plugin's
-`Config/Engine.ini` raises the recycling delay to 40 so the bound fits under it, and the subsystem
-warns at startup if a project sets the two inconsistently. The bound is generous on purpose: it counts
+`Config/Engine.ini` raises the recycling delay to 40 so the bound fits under it, and the module
+warns whenever a project sets the two inconsistently. The throttle lives for the whole process, not
+per world, since GPU lag does not reset at a level change. The bound is generous on purpose: it counts
 the cheap frames between two captures, and a bound of 1 idles the GPU through every one of them (62%
 utilization, 38% fewer images per second in a 100 Hz sim with 5 Hz cameras); at 32 the throughput
-matches an unthrottled run. Every minute the throttle logs how far behind the GPU ran and how often it
-waited, so a run's log says whether the bound was ever needed.
+matches an unthrottled run. Every minute the throttle logs how far behind the GPU ran (separately from
+any backlog on the RHI thread, which is not GPU lag) and how often it waited, so a run's log says
+whether the bound was ever needed.
 
 ## Performance notes
 

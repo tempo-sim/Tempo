@@ -10,8 +10,6 @@
 
 #include "TempoSensorServiceSubsystem.generated.h"
 
-class FTempoGPUFrameThrottle;
-
 namespace TempoCore
 {
 	class Empty;
@@ -74,8 +72,4 @@ protected:
 
 	template <typename RequestType, typename ResponseType>
 	void RequestImages(const RequestType& Request, const TResponseDelegate<ResponseType>& ResponseContinuation) const;
-
-	// Caps how far the GPU may lag the render thread, since an off-screen process has no viewport
-	// present to do it. Shared with the render command that releases it at deinitialization.
-	TSharedPtr<FTempoGPUFrameThrottle, ESPMode::ThreadSafe> GPUFrameThrottle;
 };
