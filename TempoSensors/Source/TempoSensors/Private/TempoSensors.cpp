@@ -2,7 +2,14 @@
 
 #include "TempoSensors.h"
 
+#include "TempoGPUFrameThrottle.h"
+#include "TempoSensorsSettings.h"
+
+#include "DynamicRHI.h"
 #include "Engine/RendererSettings.h"
+#include "HAL/IConsoleManager.h"
+#include "RenderingThread.h"
+#include "RHICommandList.h"
 
 #include "Framework/Notifications/NotificationManager.h"
 #include "Widgets/Notifications/SNotificationList.h"
@@ -17,6 +24,85 @@ void FTempoSensorsModule::StartupModule()
 	{
 		EngineInitCompleteHandle = FCoreDelegates::OnFEngineLoopInitComplete.AddRaw(this, &FTempoSensorsModule::OnEngineInitComplete);
 	}
+
+	StartGPUFrameThrottle();
+}
+
+void FTempoSensorsModule::StartGPUFrameThrottle()
+{
+	GPUFrameThrottle = MakeShared<FTempoGPUFrameThrottle, ESPMode::ThreadSafe>();
+
+	BeginFrameHandle = FCoreDelegates::OnBeginFrame.AddRaw(this, &FTempoSensorsModule::OnBeginFrame);
+
+	// Bound at module startup, ahead of any world subsystem's end-of-frame handler, so a frame's GPU
+	// bound is enforced before the sensors poll their readbacks and the reads it guarantees complete
+	// are picked up in the same callback rather than a frame later. The lambda shares ownership: the
+	// throttle stays alive until the render thread drops the delegate in StopGPUFrameThrottle, however
+	// the module's own pointer is handled.
+	TSharedPtr<FTempoGPUFrameThrottle, ESPMode::ThreadSafe> Throttle = GPUFrameThrottle;
+	EndFrameRTHandle = FCoreDelegates::OnEndFrameRT.AddLambda([Throttle]()
+	{
+		Throttle->OnEndFrameRT(FRHICommandListImmediate::Get());
+	});
+}
+
+void FTempoSensorsModule::StopGPUFrameThrottle()
+{
+	if (!GPUFrameThrottle)
+	{
+		return;
+	}
+
+	FCoreDelegates::OnBeginFrame.Remove(BeginFrameHandle);
+
+	// OnEndFrameRT is broadcast on the render thread and its list is not thread-safe, so the handler
+	// is removed there, in order behind any broadcast already queued; the fences go with it. Then
+	// wait, so the throttle is not reached after this returns.
+	ENQUEUE_RENDER_COMMAND(TempoStopGPUFrameThrottle)(
+		[Handle = EndFrameRTHandle, Throttle = GPUFrameThrottle](FRHICommandListImmediate&)
+		{
+			FCoreDelegates::OnEndFrameRT.Remove(Handle);
+			Throttle->Release();
+		});
+	FlushRenderingCommands();
+	GPUFrameThrottle.Reset();
+}
+
+void FTempoSensorsModule::OnBeginFrame()
+{
+	if (!GPUFrameThrottle || IsRunningCommandlet())
+	{
+		return;
+	}
+
+	const UTempoSensorsSettings* Settings = GetDefault<UTempoSensorsSettings>();
+	const bool bLimit = Settings->GetLimitGPUFramesInFlight();
+	// What the throttle will enforce: the setting's editor clamp does not apply to an ini value.
+	const int32 Bound = FTempoGPUFrameThrottle::ClampBound(Settings->GetMaxGPUFramesInFlight());
+
+	if (bLimit != bLastLimitGPUFramesInFlight || Bound != LastMaxGPUFramesInFlight)
+	{
+		bLastLimitGPUFramesInFlight = bLimit;
+		LastMaxGPUFramesInFlight = Bound;
+
+		// The bound only protects Vulkan's frame-counted recycling if that recycling waits longer than
+		// the bound. The plugin's Config/Engine.ini sets the variable to fit the default bound; a
+		// project that changes either one on its own gets a warning rather than a device loss.
+		if (bLimit && GDynamicRHI && GDynamicRHI->GetInterfaceType() == ERHIInterfaceType::Vulkan)
+		{
+			if (const IConsoleVariable* RecycleDelay = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Vulkan.NumFramesToWaitForResourceDelete")))
+			{
+				if (Bound >= RecycleDelay->GetInt())
+				{
+					UE_LOG(LogTempoSensors, Warning,
+						TEXT("MaxGPUFramesInFlight (%d as enforced) is not below r.Vulkan.NumFramesToWaitForResourceDelete (%d): the GPU may read uniform-buffer memory the RHI has already recycled (VK_ERROR_DEVICE_LOST). Raise the console variable in [ConsoleVariables] or lower the bound."),
+						Bound, RecycleDelay->GetInt());
+				}
+			}
+		}
+	}
+
+	GPUFrameThrottle->Configure(bLimit, Bound);
 }
 
 void FTempoSensorsModule::OnEngineInitComplete()
@@ -170,6 +256,8 @@ void FTempoSensorsModule::ShowSuccessNotification(const TArray<FString>& FixedSe
 
 void FTempoSensorsModule::ShutdownModule()
 {
+	StopGPUFrameThrottle();
+
 	FCoreDelegates::OnFEngineLoopInitComplete.Remove(EngineInitCompleteHandle);
 }
 
