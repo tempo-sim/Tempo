@@ -67,6 +67,8 @@ public:
 	int32 GetMaxRenderBufferSize() const { return MaxRenderBufferSize; }
 	bool GetPipelinedRendering() const { return bPipelinedRendering; }
 	void SetPipelinedRendering(bool bPipelinedRenderingIn);
+	bool GetLimitGPUFramesInFlight() const { return bLimitGPUFramesInFlight; }
+	int32 GetMaxGPUFramesInFlight() const { return MaxGPUFramesInFlight; }
 	FTempoSensorsLabelSettingsChanged TempoSensorsLabelSettingsChangedEvent;
 	FTempoSensorsLabelOverridesChanged TempoSensorsLabelOverridesChangedEvent;
 
@@ -225,4 +227,28 @@ private:
 	// simulation frame the data corresponds to.
 	UPROPERTY(EditAnywhere, Config, Category="Advanced")
 	bool bPipelinedRendering = false;
+
+	// Whether to cap how many render-thread frames the GPU may fall behind. A windowed process gets
+	// this cap from the viewport present; one rendering off-screen has no present and so no cap, and
+	// the Vulkan RHI recycles uniform-buffer memory and descriptor pools a fixed number of render-thread
+	// frames after release with no GPU sync. A GPU more than r.Vulkan.NumFramesToWaitForResourceDelete
+	// (2) frames behind then reads recycled memory: VK_ERROR_DEVICE_LOST with a READ_INVALID fault,
+	// typically in the camera's stitch merge draw, or a GPU hang. With pipelined rendering nothing on
+	// the Tempo side waits either, so the lag grows until the read queues fill. Each render-thread
+	// frame writes a GPU fence, and a frame does not end until the fence from MaxGPUFramesInFlight
+	// frames earlier has signaled. Costs nothing while the GPU keeps up. The lag is measured and
+	// summarized to the log either way (see FTempoGPUFrameThrottle).
+	UPROPERTY(EditAnywhere, Config, Category="Advanced")
+	bool bLimitGPUFramesInFlight = true;
+
+	// The most render-thread frames of GPU work that may be outstanding when a frame ends. Must stay
+	// below r.Vulkan.NumFramesToWaitForResourceDelete, which the plugin's Config/Engine.ini raises
+	// from the engine's 2 to 40 to make room for this default; the sensor subsystem warns at startup
+	// if the two are out of step. A bound of 1 is what a viewport present enforces and is safe
+	// against the engine default, but it counts the cheap frames between two captures: a sensor at
+	// 5 Hz in a sim stepping at 100 Hz has nineteen of them, and the GPU then idles through every one
+	// (measured: 62% GPU utilization and 38% fewer images per second than unthrottled). 32 lets the
+	// GPU stay busy across such gaps while still bounding the lag.
+	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=(EditCondition=bLimitGPUFramesInFlight, ClampMin=1, ClampMax=64, UIMin=1, UIMax=64))
+	int32 MaxGPUFramesInFlight = 32;
 };

@@ -2,6 +2,7 @@
 
 #include "TempoSensorServiceSubsystem.h"
 
+#include "TempoGPUFrameThrottle.h"
 #include "TempoSensorInterface.h"
 #include "TempoSensors/Sensors.grpc.pb.h"
 
@@ -14,7 +15,9 @@
 #include "TempoSensorsSettings.h"
 
 #include "Components/SceneCaptureComponent.h"
+#include "DynamicRHI.h"
 #include "Engine/GameViewportClient.h"
+#include "HAL/IConsoleManager.h"
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
@@ -64,6 +67,26 @@ void UTempoSensorServiceSubsystem::Initialize(FSubsystemCollectionBase& Collecti
 
 	FTempoServer::Get().ActivateService<SensorService>(this);
 
+	GPUFrameThrottle = MakeShared<FTempoGPUFrameThrottle, ESPMode::ThreadSafe>();
+	const UTempoSensorsSettings* Settings = GetDefault<UTempoSensorsSettings>();
+	GPUFrameThrottle->Configure(Settings->GetLimitGPUFramesInFlight(), Settings->GetMaxGPUFramesInFlight());
+
+	// The bound only protects Vulkan's frame-counted recycling if that recycling waits longer than the
+	// bound. The plugin's Config/Engine.ini sets the variable to match the default bound; a project
+	// that overrides either one on its own gets a warning rather than a device loss.
+	if (GDynamicRHI && GDynamicRHI->GetInterfaceType() == ERHIInterfaceType::Vulkan && Settings->GetLimitGPUFramesInFlight())
+	{
+		if (const IConsoleVariable* RecycleDelay = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Vulkan.NumFramesToWaitForResourceDelete")))
+		{
+			if (Settings->GetMaxGPUFramesInFlight() > RecycleDelay->GetInt())
+			{
+				UE_LOG(LogTempoSensors, Warning,
+					TEXT("MaxGPUFramesInFlight (%d) exceeds r.Vulkan.NumFramesToWaitForResourceDelete (%d): the GPU may read uniform-buffer memory the RHI has already recycled (VK_ERROR_DEVICE_LOST). Raise the console variable in [ConsoleVariables] or lower the bound."),
+					Settings->GetMaxGPUFramesInFlight(), RecycleDelay->GetInt());
+			}
+		}
+	}
+
 	// OnWorldTickStart is fired before Tick has actually begun, while the world time is still the tick
 	// of the last frame. We use this last opportunity, having waited as long as possible, to collect
 	// and send all the sensor measurements from the previous frame.
@@ -76,12 +99,35 @@ void UTempoSensorServiceSubsystem::Deinitialize()
 {
 	Super::Deinitialize();
 
+	FWorldDelegates::OnWorldTickStart.RemoveAll(this);
+	FWorldDelegates::OnWorldTickEnd.RemoveAll(this);
+	FCoreDelegates::OnEndFrameRT.RemoveAll(this);
+
+	// The throttle's fences are RHI resources: release them on the render thread, behind any end-of-
+	// frame callback already queued against them.
+	if (GPUFrameThrottle)
+	{
+		ENQUEUE_RENDER_COMMAND(TempoReleaseGPUFrameThrottle)(
+			[Throttle = GPUFrameThrottle](FRHICommandListImmediate&)
+			{
+				Throttle->Release();
+			});
+		GPUFrameThrottle.Reset();
+	}
+
 	FTempoServer::Get().DeactivateService<SensorService>();
 }
 
 void UTempoSensorServiceSubsystem::OnRenderFrameCompleted() const
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsOnRenderFrameCompleted);
+
+	// Before polling the reads: once the GPU is held to the bound, the reads it guarantees complete
+	// are picked up by the poll below rather than a frame later.
+	if (GPUFrameThrottle)
+	{
+		GPUFrameThrottle->OnEndFrameRT(FRHICommandListImmediate::Get());
+	}
 
 	ForEachActiveSensor([](ITempoSensorInterface* Sensor)
 	{
@@ -136,6 +182,13 @@ void UTempoSensorServiceSubsystem::OnWorldTickStart(UWorld* World, ELevelTick Ti
 {
 	if (World == GetWorld() && (World->WorldType == EWorldType::Game || World->WorldType == EWorldType::PIE))
 	{
+		// Settings are game-thread objects; hand the render thread a snapshot each tick.
+		if (GPUFrameThrottle)
+		{
+			const UTempoSensorsSettings* Settings = GetDefault<UTempoSensorsSettings>();
+			GPUFrameThrottle->Configure(Settings->GetLimitGPUFramesInFlight(), Settings->GetMaxGPUFramesInFlight());
+		}
+
 		// In non-pipelined fixed step mode we block the game thread on any pending measurements.
 		// This guarantees they will be sent out in the same frame when they were captured.
 		// In pipelined mode we skip this block, allowing images to arrive 1-2 frames late.
