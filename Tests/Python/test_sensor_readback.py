@@ -730,10 +730,10 @@ def test_a_sensor_at_the_game_frame_rate_captures_every_game_frame(camera_rig, f
     tw.set_property(actor=owner, component=sensor, property="RateHz", value=WorldControl.Value(float_value=rate_hz))
     tc.set_steps_per_game_frame(steps_per_game_frame=steps_per_game_frame)
     try:
-        # The first game frame runs the old timer, whose callback restarts it at the new rate, and
-        # absorbs the reconfigure if depth was off.
-        asyncio.run(_capture_each_game_frame(owner, sensor, steps_per_game_frame, 1))
-        images = asyncio.run(_capture_each_game_frame(owner, sensor, steps_per_game_frame, 6))
+        # One stream throughout, so the camera's depth stays requested. Its first game frame runs the old
+        # timer, whose callback re-arms it at the new rate, and absorbs the reconfigure if depth was off;
+        # a second stream would leave a gap long enough for the camera to turn depth off again.
+        images = asyncio.run(_capture_each_game_frame(owner, sensor, steps_per_game_frame, 7))[1:]
     finally:
         tc.set_steps_per_game_frame(steps_per_game_frame=1)
         tw.set_property(actor=owner, component=sensor, property="RateHz", value=WorldControl.Value(float_value=original_rate))
@@ -741,3 +741,62 @@ def test_a_sensor_at_the_game_frame_rate_captures_every_game_frame(camera_rig, f
     missed = [index for index, image in enumerate(images) if image is None]
     assert not missed, f"no capture in game frames {missed} of {len(images)}, at {rate_hz} Hz with one game frame per period"
 
+
+
+async def _capture_times(owner, sensor, captures, max_steps_per_capture):
+    """Step one step at a time with a depth request pending, and collect the capture times of the
+    first `captures` captures. A capture that hasn't come within `max_steps_per_capture` steps is
+    recorded as None."""
+    stream = ts.stream_depth_images(owner=owner, sensor=sensor).__aiter__()
+    times = []
+    pending = None
+    try:
+        for _ in range(captures):
+            pending = asyncio.ensure_future(stream.__anext__())
+            await asyncio.sleep(0.05)
+            for _ in range(max_steps_per_capture):
+                await tc.step()
+                done, _ = await asyncio.wait({pending}, timeout=1.0)
+                if done:
+                    break
+            if pending.done():
+                times.append(pending.result().header.capture_time_s)
+                pending = None
+            else:
+                times.append(None)
+                break
+    finally:
+        if pending is not None:
+            pending.cancel()
+        try:
+            await stream.aclose()
+        except (RuntimeError, asyncio.CancelledError):
+            pass
+    return times
+
+
+def test_a_slower_sensor_captures_on_multiples_of_its_period(camera_rig, fixed_step):
+    """In FixedStep a sensor's captures fall on multiples of its period in sim time.
+
+    A capture timer's phase would otherwise come from whenever it happened to start: a level load in
+    WallClock, a rate change, a switch of time mode. A sensor slower than the frame rate would then
+    capture on different steps from run to run, and two sensors at one rate on alternate ones."""
+    owner, sensor = camera_rig
+    rate_hz = fixed_step / 2.0
+    period = 1.0 / rate_hz
+    original_rate = tw.get_property(actor=owner, component=sensor, property="RateHz").float_value
+    tw.set_property(actor=owner, component=sensor, property="RateHz", value=WorldControl.Value(float_value=rate_hz))
+    try:
+        # One stream throughout, so the camera's depth stays requested. Its first capture absorbs the
+        # rate change and the reconfigure if depth was off; a second stream would leave a gap long
+        # enough for the camera to turn depth off again, delaying a capture by a step.
+        times = asyncio.run(_capture_times(owner, sensor, 6, 4))
+        assert None not in times, f"a capture didn't come within 4 steps: {times}"
+        times = times[1:]
+    finally:
+        tw.set_property(actor=owner, component=sensor, property="RateHz", value=WorldControl.Value(float_value=original_rate))
+
+    assert None not in times, f"a capture didn't come within 4 steps: {times}"
+    off_grid = [t for t in times if abs(t / period - round(t / period)) > 1e-6]
+    assert not off_grid, f"captures at {times} s are not on multiples of the {period} s period"
+    assert all(abs((b - a) - period) < 1e-6 for a, b in zip(times, times[1:])), f"captures at {times} s are not one period apart"
