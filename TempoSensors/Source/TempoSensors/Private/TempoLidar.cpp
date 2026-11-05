@@ -123,7 +123,14 @@ TOptional<TFuture<void>> UTempoLidar::SendMeasurements()
 		// receiving a response and re-issuing the next request. Flipping off on that gap and back
 		// on the next frame races the RT/staging swap on the render thread (the previous
 		// UpdateResource may not have completed) and corrupts in-flight reads.
-		++FramesWithoutColor;
+		//
+		// Count engine frames, not calls: between frames, while a client advances steps, this runs
+		// every millisecond or so with no frame passing.
+		if (LastFrameWithoutColor != GFrameCounter)
+		{
+			LastFrameWithoutColor = GFrameCounter;
+			++FramesWithoutColor;
+		}
 		if (bColorEnabled && FramesWithoutColor >= ColorOffDebounceFrames)
 		{
 			SetColorEnabled(false);
