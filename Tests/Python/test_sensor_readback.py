@@ -619,3 +619,49 @@ def test_sequence_ids_are_continuous(camera_rig, pipelining):
         assert statistics.pstdev(deltas) < 1e-4, (
             f"capture times did not advance uniformly in fixed-step mode: {deltas}"
         )
+
+
+SUBSTEPS_PER_STEP = 20
+
+
+async def _substeps_until_frame_arrives(owner, sensor, substeps_per_step):
+    """Capture a frame on one step, then drive the next step one substep at a time, pausing between
+    substeps so the GPU can finish. Returns how many substeps ran before the frame arrived, or None
+    if it was still outstanding when only the substep that ends the step was left."""
+    stream = ts.stream_color_images(owner=owner, sensor=sensor).__aiter__()
+    pending = asyncio.ensure_future(stream.__anext__())
+    await asyncio.sleep(0.05)
+    await tc.step()
+
+    for substeps in range(substeps_per_step):
+        if pending.done():
+            pending.result()
+            return substeps
+        if substeps == substeps_per_step - 1:
+            break
+        await tc.substep()
+        await asyncio.sleep(0.02)
+
+    pending.cancel()
+    return None
+
+
+def test_a_pipelined_frame_arrives_between_substeps(camera_rig):
+    """A pipelined frame is read back after its own frame ends. While a client drives the next step
+    one substep at a time, no frame ends, so the readback has to be noticed between substeps: by
+    polling the frame's fence, and by getting the RHI to process the GPU's completed work, which
+    some RHIs only do when something submits."""
+    owner, sensor = camera_rig
+    _pipelined(True)
+    tc.set_substeps_per_step(substeps_per_step=SUBSTEPS_PER_STEP)
+    try:
+        arrived_after = asyncio.run(_substeps_until_frame_arrives(owner, sensor, SUBSTEPS_PER_STEP))
+    finally:
+        tc.set_substeps_per_step(substeps_per_step=1)
+        _pipelined(False)
+
+    assert arrived_after is not None, (
+        f"the frame was still outstanding after {SUBSTEPS_PER_STEP - 1} substeps "
+        f"({(SUBSTEPS_PER_STEP - 1) * 20} ms of wall clock), so it would only have arrived with the "
+        "next step's frame"
+    )

@@ -101,6 +101,9 @@ Between substeps, the world is between frames:
 - **Nothing else does.** Actors don't tick, timers don't fire, and sensors don't capture until
   the step's frame ticks, over all of its substeps at once. Code that must run every substep
   subscribes to `ATempoWorldSettings::OnSubstep`.
+- **Earlier captures still arrive.** With `Pipelined Rendering`, a frame's measurements are read
+  back after the frame, so they reach the client between the next step's substeps as soon as the
+  GPU has finished them.
 - **Some RPCs wait for the step boundary.** Time settings, level loads and console commands run
   the rest of the step's substeps and are handled once its frame has ticked.
 

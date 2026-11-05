@@ -225,9 +225,17 @@ void UTempoSensorServiceSubsystem::OnSubstepLoopPoll(UWorld* World)
 		{
 			SubstepReadbackPollInFlight->store(true);
 			ENQUEUE_RENDER_COMMAND(TempoSubstepReadbackPoll)(
-				[AwaitingRender = MoveTemp(AwaitingRender), InFlight = SubstepReadbackPollInFlight](FRHICommandListImmediate&)
+				[AwaitingRender = MoveTemp(AwaitingRender), InFlight = SubstepReadbackPollInFlight](FRHICommandListImmediate& RHICmdList)
 				{
 					TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsSubstepReadbackPoll);
+
+					// A fence only reads as complete once the RHI has processed the GPU's completed work.
+					// An RHI without an interrupt thread (Vulkan without timeline semaphores or with few
+					// task threads) does that only when it submits, and between frames nothing submits.
+					// A dispatch always ends in a submit, even with nothing recorded, which processes
+					// whatever has completed, so the next poll sees it. It never waits on the GPU.
+					RHICmdList.ImmediateFlush(EImmediateFlushType::DispatchToRHIThread);
+
 					for (ITempoSensorInterface* Sensor : AwaitingRender)
 					{
 						Sensor->OnRenderCompleted();
