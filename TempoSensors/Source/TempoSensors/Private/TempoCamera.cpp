@@ -825,7 +825,9 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 	// instead of oscillating off/on when the queue looks empty post-drain.
 	const bool bHadDepthRequests = !PendingDepthImageRequests.IsEmpty();
 
-	if (TextureReadQueue.NextReadComplete())
+	// A measurement captured before its client asked again is held until it does, rather than sent to
+	// no one (see bStreaming).
+	if (TextureReadQueue.NextReadComplete() && HasPendingCameraRequests())
 	{
 		TSharedPtr<FTextureRead> TextureRead = TextureReadQueue.DequeueIfReadComplete();
 		const bool bReadHasDepth = TextureRead->GetType() == TEXT("WithDepth");

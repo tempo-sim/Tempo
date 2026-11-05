@@ -119,4 +119,16 @@ protected:
 
 	uint8 bReconfigurePending = false;
 	bool bNeedsCapture = false;
+
+	// Whether a client is streaming from this sensor. A streaming client asks for its next measurement
+	// only once the last one has been written, and with several substeps per step, or when rendering
+	// stalls, that can land after the next capture is due. Such a capture is still taken, and its
+	// measurement held until the client asks (see SendMeasurements).
+	bool bStreaming = false;
+
+	// World time when a capture last came due with a request pending. A stream that has gone
+	// StreamTimeoutPeriods capture periods without one is treated as stopped.
+	double LastRequestedCaptureTime = 0.0;
+
+	static constexpr int32 StreamTimeoutPeriods = 3;
 };

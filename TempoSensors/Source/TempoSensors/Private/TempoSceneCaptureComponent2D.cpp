@@ -751,7 +751,8 @@ float GetTimerPeriod(float RateHz)
 void UTempoSceneCaptureComponent2D::RestartCaptureTimer()
 {
 	const float TimerPeriod = GetTimerPeriod(RateHz);
-	GetWorld()->GetTimerManager().SetTimer(TimerHandle, this, &UTempoSceneCaptureComponent2D::MaybeCapture, TimerPeriod, true);
+	// Due a hair before each period ends; see UTempoTiledSceneCaptureComponent::RestartCaptureTimer.
+	GetWorld()->GetTimerManager().SetTimer(TimerHandle, this, &UTempoSceneCaptureComponent2D::MaybeCapture, TimerPeriod, true, TimerPeriod * (1.0f - 1e-3f));
 }
 
 void UTempoSceneCaptureComponent2D::MaybeCapture()
