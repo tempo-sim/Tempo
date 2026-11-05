@@ -178,6 +178,9 @@ private:
 
 	mutable bool bWarnedNoSubstepSubscriber = false;
 
+	// The steps per second and substeps per step CheckPhysicsSettings last checked.
+	mutable FIntPoint LastCheckedStepSettings = FIntPoint::ZeroValue;
+
 	FDelegateHandle BeginFrameHandle;
 
 	FDelegateHandle SettingsChangedHandle;

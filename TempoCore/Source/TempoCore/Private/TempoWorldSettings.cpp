@@ -484,6 +484,15 @@ void ATempoWorldSettings::CheckPhysicsSettings() const
 		return;
 	}
 
+	// Time settings change far more often than these two do (every time mode switch), so warn once
+	// per combination rather than on every change.
+	const FIntPoint StepSettings(Settings->GetSimulatedStepsPerSecond(), Settings->GetSubstepsPerStep());
+	if (StepSettings == LastCheckedStepSettings)
+	{
+		return;
+	}
+	LastCheckedStepSettings = StepSettings;
+
 	const UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get();
 	const double StepSeconds = 1.0 / Settings->GetSimulatedStepsPerSecond();
 	const int32 SubstepsPerStep = Settings->GetSubstepsPerStep();
