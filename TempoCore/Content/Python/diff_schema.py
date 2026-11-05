@@ -6,8 +6,9 @@
 # type-checks or does not. This says which, before the release rather than after: removed classes,
 # removed or retyped properties, properties that became read-only, changed signatures, functions no
 # longer offered, removed or retyped components, removed enumerators, struct members that went away
-# or became read-only, and moved, removed or retyped assets. Additions are counted but not listed --
-# nothing breaks by gaining a member.
+# or became read-only, and moved, removed or retyped assets. Additions -- new entries, and anything a
+# client can newly use, such as a property that became writable -- are counted but not listed:
+# nothing breaks by gaining a member, given the `..Default::default()` rule for Rust struct literals.
 #
 # What counts as breaking is whatever the generators act on: a component gets a typed accessor of its
 # own (gen_py_classes.py), a function is withheld unless it is callable and positional, and a struct
@@ -33,20 +34,33 @@ def _by_path(schema):
     return {cls["path"]: cls for cls in schema.get("classes", [])}
 
 
-def _members(cls):
-    return {member["name"]: member for member in cls.get("properties", [])}
-
-
-def _functions(cls):
-    return {function["name"]: function for function in cls.get("functions", [])}
-
-
-def _components(cls):
-    return {component["name"]: component for component in cls.get("components", [])}
-
-
 def _named(items):
     return {item["name"]: item for item in items}
+
+
+def _keyed(old, new, breaking, additions, record):
+    """Record what one side has and the other lacks, in both directions, and return the keys both
+    have. Every removal check is paired with its addition here, so neither can be written alone.
+
+    `record(key, verb)` builds the (owner, change) entry, verb being "removed" or "added"."""
+    for key in sorted(set(old) - set(new)):
+        breaking.append(record(key, "removed"))
+    for key in sorted(set(new) - set(old)):
+        additions.append(record(key, "added"))
+    return sorted(set(old) & set(new))
+
+
+def _gained(was, now, flag):
+    return bool(now.get(flag)) and not was.get(flag)
+
+
+def _lost(was, now, flag):
+    return bool(was.get(flag)) and not now.get(flag)
+
+
+def _offered(function):
+    # The generators emit a function only when it is both callable and positional.
+    return bool(function.get("callable")) and bool(function.get("positional"))
 
 
 def compare(old, new):
@@ -55,13 +69,8 @@ def compare(old, new):
     additions = []
 
     old_classes, new_classes = _by_path(old), _by_path(new)
-
-    for path in sorted(set(old_classes) - set(new_classes)):
-        breaking.append((path, "class removed"))
-    for path in sorted(set(new_classes) - set(old_classes)):
-        additions.append((path, "class added"))
-
-    for path in sorted(set(old_classes) & set(new_classes)):
+    for path in _keyed(old_classes, new_classes, breaking, additions,
+                       lambda key, verb: (key, "class " + verb)):
         old_cls, new_cls = old_classes[path], new_classes[path]
 
         # A changed superclass can remove every inherited member at once, which is as breaking as
@@ -70,102 +79,95 @@ def compare(old, new):
             breaking.append((path, "superclass: {} -> {}".format(
                 old_cls.get("super") or "(none)", new_cls.get("super") or "(none)")))
 
-        old_members, new_members = _members(old_cls), _members(new_cls)
-        for name in sorted(set(old_members) - set(new_members)):
-            breaking.append((path, "property {} removed".format(name)))
-        for name in sorted(set(new_members) - set(old_members)):
-            additions.append((path, "property {} added".format(name)))
-
-        for name in sorted(set(old_members) & set(new_members)):
+        old_members = _named(old_cls.get("properties", []))
+        new_members = _named(new_cls.get("properties", []))
+        for name in _keyed(old_members, new_members, breaking, additions,
+                           lambda key, verb: (path, "property {} {}".format(key, verb))):
             was, now = old_members[name], new_members[name]
             if was.get("type") != now.get("type"):
                 breaking.append((path, "property {}: {} -> {}".format(
                     name, was.get("type"), now.get("type"))))
-            if was.get("writable") and not now.get("writable"):
+            if _lost(was, now, "writable"):
                 breaking.append((path, "property {} became read-only".format(name)))
-            if was.get("readable") and not now.get("readable"):
+            elif _gained(was, now, "writable"):
+                additions.append((path, "property {} became writable".format(name)))
+            if _lost(was, now, "readable"):
                 breaking.append((path, "property {} is no longer readable".format(name)))
+            elif _gained(was, now, "readable"):
+                additions.append((path, "property {} became readable".format(name)))
 
-        old_fns, new_fns = _functions(old_cls), _functions(new_cls)
-        for name in sorted(set(old_fns) - set(new_fns)):
-            breaking.append((path, "function {} removed".format(name)))
-        for name in sorted(set(new_fns) - set(old_fns)):
-            additions.append((path, "function {} added".format(name)))
-        for name in sorted(set(old_fns) & set(new_fns)):
+        old_fns, new_fns = _named(old_cls.get("functions", [])), _named(new_cls.get("functions", []))
+        for name in _keyed(old_fns, new_fns, breaking, additions,
+                           lambda key, verb: (path, "function {} {}".format(key, verb))):
             was, now = old_fns[name], new_fns[name]
             if was.get("signature") != now.get("signature"):
                 breaking.append((path, "function {}: {} -> {}".format(
                     name, was.get("signature"), now.get("signature"))))
             # A function that stops being callable is as unusable as one that is gone.
-            if was.get("callable") and not now.get("callable"):
+            if _lost(was, now, "callable"):
                 breaking.append((path, "function {} is no longer callable: {}".format(
                     name, now.get("unsupported_reason") or "no reason given")))
             # So is one whose inputs can no longer all travel as one value: the generators
             # withhold it, since there is no way to pass the argument it now needs.
-            if was.get("positional") and not now.get("positional"):
+            if _lost(was, now, "positional"):
                 breaking.append((path, "function {} is no longer offered: an input can no longer "
                                        "be passed as one value".format(name)))
+            # And one the generators start emitting is as new as one that was just declared.
+            if _offered(now) and not _offered(was):
+                additions.append((path, "function {} is now offered".format(name)))
 
         # A component is a typed accessor of its own, typed as the component's class, so a changed
         # class is a different member under the same name.
-        old_components, new_components = _components(old_cls), _components(new_cls)
-        for name in sorted(set(old_components) - set(new_components)):
-            breaking.append((path, "component {} removed".format(name)))
-        for name in sorted(set(new_components) - set(old_components)):
-            additions.append((path, "component {} added".format(name)))
-        for name in sorted(set(old_components) & set(new_components)):
+        old_components = _named(old_cls.get("components", []))
+        new_components = _named(new_cls.get("components", []))
+        for name in _keyed(old_components, new_components, breaking, additions,
+                           lambda key, verb: (path, "component {} {}".format(key, verb))):
             was, now = old_components[name], new_components[name]
             if was.get("class") != now.get("class"):
                 breaking.append((path, "component {}: {} -> {}".format(
                     name, was.get("class"), now.get("class"))))
 
     old_structs, new_structs = _named(old.get("structs", [])), _named(new.get("structs", []))
-    for name in sorted(set(old_structs) - set(new_structs)):
-        breaking.append((name, "struct removed"))
-    for name in sorted(set(new_structs) - set(old_structs)):
-        additions.append((name, "struct added"))
-    for name in sorted(set(old_structs) & set(new_structs)):
+    for name in _keyed(old_structs, new_structs, breaking, additions,
+                       lambda key, verb: (key, "struct " + verb)):
         # Every function taking one is withheld once it cannot travel whole, and its value type with
-        # them -- as breaking as removing each of those.
-        if old_structs[name].get("value_expressible") and not new_structs[name].get("value_expressible"):
+        # them -- as breaking as removing each of those. The reverse un-withholds them all.
+        if _lost(old_structs[name], new_structs[name], "value_expressible"):
             breaking.append((name, "struct can no longer be passed as one value"))
-        was, now = _named(old_structs[name].get("members", [])), _named(new_structs[name].get("members", []))
-        for member in sorted(set(was) - set(now)):
-            breaking.append((name, "struct member {} removed".format(member)))
-        for member in sorted(set(now) - set(was)):
-            additions.append((name, "struct member {} added".format(member)))
-        for member in sorted(set(was) & set(now)):
+        elif _gained(old_structs[name], new_structs[name], "value_expressible"):
+            additions.append((name, "struct can now be passed as one value"))
+        was = _named(old_structs[name].get("members", []))
+        now = _named(new_structs[name].get("members", []))
+        # A new member is an addition, not a break, under the same rule as a new field of a request
+        # message: Python's constructor is keyword-only and C++'s is a designated-initializer
+        # aggregate, but a Rust struct value is a plain struct, so a literal survives a new member
+        # only when it ends in `..Default::default()`, as docs/clients/rust.md asks of every one.
+        for member in _keyed(was, now, breaking, additions,
+                             lambda key, verb: (name, "struct member {} {}".format(key, verb))):
             if was[member].get("type") != now[member].get("type"):
                 breaking.append((name, "struct member {}: {} -> {}".format(
                     member, was[member].get("type"), now[member].get("type"))))
             # A writable member is a constructor argument; a read-only one is not, so a struct
             # value built with it stops type-checking.
-            if was[member].get("writable") and not now[member].get("writable"):
+            if _lost(was[member], now[member], "writable"):
                 breaking.append((name, "struct member {} became read-only".format(member)))
+            elif _gained(was[member], now[member], "writable"):
+                additions.append((name, "struct member {} became writable".format(member)))
 
     old_enums, new_enums = _named(old.get("enums", [])), _named(new.get("enums", []))
-    for name in sorted(set(old_enums) - set(new_enums)):
-        breaking.append((name, "enum removed"))
-    for name in sorted(set(new_enums) - set(old_enums)):
-        additions.append((name, "enum added"))
-    for name in sorted(set(old_enums) & set(new_enums)):
-        was = set(old_enums[name].get("enumerators", []))
-        now = set(new_enums[name].get("enumerators", []))
-        for enumerator in sorted(was - now):
-            breaking.append((name, "enumerator {} removed".format(enumerator)))
-        for enumerator in sorted(now - was):
-            additions.append((name, "enumerator {} added".format(enumerator)))
+    for name in _keyed(old_enums, new_enums, breaking, additions,
+                       lambda key, verb: (key, "enum " + verb)):
+        _keyed(dict.fromkeys(old_enums[name].get("enumerators", [])),
+               dict.fromkeys(new_enums[name].get("enumerators", [])), breaking, additions,
+               lambda key, verb: (name, "enumerator {} {}".format(key, verb)))
 
     # The asset catalog. A moved asset is a removed one under its old path and an added one under
     # its new path -- which is exactly how a scenario naming the old path experiences it.
     old_assets = {asset["path"]: asset["class"] for asset in old.get("assets", [])}
     new_assets = {asset["path"]: asset["class"] for asset in new.get("assets", [])}
     if old_assets and new_assets:
-        for path in sorted(set(old_assets) - set(new_assets)):
-            breaking.append((path, "asset removed"))
-        for path in sorted(set(new_assets) - set(old_assets)):
-            additions.append((path, "asset added"))
-        for path in sorted(set(old_assets) & set(new_assets)):
+        for path in _keyed(old_assets, new_assets, breaking, additions,
+                           lambda key, verb: (key, "asset " + verb)):
             if old_assets[path] != new_assets[path]:
                 breaking.append((path, "asset class: {} -> {}".format(old_assets[path], new_assets[path])))
 
