@@ -168,28 +168,8 @@ void UTempoTiledSceneCaptureComponent::MaybeMarkPendingCapture()
 		RestartCaptureTimer();
 	}
 
-	if (HasPendingRequests())
+	if (!HasPendingRequests())
 	{
-		bStreaming = true;
-		LastRequestedCaptureTime = World->GetTimeSeconds();
-	}
-	else if (!bStreaming)
-	{
-		return;
-	}
-	else if (World->GetTimeSeconds() - LastRequestedCaptureTime > StreamTimeoutPeriods * TimerPeriod)
-	{
-		// Decided by time rather than by how many reads are waiting: a render stall can leave several
-		// captures in flight for a client that is still streaming. Drop what is already read back, so a
-		// client that comes back later is not sent stale measurements.
-		bStreaming = false;
-		int32 Dropped = 0;
-		while (TextureReadQueue.DequeueIfReadComplete().IsValid())
-		{
-			++Dropped;
-		}
-		UE_LOG(LogTempoSensors, Display, TEXT("Sensor %s: no request for %d capture periods; treating its stream as stopped (dropped %d unclaimed measurements)."),
-			*GetName(), StreamTimeoutPeriods, Dropped);
 		return;
 	}
 
@@ -257,8 +237,7 @@ void UTempoTiledSceneCaptureComponent::RestartCaptureTimer()
 		const float TimerPeriod = 1.0f / FMath::Max(UE_KINDA_SMALL_NUMBER, RateHz);
 		// Due a hair before each period ends. FTimerManager fires a timer only once it is strictly
 		// overdue, then catches up by whole periods; when the frame interval equals the period (one
-		// frame per capture, as with substeps), a timer due exactly on a frame would fire every other
-		// frame instead.
+		// game frame per capture), a timer due exactly on a frame would fire every other frame instead.
 		World->GetTimerManager().SetTimer(TimerHandle, this, &UTempoTiledSceneCaptureComponent::MaybeMarkPendingCapture, TimerPeriod, true, TimerPeriod * (1.0f - 1e-3f));
 	}
 }

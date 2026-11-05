@@ -74,9 +74,7 @@ TOptional<TFuture<void>> UTempoLidar::SendMeasurements()
 		return false;
 	}();
 
-	// A measurement captured before its client asked again is held until it does, rather than sent to
-	// no one (see bStreaming).
-	if (TextureReadQueue.NextReadComplete() && !PendingRequests.IsEmpty())
+	if (TextureReadQueue.NextReadComplete())
 	{
 		TSharedPtr<FTextureRead> TextureRead = TextureReadQueue.DequeueIfReadComplete();
 		const FName ReadType = TextureRead->GetType();
