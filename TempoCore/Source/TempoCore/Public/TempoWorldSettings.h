@@ -120,8 +120,9 @@ private:
 	bool HasStepsToRun() const { return StepsToSimulate.IsSet() && StepsToSimulate.GetValue() > 0; }
 
 	// In a paused FixedStep world, runs the steps a Step asked for that don't complete a game frame,
-	// between frames, and starts the game frame when one does. While a client advances one step at a
-	// time, also serves its RPCs between them, until it goes quiet or a request needs a game frame.
+	// between frames, and starts the game frame when one does. While a client keeps stepping, also
+	// serves its RPCs between frames until its next Step, until it goes quiet or a request needs a
+	// game frame.
 	void OnBeginFrame();
 
 	void RunStepsBetweenFrames();
@@ -186,8 +187,9 @@ private:
 
 	bool bInStepLoop = false;
 
-	// Whether the last frame's RunStepsBetweenFrames ran a step there. Each frame then starts by
-	// waiting for the client's next one, rather than leaving it to land in the frame's RPC pump.
+	// Whether a client's Step has completed since the world last waited for one and timed out. Each
+	// paused frame then starts by waiting between frames for its next Step (Tempo.StepWaitTimeoutMs),
+	// so it runs in that frame, rather than landing in the frame's RPC pump and running in the next.
 	bool bClientStepping = false;
 
 	mutable bool bWarnedNoStepSubscriber = false;

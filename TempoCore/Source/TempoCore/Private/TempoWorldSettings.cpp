@@ -27,7 +27,7 @@ namespace
 {
 	TAutoConsoleVariable<float> CVarStepWaitTimeoutMs(
 		TEXT("Tempo.StepWaitTimeoutMs"), 50.0f,
-		TEXT("How long the world waits between frames for a client's next Step, part-way through a game frame, before letting a paused frame run."));
+		TEXT("How long the world waits between frames for a client's next Step before letting a paused frame run."));
 
 	TAutoConsoleVariable<float> CVarStepPollIntervalMs(
 		TEXT("Tempo.StepPollIntervalMs"), 1.0f,
@@ -370,6 +370,11 @@ void ATempoWorldSettings::FirePendingStepCompletion(ETempoStepResult Result)
 	PendingStepCompletion = nullptr;
 	if (Completion)
 	{
+		// A client that waited on its Step is likely to send the next one as soon as it hears back.
+		if (Result == ETempoStepResult::Completed)
+		{
+			bClientStepping = true;
+		}
 		Completion(Result);
 	}
 }
@@ -599,24 +604,29 @@ void ATempoWorldSettings::RunStepsBetweenFrames()
 	const double WaitTimeoutSeconds = CVarStepWaitTimeoutMs.GetValueOnGameThread() / 1000.0;
 	const double PollIntervalSeconds = CVarStepPollIntervalMs.GetValueOnGameThread() / 1000.0;
 
-	bool bRanStep = false;
 	{
 		TGuardValue<bool> InLoopGuard(bInStepLoop, true);
 		TGuardValue<float> DeltaSecondsGuard(World->DeltaTimeSeconds, World->DeltaTimeSeconds);
 
 		while (true)
 		{
-			// Between a client's steps, serve its RPCs until it asks for the next one.
+			// Between a client's steps, serve its RPCs until it asks for the next one, which then runs in
+			// this frame rather than landing in its RPC pump and running in the next. If the client goes
+			// quiet, stop waiting, and let paused frames run until it steps again.
 			if (!HasStepsToRun())
 			{
-				if (!bClientStepping && !bRanStep)
+				if (!bClientStepping)
 				{
 					break;
 				}
-				Server.PumpEvents(
+				if (!Server.PumpEvents(
 					[this, &Server, World]() { return HasStepsToRun() || Server.HasHeldRequests() || !World->IsPaused(); },
 					WaitTimeoutSeconds, PollIntervalSeconds,
-					[World]() { OnBetweenFramesPoll.Broadcast(World); });
+					[World]() { OnBetweenFramesPoll.Broadcast(World); }))
+				{
+					bClientStepping = false;
+					break;
+				}
 			}
 
 			// A Play has taken the world over, and its frames run the rest of the game frame's steps. Or
@@ -634,7 +644,6 @@ void ATempoWorldSettings::RunStepsBetweenFrames()
 			}
 
 			RunStep();
-			bRanStep = true;
 			--StepsToSimulate.GetValue();
 
 			// The game frame is done: tick it now. The Step's completion fires once it has.
@@ -661,8 +670,6 @@ void ATempoWorldSettings::RunStepsBetweenFrames()
 		StepsToSimulate = StepsPerGameFrame - StepsIntoGameFrame;
 		StartGameFrame();
 	}
-
-	bClientStepping = bRanStep;
 }
 
 void ATempoWorldSettings::StartGameFrame()

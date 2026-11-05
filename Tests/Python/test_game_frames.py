@@ -35,6 +35,29 @@ def test_one_step_per_game_frame_ticks_a_game_frame_every_step(fixed_step):
     assert response.steps_until_game_frame == 1
 
 
+def test_a_client_that_keeps_stepping_gets_one_frame_per_step(fixed_step):
+    # While a client keeps stepping, the world waits between frames for its next Step and runs it in
+    # the very next frame, rather than spending a paused frame receiving it and another running it.
+    # Capping the frame rate makes the frame count visible in wall-clock time.
+    max_fps = 20
+    frame_seconds = 1.0 / max_fps
+    original = tc.get_console_variable(name="t.MaxFPS").value
+    tc.set_console_variable(name="t.MaxFPS", value=str(max_fps))
+    try:
+        tc.step()
+        steps = 10
+        start = time.monotonic()
+        for _ in range(steps):
+            tc.step()
+        elapsed = time.monotonic() - start
+    finally:
+        tc.set_console_variable(name="t.MaxFPS", value=original)
+    assert elapsed < 1.5 * steps * frame_seconds, (
+        f"{steps} steps took {elapsed:.2f}s at {max_fps} fps: about {elapsed / frame_seconds / steps:.1f} "
+        "frames per step"
+    )
+
+
 def test_each_step_advances_sim_time_by_one_step(game_frames):
     step_seconds = game_frames
     t0 = sim_time()
