@@ -94,6 +94,7 @@ MAX_RAY_M = 500.0
 # How long to wait for the test level to come up. A level swap tears the gRPC services down and
 # back up, so the first calls after it can fail before they start answering.
 LEVEL_LOAD_TIMEOUT_S = 120.0
+LEVEL_WARM_UP_S = 1.0
 
 
 def _vec(x, y, z):
@@ -213,6 +214,13 @@ def readback_level(sim_server):
         pytest.fail(
             f"{LEVEL} did not come up within {LEVEL_LOAD_TIMEOUT_S}s; the sim last reported {last}"
         )
+
+    # A level's first frames can render before it is ready to (sky capture, shader and mesh setup), so
+    # a capture a few frames after the load can come back without the scene in it. Let it run for a
+    # moment first. Nothing else gives it that time: a stepping client gets one frame per step.
+    tc.set_time_mode(time_mode=Time.TM_WALL_CLOCK)
+    tc.play()
+    time.sleep(LEVEL_WARM_UP_S)
 
     # Left loaded on purpose. Reloading on teardown would cost another transition, and the tests
     # that follow in this session are better off on a level that has a sensor rig in it.
@@ -631,20 +639,26 @@ async def _steps_until_frame_arrives(owner, sensor, steps_per_game_frame):
     was still outstanding when only the step that completes the game frame was left."""
     stream = ts.stream_color_images(owner=owner, sensor=sensor).__aiter__()
     pending = asyncio.ensure_future(stream.__anext__())
-    await asyncio.sleep(0.05)
-    await tc.advance_steps(steps=steps_per_game_frame)
+    try:
+        await asyncio.sleep(0.05)
+        await tc.advance_steps(steps=steps_per_game_frame)
 
-    for steps in range(steps_per_game_frame):
-        if pending.done():
-            pending.result()
-            return steps
-        if steps == steps_per_game_frame - 1:
-            break
-        await tc.step()
-        await asyncio.sleep(0.02)
-
-    pending.cancel()
-    return None
+        for steps in range(steps_per_game_frame):
+            if pending.done():
+                pending.result()
+                return steps
+            if steps == steps_per_game_frame - 1:
+                break
+            await tc.step()
+            await asyncio.sleep(0.02)
+        return None
+    finally:
+        # Close the stream, or the camera keeps its color request pending into later tests.
+        pending.cancel()
+        try:
+            await stream.aclose()
+        except (RuntimeError, asyncio.CancelledError):
+            pass
 
 
 def test_a_pipelined_frame_arrives_between_game_frames(camera_rig):
