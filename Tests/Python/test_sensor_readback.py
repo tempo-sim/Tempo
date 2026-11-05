@@ -67,6 +67,7 @@ import tempo_sim.tempo_world as tw
 import tempo_sim.TempoCore.Geometry_pb2 as Geometry
 import tempo_sim.TempoCore.Time_pb2 as Time
 import tempo_sim.TempoSensors.Sensors_pb2 as SensorsPb
+import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
 
 pytestmark = pytest.mark.sensors
 
@@ -680,3 +681,63 @@ def test_a_pipelined_frame_arrives_between_game_frames(camera_rig):
         f"({(STEPS_PER_GAME_FRAME - 1) * 20} ms of wall clock), so it would only have arrived with the "
         "next game frame"
     )
+
+
+async def _capture_each_game_frame(owner, sensor, steps_per_game_frame, game_frames):
+    """Advance one game frame at a time with a depth request pending, and collect what each yields:
+    the image, or None if no capture came within a few seconds.
+
+    Depth, so the camera's depth stays on: turning it on or off reconfigures the camera, which skips
+    captures until the reconfigure has applied. A test before this one may have left it on, and with
+    color alone the camera would turn it off part-way through."""
+    stream = ts.stream_depth_images(owner=owner, sensor=sensor).__aiter__()
+    images = []
+    pending = None
+    try:
+        for _ in range(game_frames):
+            if pending is None:
+                pending = asyncio.ensure_future(stream.__anext__())
+            await asyncio.sleep(0.05)
+            await tc.advance_steps(steps=steps_per_game_frame)
+            # asyncio.wait, not wait_for: a missed capture must leave the read pending for the next
+            # game frame, and cancelling it would end the stream.
+            done, _ = await asyncio.wait({pending}, timeout=5.0)
+            if done:
+                images.append(pending.result())
+                pending = None
+            else:
+                images.append(None)
+    finally:
+        if pending is not None:
+            pending.cancel()
+        try:
+            await stream.aclose()
+        except (RuntimeError, asyncio.CancelledError):
+            pass
+    return images
+
+
+def test_a_sensor_at_the_game_frame_rate_captures_every_game_frame(camera_rig, fixed_step):
+    """A sensor whose rate equals the game frame rate must capture in every game frame.
+
+    The timer manager fires a timer only once it is strictly overdue. A capture timer restarted on a
+    frame boundary, as a rate change restarts it, is due exactly on every later frame, so without
+    allowance it fires every other frame and halves the capture rate."""
+    owner, sensor = camera_rig
+    steps_per_game_frame = 2
+    rate_hz = fixed_step / steps_per_game_frame
+    original_rate = tw.get_property(actor=owner, component=sensor, property="RateHz").float_value
+    tw.set_property(actor=owner, component=sensor, property="RateHz", value=WorldControl.Value(float_value=rate_hz))
+    tc.set_steps_per_game_frame(steps_per_game_frame=steps_per_game_frame)
+    try:
+        # The first game frame runs the old timer, whose callback restarts it at the new rate, and
+        # absorbs the reconfigure if depth was off.
+        asyncio.run(_capture_each_game_frame(owner, sensor, steps_per_game_frame, 1))
+        images = asyncio.run(_capture_each_game_frame(owner, sensor, steps_per_game_frame, 6))
+    finally:
+        tc.set_steps_per_game_frame(steps_per_game_frame=1)
+        tw.set_property(actor=owner, component=sensor, property="RateHz", value=WorldControl.Value(float_value=original_rate))
+
+    missed = [index for index, image in enumerate(images) if image is None]
+    assert not missed, f"no capture in game frames {missed} of {len(images)}, at {rate_hz} Hz with one game frame per period"
+
