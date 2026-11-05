@@ -16,12 +16,12 @@ using OpenLevelRequest = TempoCoreEditor::OpenLevelRequest;
 void UTempoCoreEditorServiceSubsystem::RegisterServices(FTempoServer& Server)
 {
 	Server.RegisterService<TempoCoreEditorService>(
-			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestPlayInEditor, &UTempoCoreEditorServiceSubsystem::PlayInEditor).NoSubstep(),
-			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestSimulate, &UTempoCoreEditorServiceSubsystem::Simulate).NoSubstep(),
-			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestStop, &UTempoCoreEditorServiceSubsystem::Stop).NoSubstep(),
-			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestSaveLevel, &UTempoCoreEditorServiceSubsystem::SaveLevel).NoSubstep(),
-			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestOpenLevel, &UTempoCoreEditorServiceSubsystem::OpenLevel).NoSubstep(),
-			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestNewLevel, &UTempoCoreEditorServiceSubsystem::NewLevel).NoSubstep()
+			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestPlayInEditor, &UTempoCoreEditorServiceSubsystem::PlayInEditor).GameFrameOnly(),
+			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestSimulate, &UTempoCoreEditorServiceSubsystem::Simulate).GameFrameOnly(),
+			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestStop, &UTempoCoreEditorServiceSubsystem::Stop).GameFrameOnly(),
+			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestSaveLevel, &UTempoCoreEditorServiceSubsystem::SaveLevel).GameFrameOnly(),
+			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestOpenLevel, &UTempoCoreEditorServiceSubsystem::OpenLevel).GameFrameOnly(),
+			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestNewLevel, &UTempoCoreEditorServiceSubsystem::NewLevel).GameFrameOnly()
 		);
 }
 

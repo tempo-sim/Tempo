@@ -66,53 +66,60 @@ Use Fixed Step for reproducible runs, dataset generation, and any test that asse
 | `pause()` | Stop advancing sim time. |
 | `play()` | Resume advancing sim time. |
 | `step()` | Advance one step (Fixed Step mode). |
-| `substep()` | Advance one substep (Fixed Step mode; see [Substeps](#substeps)). |
+| `advance_steps(steps=N)` | Advance `N` steps. |
+
+`step()` and `advance_steps()` report where they left the [game frame](#game-frames):
+`game_frame` is whether the last step completed one, and `steps_until_game_frame` is how many steps
+remain until the next. With the default of one step per game frame, every step is a game frame.
 
 In the Editor, Tempo's pause and Unreal's own PIE pause are kept in sync, and the "Advance Single
-Frame" toolbar button is wired to Tempo's `step` — so the Editor controls and the API controls
-agree rather than fighting each other.
+Frame" toolbar button is wired to Tempo's stepping, advancing to the end of the game frame — so the
+Editor controls and the API controls agree rather than fighting each other.
 
-## Substeps
+## Game frames
 
-A Fixed Step step can be divided into `SubstepsPerStep` evenly-spaced **substeps**. The frame rate
-stays `sim_steps_per_second`: a step's frame still ticks once, over the whole step. Substeps are
-for what must advance more finely than that, such as a physics plugin, and for a client that
-needs to act between those finer steps.
+By default every Fixed Step step is a frame: the world ticks once per step. `StepsPerGameFrame`
+groups steps into **game frames** instead, so the world ticks once every `StepsPerGameFrame` steps,
+over all of them. Steps keep their length, `1 / sim_steps_per_second`, and a client keeps calling
+`step()`. Game frames are for whatever must advance more finely than the world ticks, such as a
+physics plugin, and for a client that needs to act between those finer steps.
 
 ```python
 tc.set_time_mode(Time.TM_FIXED_STEP)
-tc.set_sim_steps_per_second(10)
-tc.set_substeps_per_step(10)
+tc.set_sim_steps_per_second(100)
+tc.set_steps_per_game_frame(10)    # the world ticks at 10 Hz
 tc.pause()
 
 while True:
-    tc.substep()
-    # ... sim time has advanced 0.01 s; read state and send commands for the next substep
+    response = tc.step()
+    # ... sim time has advanced 0.01 s; read state and send commands for the next step
+    if response.game_frame:
+        ...  # the world has just ticked: actors moved, sensors captured
 ```
 
-`substep()` advances one substep, and `step()` advances to the end of the current step: a whole
-step at a step boundary, or the rest of the step part-way through one. Either way, steps begin and
-end on the same grid no matter how the client advances them, or how long it takes to do so.
-
-Between substeps, the world is between frames:
+A game frame ticks every `StepsPerGameFrame` steps, counted from where the setting last changed,
+however the client advances them and however long it takes. A step that doesn't complete a game
+frame runs between frames:
 
 - **Sim time moves.** `get_sim_time` and every timestamp the server reports (actor state, sensor
-  transmission time) give the latest substep's time.
+  transmission time) give the latest step's time.
 - **Nothing else does.** Actors don't tick, timers don't fire, and sensors don't capture until
-  the step's frame ticks, over all of its substeps at once. Code that must run every substep
-  subscribes to `ATempoWorldSettings::OnSubstep`.
+  the game frame ticks, over all of its steps at once. Code that must run every step subscribes to
+  `ATempoWorldSettings::OnStep`.
 - **Earlier captures still arrive.** With `Pipelined Rendering`, a frame's measurements are read
-  back after the frame, so they reach the client between the next step's substeps as soon as the
-  GPU has finished them.
-- **Some RPCs wait for the step boundary.** Time settings, level loads and console commands run
-  the rest of the step's substeps and are handled once its frame has ticked.
+  back after the frame, so they reach the client between the next game frame's steps as soon as
+  the GPU has finished them.
+- **Some RPCs need a game frame.** Time settings, level loads and console commands run the rest of
+  the game frame's steps and are handled once it has ticked.
 
-!!! warning "Chaos only follows substeps through its own settings"
+Sensor rates are rounded to game frames, since sensors capture only when the world ticks.
 
-    Tempo can't step Chaos between frames, so Chaos integrates each step in its own substeps,
-    from the physics settings' `bSubstepping`, `MaxSubstepDeltaTime` and `MaxSubsteps`. Tempo
-    warns when those are coarser than its substeps or would drop time. Async physics
-    (`bTickPhysicsAsync`) runs on its own clock, so Tempo ignores `SubstepsPerStep` when it's on.
+!!! warning "Chaos only follows steps through its own settings"
+
+    Tempo can't step Chaos between frames, so Chaos integrates each game frame in its own
+    substeps, from the physics settings' `bSubstepping`, `MaxSubstepDeltaTime` and `MaxSubsteps`.
+    Tempo warns when those are coarser than its steps or would drop time. Async physics
+    (`bTickPhysicsAsync`) runs on its own clock, so Tempo ignores `StepsPerGameFrame` when it's on.
 
 ## Why this matters downstream
 
@@ -133,4 +140,4 @@ Fixed Step mode is what makes the rest of the API deterministic:
 ## Settings
 
 See the [settings reference](../reference/settings.md#tempo-core) for `TimeMode`,
-`SimulatedStepsPerSecond`, `SubstepsPerStep`, and `MaxWallClockTimeStep`.
+`SimulatedStepsPerSecond`, `StepsPerGameFrame`, and `MaxWallClockTimeStep`.

@@ -57,18 +57,18 @@ struct TRequestHandler
 		AcceptDelegate.BindRaw(Service, AcceptFunc);
 	}
 
-	// Marks an RPC that may only run at a step boundary, inside a world tick: one that changes the step
-	// grid, loads or leaves a level, or changes engine state. While a step is part-way through its
-	// substeps, its requests are held; the step then runs to its end, and they are handled in that
-	// step's frame.
-	TRequestHandler NoSubstep() const
+	// Marks an RPC that may only run in a game frame, inside a world tick: one that changes the step
+	// grid, loads or leaves a level, or changes engine state. While a game frame is part-way through
+	// its steps, its requests are held; the game frame then runs the rest of its steps, and they are
+	// handled in its frame.
+	TRequestHandler GameFrameOnly() const
 	{
 		TRequestHandler Handler(*this);
-		Handler.bNoSubstep = true;
+		Handler.bGameFrameOnly = true;
 		return Handler;
 	}
 
-	bool IsNoSubstep() const { return bNoSubstep; }
+	bool IsGameFrameOnly() const { return bGameFrameOnly; }
 
 	void AcceptRequests(grpc::ServerContext* Context, RequestType* Request, ResponderType<ResponseType>* Responder, grpc::ServerCompletionQueue* CompletionQueue, void* Tag)
 	{
@@ -112,7 +112,7 @@ private:
 	TDelegate<void(const RequestType&, const TResponseDelegate<ResponseType>&)> HandleDelegate;
 	TDelegate<void(grpc::ServerContext*, RequestType*, ResponderType<ResponseType>*, grpc::CompletionQueue*, grpc::ServerCompletionQueue*, void*)> AcceptDelegate;
 	FWeakObjectPtr ActiveObject;
-	bool bNoSubstep = false;
+	bool bGameFrameOnly = false;
 };
 
 template <class ServiceType, class RequestType, class ResponseType, class UserObjectType, bool Const>
@@ -167,7 +167,7 @@ struct FRequestManager : TSharedFromThis<FRequestManager>
 	virtual void HandleAndRespond() = 0;
 	virtual FRequestManager* Duplicate(int32 NewTag) const = 0;
 	virtual const FName GetServiceName() const = 0;
-	virtual bool IsNoSubstep() const = 0;
+	virtual bool IsGameFrameOnly() const = 0;
 	virtual void Activate(UObject* Object) = 0;
 	virtual void Deactivate() = 0;
 	virtual const FWeakObjectPtr& GetActiveObject() const = 0;
@@ -199,9 +199,9 @@ public:
 		return ServiceName;
 	}
 
-	virtual bool IsNoSubstep() const override
+	virtual bool IsGameFrameOnly() const override
 	{
-		return Handler->IsNoSubstep();
+		return Handler->IsGameFrameOnly();
 	}
 
 	virtual void Activate(UObject* Object) override
@@ -391,12 +391,12 @@ public:
 	// Handles gRPC events on the game thread until ShouldStop returns true, or until no event has
 	// arrived for QuietTimeoutSeconds. While the queue is idle, OnPoll runs every PollIntervalSeconds.
 	// Returns whether ShouldStop ended it. This is how ATempoWorldSettings serves RPCs between the
-	// substeps a client drives between frames, outside TickInternal.
+	// steps a client advances between frames, outside TickInternal.
 	bool PumpEvents(TFunctionRef<bool()> ShouldStop, double QuietTimeoutSeconds, double PollIntervalSeconds, TFunctionRef<void()> OnPoll);
 
-	// While set, a new request to an RPC declared NoSubstep is held back rather than handled.
+	// While set, a new request to an RPC declared GameFrameOnly is held back rather than handled.
 	// TickInternal handles held requests first, once this is cleared.
-	void SetHoldNoSubstepRequests(bool bHold) { bHoldNoSubstepRequests = bHold; }
+	void SetHoldGameFrameOnlyRequests(bool bHold) { bHoldGameFrameOnlyRequests = bHold; }
 
 	bool HasHeldRequests() const { return !HeldRequestTags.IsEmpty(); }
 
@@ -466,7 +466,7 @@ protected:
 
 	bool bIsInitialized = false;
 
-	bool bHoldNoSubstepRequests = false;
+	bool bHoldGameFrameOnlyRequests = false;
 	TArray<int32> HeldRequestTags;
 
 	int32 TagAllocator = 0;

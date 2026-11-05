@@ -30,5 +30,5 @@ void UTempoTimeROSBridgeSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	BindServiceToROS<FTempoSetTimeModeService>(ROSNode, "SetTimeMode", this, &UTempoTimeROSBridgeSubsystem::SetTimeMode);
 	BindServiceToROS<FTempoEmptyService>(ROSNode, "Play", this, &UTempoTimeROSBridgeSubsystem::Play);
 	BindServiceToROS<FTempoEmptyService>(ROSNode, "Pause", this, &UTempoTimeROSBridgeSubsystem::Pause);
-	BindServiceToROS<FTempoEmptyService>(ROSNode, "Step", this, &UTempoTimeROSBridgeSubsystem::Step);
+	BindServiceToROS<FTempoStepService>(ROSNode, "Step", this, &UTempoTimeROSBridgeSubsystem::Step);
 }

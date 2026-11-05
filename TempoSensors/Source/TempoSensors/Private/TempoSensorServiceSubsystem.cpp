@@ -72,14 +72,14 @@ void UTempoSensorServiceSubsystem::Initialize(FSubsystemCollectionBase& Collecti
 	FWorldDelegates::OnWorldTickEnd.AddUObject(this, &UTempoSensorServiceSubsystem::OnWorldTickEnd);
 	FCoreDelegates::OnEndFrameRT.AddUObject(this, &UTempoSensorServiceSubsystem::OnRenderFrameCompleted);
 
-	SubstepLoopPollHandle = ATempoWorldSettings::OnSubstepLoopPoll.AddUObject(this, &UTempoSensorServiceSubsystem::OnSubstepLoopPoll);
+	BetweenFramesPollHandle = ATempoWorldSettings::OnBetweenFramesPoll.AddUObject(this, &UTempoSensorServiceSubsystem::OnBetweenFramesPoll);
 }
 
 void UTempoSensorServiceSubsystem::Deinitialize()
 {
 	Super::Deinitialize();
 
-	ATempoWorldSettings::OnSubstepLoopPoll.Remove(SubstepLoopPollHandle);
+	ATempoWorldSettings::OnBetweenFramesPoll.Remove(BetweenFramesPollHandle);
 
 	FTempoServer::Get().DeactivateService<SensorService>();
 }
@@ -178,27 +178,27 @@ void UTempoSensorServiceSubsystem::SendCompletedMeasurements()
 	}
 }
 
-void UTempoSensorServiceSubsystem::OnSubstepLoopPoll(UWorld* World)
+void UTempoSensorServiceSubsystem::OnBetweenFramesPoll(UWorld* World)
 {
 	if (World != GetWorld())
 	{
 		return;
 	}
 
-	TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsSubstepLoopPoll);
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsBetweenFramesPoll);
 
-	if (SubstepSensorsFrame != GFrameCounter)
+	if (BetweenFramesSensorsFrame != GFrameCounter)
 	{
-		SubstepSensorsFrame = GFrameCounter;
-		SubstepSensors.Reset();
+		BetweenFramesSensorsFrame = GFrameCounter;
+		BetweenFramesSensors.Reset();
 		ForEachActiveSensor([this](ITempoSensorInterface* Sensor)
 		{
-			SubstepSensors.Add(Cast<UActorComponent>(Sensor));
+			BetweenFramesSensors.Add(Cast<UActorComponent>(Sensor));
 		});
 	}
 
 	TArray<ITempoSensorInterface*> Sensors;
-	for (const TWeakObjectPtr<UActorComponent>& Component : SubstepSensors)
+	for (const TWeakObjectPtr<UActorComponent>& Component : BetweenFramesSensors)
 	{
 		if (ITempoSensorInterface* Sensor = Cast<ITempoSensorInterface>(Component.Get()))
 		{
@@ -206,12 +206,12 @@ void UTempoSensorServiceSubsystem::OnSubstepLoopPoll(UWorld* World)
 		}
 	}
 
-	// Readbacks are otherwise polled only at the render thread's end of frame, and a client driving
-	// substeps holds the next frame off for many of them. Poll from a render command instead; it is
+	// Readbacks are otherwise polled only at the render thread's end of frame, and a client advancing
+	// steps holds the next frame off for many of them. Poll from a render command instead; it is
 	// non-blocking, exactly like the end-of-frame poll. A sensor is only destroyed after the render
 	// thread has drained the commands queued before its destruction began, so the raw pointers outlive
 	// this command.
-	if (!SubstepReadbackPollInFlight->load())
+	if (!BetweenFramesReadbackPollInFlight->load())
 	{
 		TArray<ITempoSensorInterface*> AwaitingRender;
 		for (ITempoSensorInterface* Sensor : Sensors)
@@ -223,11 +223,11 @@ void UTempoSensorServiceSubsystem::OnSubstepLoopPoll(UWorld* World)
 		}
 		if (!AwaitingRender.IsEmpty())
 		{
-			SubstepReadbackPollInFlight->store(true);
-			ENQUEUE_RENDER_COMMAND(TempoSubstepReadbackPoll)(
-				[AwaitingRender = MoveTemp(AwaitingRender), InFlight = SubstepReadbackPollInFlight](FRHICommandListImmediate& RHICmdList)
+			BetweenFramesReadbackPollInFlight->store(true);
+			ENQUEUE_RENDER_COMMAND(TempoBetweenFramesReadbackPoll)(
+				[AwaitingRender = MoveTemp(AwaitingRender), InFlight = BetweenFramesReadbackPollInFlight](FRHICommandListImmediate& RHICmdList)
 				{
-					TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsSubstepReadbackPoll);
+					TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsBetweenFramesReadbackPoll);
 
 					// A fence only reads as complete once the RHI has processed the GPU's completed work.
 					// An RHI without an interrupt thread (Vulkan without timeline semaphores or with few

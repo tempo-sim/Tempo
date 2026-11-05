@@ -25,7 +25,8 @@ fn api_surface_exists() {
     let _level: fn() -> Result<tempo_sim::proto::tempo_core::CurrentLevelResponse, TempoError> =
         tempo_sim::tempo_core::get_current_level_name;
     let _sim_time = tempo_sim::tempo_core::get_sim_time;
-    let _step: fn() -> Result<Empty, TempoError> = tempo_sim::tempo_core::step;
+    let _step: fn() -> Result<tempo_sim::proto::tempo_core::StepResponse, TempoError> =
+        tempo_sim::tempo_core::step;
     // Every other wrapper takes its request message whole, re-exported beside it.
     let _spawn: fn(tempo_world::SpawnActorRequest)
         -> Result<tempo_sim::proto::tempo_world::SpawnActorResponse, TempoError> =

@@ -21,15 +21,24 @@ message SetSimStepsPerSecondRequest {
   int32 sim_steps_per_second = 1;
 }
 
-message SetSubstepsPerStepRequest {
-  // Number of evenly-spaced substeps each sim step is divided into (used in FIXED_STEP mode).
-  // 1, the default, means no substeps.
-  int32 substeps_per_step = 1;
+message SetStepsPerGameFrameRequest {
+  // Number of sim steps in each game frame (used in FIXED_STEP mode): the world ticks once
+  // every this many steps. 1, the default, ticks it every step.
+  int32 steps_per_game_frame = 1;
 }
 
 message AdvanceStepsRequest {
   // Number of sim steps to advance while paused.
   int32 steps = 1;
+}
+
+message StepResponse {
+  // Whether the last step advanced completed a game frame, which has ticked by the time the
+  // response arrives. Always true with one step per game frame, and in WALL_CLOCK mode.
+  bool game_frame = 1;
+  // Steps until the next game frame ticks: the step that ticks it is this many steps away.
+  // Always 1 with one step per game frame, and in WALL_CLOCK mode.
+  int32 steps_until_game_frame = 2;
 }
 
 message GetSimTimeResponse {
@@ -48,12 +57,22 @@ service TimeService {
 
   rpc SetSimStepsPerSecond(SetSimStepsPerSecondRequest) returns (TempoCore.Empty);
 
-  // Divides each FIXED_STEP step into this many substeps. Takes effect at the next step
-  // boundary.
-  rpc SetSubstepsPerStep(SetSubstepsPerStepRequest) returns (TempoCore.Empty);
+  // Groups FIXED_STEP steps into game frames of this many steps. Takes effect at a game
+  // frame boundary, and the next game frame counts from there. A Step or AdvanceSteps in
+  // progress keeps running.
+  rpc SetStepsPerGameFrame(SetStepsPerGameFrameRequest) returns (TempoCore.Empty);
 
-  // Advances the simulation by `steps` steps while otherwise leaving it paused. Returns
-  // after the final step's OnWorldTickEnd, then re-pauses.
+  // Advances the simulation by `steps` steps while otherwise leaving it paused, pausing it
+  // first if it is playing. Returns after the final step: if that step completes a game
+  // frame, after that frame's OnWorldTickEnd.
+  //
+  // In FIXED_STEP mode with more than one step per game frame, the world ticks only once
+  // every steps_per_game_frame steps, over all of them. A step that doesn't complete a game
+  // frame runs between frames: sim time advances, and RPCs sent between such steps are
+  // handled between them, but nothing else that a frame does happens until the game frame
+  // ticks: actors don't tick, timers don't fire, and sensors don't capture. RPCs that need
+  // a game frame (time settings, level loads, console commands) instead run the rest of the
+  // game frame's steps and are handled once it has ticked.
   //
   // The return signals only that the world has ticked. Data delivered on separate
   // streams (e.g. sensor measurements) is not guaranteed to have arrived at the client
@@ -62,10 +81,7 @@ service TimeService {
   //
   // Only one AdvanceSteps/Step RPC may be in flight at a time. If you need to do other
   // work while waiting, use the async client API.
-  //
-  // Called part-way through a step's substeps, the first step advanced is the rest of
-  // that step.
-  rpc AdvanceSteps(AdvanceStepsRequest) returns (TempoCore.Empty);
+  rpc AdvanceSteps(AdvanceStepsRequest) returns (StepResponse);
 
   rpc Play (TempoCore.Empty) returns (TempoCore.Empty);
 
@@ -73,19 +89,7 @@ service TimeService {
 
   // Advances the simulation by one step. Same return semantics and concurrency rule
   // as AdvanceSteps.
-  rpc Step(TempoCore.Empty) returns (TempoCore.Empty);
-
-  // Advances the simulation by one substep (FIXED_STEP mode only), pausing it first if it
-  // is playing. Returns once the substep has run or, for the substep that ends a step,
-  // once that step's frame has ticked.
-  //
-  // Substeps run between frames. Sim time advances by one substep each time, and other
-  // RPCs sent between substeps are handled between them, but nothing else that a frame
-  // does happens until the step's frame ticks over all of its substeps: actors don't
-  // tick, timers don't fire, and sensors don't capture. RPCs that need a step boundary
-  // (time settings, level loads, console commands) instead run the rest of the step's
-  // substeps and are handled once its frame has ticked.
-  rpc Substep(TempoCore.Empty) returns (TempoCore.Empty);
+  rpc Step(TempoCore.Empty) returns (StepResponse);
 
   // Returns the current simulation time in seconds.
   rpc GetSimTime(TempoCore.Empty) returns (GetSimTimeResponse);

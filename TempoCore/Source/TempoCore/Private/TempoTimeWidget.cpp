@@ -162,8 +162,9 @@ void UTempoTimeWidget::OnStepPressed()
 	{
 		return;
 	}
+	// A whole game frame, so the button always shows the world move.
 	if (ATempoWorldSettings* WorldSettings = Cast<ATempoWorldSettings>(World->GetWorldSettings()))
 	{
-		WorldSettings->Step();
+		WorldSettings->Step(WorldSettings->GetStepsUntilGameFrame());
 	}
 }

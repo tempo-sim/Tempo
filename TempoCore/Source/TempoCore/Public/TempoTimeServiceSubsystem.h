@@ -15,8 +15,9 @@ namespace TempoCore
 	class Empty;
 	class TimeModeRequest;
 	class SetSimStepsPerSecondRequest;
-	class SetSubstepsPerStepRequest;
+	class SetStepsPerGameFrameRequest;
 	class AdvanceStepsRequest;
+	class StepResponse;
 	class GetSimTimeResponse;
 }
 
@@ -36,17 +37,15 @@ public:
 
 	void SetSimStepsPerSecond(const TempoCore::SetSimStepsPerSecondRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
 
-	void SetSubstepsPerStep(const TempoCore::SetSubstepsPerStepRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
+	void SetStepsPerGameFrame(const TempoCore::SetStepsPerGameFrameRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
 
-	void AdvanceSteps(const TempoCore::AdvanceStepsRequest& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
+	void AdvanceSteps(const TempoCore::AdvanceStepsRequest& Request, const TResponseDelegate<TempoCore::StepResponse>& ResponseContinuation) const;
 
 	void Play(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
 
 	void Pause(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
 
-	void Step(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
-
-	void Substep(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::Empty>& ResponseContinuation) const;
+	void Step(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::StepResponse>& ResponseContinuation) const;
 
 	void GetSimTime(const TempoCore::Empty& Request, const TResponseDelegate<TempoCore::GetSimTimeResponse>& ResponseContinuation) const;
 };

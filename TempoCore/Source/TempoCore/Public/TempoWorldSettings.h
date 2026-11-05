@@ -3,12 +3,13 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "TempoCoreTypes.h"
 #include "GameFramework/WorldSettings.h"
 
 #include "TempoWorldSettings.generated.h"
 
-DECLARE_MULTICAST_DELEGATE_ThreeParams(FTempoSubstepDelegate, UWorld* /*World*/, float /*DeltaSeconds*/, double /*SimTime*/);
-DECLARE_MULTICAST_DELEGATE_OneParam(FTempoSubstepLoopPollDelegate, UWorld* /*World*/);
+DECLARE_MULTICAST_DELEGATE_ThreeParams(FTempoStepDelegate, UWorld* /*World*/, float /*DeltaSeconds*/, double /*SimTime*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FTempoBetweenFramesPollDelegate, UWorld* /*World*/);
 
 UENUM()
 enum class ETempoStepResult : uint8
@@ -28,36 +29,38 @@ class TEMPOCORE_API ATempoWorldSettings : public AWorldSettings
 	GENERATED_BODY()
 
 public:
-	// Begin simulating NumSteps steps. If OnComplete is bound, fires after the final
-	// simulated tick ends or if the wait is aborted. Returns false if a waited step is
-	// already in progress (only one waited step may be in flight at a time).
+	// Begin simulating NumSteps steps, pausing first if the world is playing. If OnComplete is bound,
+	// it fires once the final step has run or the wait is aborted; when that step completes a game
+	// frame (UTempoCoreSettings::StepsPerGameFrame), once that frame has ticked. Returns false if a
+	// waited step is already in progress (only one waited step may be in flight at a time).
+	//
+	// In FixedStep, a step that doesn't complete a game frame runs between frames, and RPCs that
+	// arrive between such steps are handled between them too. In WallClock every step is a frame.
 	bool Step(int32 NumSteps = 1, TFunction<void(ETempoStepResult)> OnComplete = {});
 
-	// Advance one substep (UTempoCoreSettings::SubstepsPerStep) in FixedStep mode, pausing first if
-	// the world is playing. Substeps run between frames, and RPCs that arrive between them are handled
-	// between them too. OnComplete fires once the substep has run or, for the substep that ends its
-	// step, once that step's frame has ticked. Returns false if a substep or a step is already in
-	// progress.
-	bool Substep(TFunction<void(ETempoStepResult)> OnComplete = {});
+	// Steps the current game frame has run, and how many it has left until it ticks. With one step
+	// per game frame (the default) these are always 0 and 1.
+	int32 GetStepsIntoGameFrame() const { return StepsIntoGameFrame; }
+	int32 GetStepsUntilGameFrame() const;
 
 	// Unpause, ending any step in progress (its completion fires as aborted). Without that, a step's
 	// re-pause at the end of its frame would undo a Play that arrived during the frame.
 	void Play();
 
-	// Fires once per substep in FixedStep mode, in order, with the substep's length and its end time.
-	// While it fires, world time (GetTimeSeconds) is that end time and GetDeltaSeconds is that length.
-	// The substeps a client drives with Substep run between frames, and the rest run just before the
-	// step's frame ticks; with one substep per step (the default) that is once per frame.
+	// Fires once per step in FixedStep mode, in order, with the step's length and its end time. While
+	// it fires, world time (GetTimeSeconds) is that end time and GetDeltaSeconds is that length. A step
+	// a client advances on its own runs between frames; the rest of a game frame's steps run just
+	// before the frame ticks. With one step per game frame (the default) that is once per frame.
 	//
-	// Only world time and delta seconds move from substep to substep. No actor or component ticks,
-	// no timer fires, Chaos does not step and GFrameCounter does not advance until the step's frame
-	// ticks, over all of its substeps at once. The same holds for an RPC handled between substeps
-	// (see ITempoServiceProvider).
-	FTempoSubstepDelegate OnSubstep;
+	// Only world time and delta seconds move from step to step within a game frame. No actor or
+	// component ticks, no timer fires, Chaos does not step and GFrameCounter does not advance until
+	// the game frame ticks, over all of its steps at once. The same holds for an RPC handled between
+	// steps (see ITempoServiceProvider).
+	FTempoStepDelegate OnStep;
 
-	// Polled between the substeps a client drives and while the world waits for its next one, so
-	// sensors can read back and send measurements without waiting for a frame to end.
-	static FTempoSubstepLoopPollDelegate OnSubstepLoopPoll;
+	// Polled between the steps a client advances between frames and while the world waits for its
+	// next one, so sensors can read back and send measurements without waiting for a frame to end.
+	static FTempoBetweenFramesPollDelegate OnBetweenFramesPoll;
 
 	virtual void SetPauserPlayerState(APlayerState* PlayerState) override;
 
@@ -103,26 +106,34 @@ private:
 
 	void FirePendingStepCompletion(ETempoStepResult Result);
 
-	// UTempoCoreSettings::SubstepsPerStep, or 1 if Chaos ticks asynchronously.
-	int32 GetSubstepsPerStep() const;
+	// UTempoCoreSettings::StepsPerGameFrame, or 1 if Chaos ticks asynchronously.
+	int32 GetStepsPerGameFrame() const;
 
-	// Warns when Chaos's own settings will integrate a step more coarsely than Tempo's substeps, drop
-	// time, or tick on their own clock.
+	// Warns when Chaos's own settings will integrate a game frame more coarsely than Tempo's steps,
+	// drop time, or tick on their own clock.
 	void CheckPhysicsSettings() const;
 
-	// While a client is driving substeps, serves its RPCs between frames and runs each substep it
-	// asks for, until the step is done, the client goes quiet, or a request needs the step boundary.
+	bool HasStepsToRun() const { return StepsToSimulate.IsSet() && StepsToSimulate.GetValue() > 0; }
+
+	// In a paused FixedStep world, runs the steps a Step asked for that don't complete a game frame,
+	// between frames, and starts the game frame when one does. While a client advances one step at a
+	// time, also serves its RPCs between them, until it goes quiet or a request needs a game frame.
 	void OnBeginFrame();
 
-	void RunClientSubsteps();
+	void RunStepsBetweenFrames();
 
-	// Runs the step's next substep: moves world time to its end and fires OnSubstep.
-	void RunSubstep();
+	// Unpause for the frame that ticks over the current game frame's steps.
+	void StartGameFrame();
 
-	// Runs whatever substeps the step has left, from FixupDeltaSeconds.
-	void RunSubstepsToStepEnd();
+	// Runs the game frame's next step: moves world time to its end and fires OnStep.
+	void RunStep();
 
-	void UpdateNoSubstepHold() const;
+	// Runs whatever steps the game frame has left, from FixupDeltaSeconds.
+	void RunStepsToGameFrameEnd();
+
+	void EnsureTickEndHandle();
+
+	void UpdateGameFrameOnlyHold() const;
 
 #if WITH_EDITOR
 	// Bridges Tempo's game pause (the pauser player state) and the editor's PIE pause
@@ -151,35 +162,40 @@ private:
 	UPROPERTY(VisibleAnywhere)
 	double SimTimeWhenTimeModeChanged = 0;
 
+	// Steps run since sim time was last synced to the step grid. In FixedStep, sim time is this many
+	// steps, which keeps it exact.
 	UPROPERTY(VisibleAnywhere)
 	uint64 FixedStepsCount = 0;
 
+	// Steps still to run for the Step in progress, if there is one.
 	TOptional<int32> StepsToSimulate;
 
 	TFunction<void(ETempoStepResult)> PendingStepCompletion;
 
 	bool bSelfPausing = false;
 
-	// Substeps of the current step that have run. Nonzero only between frames, while a client drives
-	// the step one substep at a time; the step's frame then ticks over all of them.
-	int32 SubstepsIntoStep = 0;
+	// Steps of the current game frame that have run. Nonzero only between frames, part-way through a
+	// game frame; the frame then ticks over all of them.
+	int32 StepsIntoGameFrame = 0;
 
-	// World time when the current step's first substep ran.
-	double StepStartTime = 0.0;
+	// World time when the current game frame's first step ran.
+	double GameFrameStartTime = 0.0;
 
-	bool bInSubstepLoop = false;
+	bool bInStepLoop = false;
 
-	// Whether the last frame's RunClientSubsteps ran a substep. Each frame then starts by waiting for
-	// the client's next one, rather than leaving it to land in the frame's RPC pump.
-	bool bClientSubstepping = false;
+	// Whether the last frame's RunStepsBetweenFrames ran a step there. Each frame then starts by
+	// waiting for the client's next one, rather than leaving it to land in the frame's RPC pump.
+	bool bClientStepping = false;
 
-	bool bSubstepRequested = false;
-	TFunction<void(ETempoStepResult)> SubstepCompletion;
+	mutable bool bWarnedNoStepSubscriber = false;
 
-	mutable bool bWarnedNoSubstepSubscriber = false;
-
-	// The steps per second and substeps per step CheckPhysicsSettings last checked.
+	// The steps per second and steps per game frame CheckPhysicsSettings last checked.
 	mutable FIntPoint LastCheckedStepSettings = FIntPoint::ZeroValue;
+
+	// The time settings that change what a step is. A change to anything else (steps per game frame)
+	// regroups steps into game frames and leaves a Step in progress running.
+	ETimeMode LastTimeMode = ETimeMode::WallClock;
+	int32 LastSimulatedStepsPerSecond = 0;
 
 	FDelegateHandle BeginFrameHandle;
 

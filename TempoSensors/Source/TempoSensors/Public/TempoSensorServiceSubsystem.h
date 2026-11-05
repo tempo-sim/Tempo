@@ -75,20 +75,20 @@ protected:
 	// Sends every measurement whose readback has completed, waiting for the decode tasks.
 	void SendCompletedMeasurements();
 
-	// Polled between the substeps a client drives; see ATempoWorldSettings::OnSubstepLoopPoll.
-	void OnSubstepLoopPoll(UWorld* World);
+	// Polled between the steps a client advances between frames; see ATempoWorldSettings::OnBetweenFramesPoll.
+	void OnBetweenFramesPoll(UWorld* World);
 
-	// Set while a substep readback poll is queued on the render thread, so OnSubstepLoopPoll (which
+	// Set while a between-frames readback poll is queued on the render thread, so OnBetweenFramesPoll (which
 	// runs far more often than the render thread drains) never queues a second.
-	TSharedRef<std::atomic<bool>> SubstepReadbackPollInFlight = MakeShared<std::atomic<bool>>(false);
+	TSharedRef<std::atomic<bool>> BetweenFramesReadbackPollInFlight = MakeShared<std::atomic<bool>>(false);
 
-	FDelegateHandle SubstepLoopPollHandle;
+	FDelegateHandle BetweenFramesPollHandle;
 
-	// The active sensors, gathered once per engine frame: OnSubstepLoopPoll runs every millisecond or
-	// so and ForEachActiveSensor walks every actor component. No frame passes between substeps, so the
+	// The active sensors, gathered once per engine frame: OnBetweenFramesPoll runs every millisecond or
+	// so and ForEachActiveSensor walks every actor component. No frame passes between those steps, so the
 	// set can't change under it.
-	TArray<TWeakObjectPtr<UActorComponent>> SubstepSensors;
-	uint64 SubstepSensorsFrame = MAX_uint64;
+	TArray<TWeakObjectPtr<UActorComponent>> BetweenFramesSensors;
+	uint64 BetweenFramesSensorsFrame = MAX_uint64;
 
 	template <typename RequestType, typename ResponseType>
 	void RequestImages(const RequestType& Request, const TResponseDelegate<ResponseType>& ResponseContinuation) const;

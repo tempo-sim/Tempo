@@ -341,7 +341,7 @@ void FTempoServer::TickInternal()
 		return;
 	}
 
-	if (!bHoldNoSubstepRequests && !HeldRequestTags.IsEmpty())
+	if (!bHoldGameFrameOnlyRequests && !HeldRequestTags.IsEmpty())
 	{
 		const TArray<int32> HeldTags = MoveTemp(HeldRequestTags);
 		HeldRequestTags.Reset();
@@ -477,7 +477,7 @@ void FTempoServer::HandleEventForTag(int32 Tag, bool bOk)
 			}
 		case FRequestManager::REQUESTED: // A request has been received.
 			{
-				if (bHoldNoSubstepRequests && (*RequestManager)->IsNoSubstep())
+				if (bHoldGameFrameOnlyRequests && (*RequestManager)->IsGameFrameOnly())
 				{
 					HeldRequestTags.Add(Tag);
 					break;
