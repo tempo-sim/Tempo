@@ -513,7 +513,7 @@ int32 ATempoWorldSettings::GetStepsPerGameFrame() const
 	return StepsPerGameFrame > 1 && UPhysicsSettings::Get()->bTickPhysicsAsync ? 1 : StepsPerGameFrame;
 }
 
-void ATempoWorldSettings::CheckPhysicsSettings() const
+void ATempoWorldSettings::CheckPhysicsSettings()
 {
 	const UTempoCoreSettings* Settings = GetDefault<UTempoCoreSettings>();
 	if (!GetWorld() || !GetWorld()->IsGameWorld() || Settings->GetTimeMode() != ETimeMode::FixedStep)
@@ -534,15 +534,17 @@ void ATempoWorldSettings::CheckPhysicsSettings() const
 	const int32 StepsPerGameFrame = Settings->GetStepsPerGameFrame();
 	const double GameFrameSeconds = static_cast<double>(StepsPerGameFrame) / Settings->GetSimulatedStepsPerSecond();
 
-	if (GameFrameSeconds > PhysicsSettings->MaxPhysicsDeltaTime)
-	{
-		UE_LOG(LogTempoCore, Warning, TEXT("A FixedStep game frame (%.4fs) is longer than the physics settings' MaxPhysicsDeltaTime (%.4fs), so Chaos will simulate less time than each game frame advances."),
-			GameFrameSeconds, PhysicsSettings->MaxPhysicsDeltaTime);
-	}
-
 	if (StepsPerGameFrame <= 1)
 	{
 		return;
+	}
+
+	// Without substepping Chaos clamps a frame to MaxPhysicsDeltaTime; with it, to MaxSubsteps substeps
+	// of MaxSubstepDeltaTime, checked below (FChaosScene::SetUpForFrame).
+	if (!PhysicsSettings->bSubstepping && GameFrameSeconds > PhysicsSettings->MaxPhysicsDeltaTime)
+	{
+		UE_LOG(LogTempoCore, Warning, TEXT("A FixedStep game frame (%.4fs) is longer than the physics settings' MaxPhysicsDeltaTime (%.4fs), so Chaos will simulate less time than each game frame advances."),
+			GameFrameSeconds, PhysicsSettings->MaxPhysicsDeltaTime);
 	}
 
 	// Async physics runs Chaos on its own thread at its own step size, and can drop steps to keep up,
@@ -578,19 +580,7 @@ void ATempoWorldSettings::OnBeginFrame()
 		return;
 	}
 
-	// A request that needs a game frame arrived in a paused frame part-way through one. Run the game
-	// frame's remaining steps, so the request is handled in its frame.
-	if (StepsIntoGameFrame > 0 && !HasStepsToRun() && FTempoServer::Get().HasHeldRequests())
-	{
-		StepsToSimulate = GetStepsPerGameFrame() - StepsIntoGameFrame;
-		StartGameFrame();
-		return;
-	}
-
-	if (HasStepsToRun() || bClientStepping)
-	{
-		RunStepsBetweenFrames();
-	}
+	RunStepsBetweenFrames();
 }
 
 void ATempoWorldSettings::RunStepsBetweenFrames()
@@ -606,13 +596,13 @@ void ATempoWorldSettings::RunStepsBetweenFrames()
 
 	{
 		TGuardValue<bool> InLoopGuard(bInStepLoop, true);
-		TGuardValue<float> DeltaSecondsGuard(World->DeltaTimeSeconds, World->DeltaTimeSeconds);
 
 		while (true)
 		{
 			// Between a client's steps, serve its RPCs until it asks for the next one, which then runs in
-			// this frame rather than landing in its RPC pump and running in the next. If the client goes
-			// quiet, stop waiting, and let paused frames run until it steps again.
+			// this frame rather than landing in its RPC pump and running in the next. If the next Step
+			// doesn't come within the wait timeout, stop waiting (other RPCs don't extend it), and let
+			// paused frames run until the client steps again.
 			if (!HasStepsToRun())
 			{
 				if (!bClientStepping)
@@ -662,9 +652,9 @@ void ATempoWorldSettings::RunStepsBetweenFrames()
 		}
 	}
 
-	// A request held for the game frame ends the wait for the client's next step, but not the game
-	// frame's steps: the frame runs the rest of them, so it lands where it would have, and the request
-	// is handled after.
+	// A request held for the game frame, whether it arrived while waiting here or in an earlier paused
+	// frame's RPC pump, ends the wait for the client's next step but not the game frame's steps: the
+	// frame runs the rest of them, so it lands where it would have, and the request is handled after.
 	if (StepsIntoGameFrame > 0 && !HasStepsToRun() && Server.HasHeldRequests() && World->IsPaused())
 	{
 		StepsToSimulate = StepsPerGameFrame - StepsIntoGameFrame;
@@ -711,7 +701,6 @@ void ATempoWorldSettings::RunStepsToGameFrameEnd()
 	UWorld* World = GetWorld();
 	check(World);
 
-	TGuardValue<float> DeltaSecondsGuard(World->DeltaTimeSeconds, World->DeltaTimeSeconds);
 	const int32 StepsPerGameFrame = GetStepsPerGameFrame();
 	while (StepsIntoGameFrame < StepsPerGameFrame)
 	{

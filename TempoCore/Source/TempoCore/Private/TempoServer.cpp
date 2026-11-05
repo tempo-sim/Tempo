@@ -297,6 +297,7 @@ void FTempoServer::Deinitialize()
 
 	Services.Empty();
 	RequestManagers.Empty();
+	HeldRequestTags.Reset();
 
 	if (!BoundSocketPath.IsEmpty())
 	{
@@ -350,7 +351,6 @@ void FTempoServer::TickInternal()
 	if (!HeldRequestTags.IsEmpty() && !ShouldHoldGameFrameOnlyRequests())
 	{
 		const TArray<int32> HeldTags = MoveTemp(HeldRequestTags);
-		HeldRequestTags.Reset();
 		for (const int32 HeldTag : HeldTags)
 		{
 			HandleEventForTag(HeldTag, true);
@@ -427,7 +427,7 @@ bool FTempoServer::ShouldHoldGameFrameOnlyRequests() const
 	return WorldSettings && WorldSettings->ShouldHoldGameFrameOnlyRequests();
 }
 
-bool FTempoServer::PumpEvents(TFunctionRef<bool()> ShouldStop, double QuietTimeoutSeconds, double PollIntervalSeconds, TFunctionRef<void()> OnPoll)
+bool FTempoServer::PumpEvents(TFunctionRef<bool()> ShouldStop, double TimeoutSeconds, double PollIntervalSeconds, TFunctionRef<void()> OnPoll)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(TempoServerPumpEvents);
 
@@ -438,7 +438,7 @@ bool FTempoServer::PumpEvents(TFunctionRef<bool()> ShouldStop, double QuietTimeo
 
 	const int64 PollIntervalNanoSeconds = FMath::Max<int64>(1, static_cast<int64>(PollIntervalSeconds * 1.e9));
 	const gpr_timespec PollInterval {PollIntervalNanoSeconds / 1000000000, static_cast<int32>(PollIntervalNanoSeconds % 1000000000), GPR_TIMESPAN};
-	double LastEventSeconds = FPlatformTime::Seconds();
+	const double DeadlineSeconds = FPlatformTime::Seconds() + TimeoutSeconds;
 	while (!ShouldStop())
 	{
 		int32* Tag;
@@ -450,7 +450,6 @@ bool FTempoServer::PumpEvents(TFunctionRef<bool()> ShouldStop, double QuietTimeo
 		case grpc::CompletionQueue::GOT_EVENT:
 			{
 				HandleEventForTag(*Tag, bOk);
-				LastEventSeconds = FPlatformTime::Seconds();
 				break;
 			}
 		case grpc::CompletionQueue::SHUTDOWN:
@@ -460,12 +459,15 @@ bool FTempoServer::PumpEvents(TFunctionRef<bool()> ShouldStop, double QuietTimeo
 		case grpc::CompletionQueue::TIMEOUT:
 			{
 				OnPoll();
-				if (FPlatformTime::Seconds() - LastEventSeconds > QuietTimeoutSeconds)
-				{
-					return false;
-				}
 				break;
 			}
+		}
+
+		// A deadline, not a quiet period: steady traffic (a client polling, a stream's writes) must
+		// not keep the caller here, which in the editor would freeze it.
+		if (FPlatformTime::Seconds() > DeadlineSeconds)
+		{
+			return ShouldStop();
 		}
 	}
 	return true;

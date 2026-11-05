@@ -388,11 +388,11 @@ public:
 		DeactivateService(ServiceName);
 	}
 
-	// Handles gRPC events on the game thread until ShouldStop returns true, or until no event has
-	// arrived for QuietTimeoutSeconds. While the queue is idle, OnPoll runs every PollIntervalSeconds.
+	// Handles gRPC events on the game thread until ShouldStop returns true, or for at most
+	// TimeoutSeconds. While the queue is idle, OnPoll runs every PollIntervalSeconds.
 	// Returns whether ShouldStop ended it. This is how ATempoWorldSettings serves RPCs between the
 	// steps a client advances between frames, outside TickInternal.
-	bool PumpEvents(TFunctionRef<bool()> ShouldStop, double QuietTimeoutSeconds, double PollIntervalSeconds, TFunctionRef<void()> OnPoll);
+	bool PumpEvents(TFunctionRef<bool()> ShouldStop, double TimeoutSeconds, double PollIntervalSeconds, TFunctionRef<void()> OnPoll);
 
 	// Whether a request to an RPC declared GameFrameOnly has been held back, because the game world's
 	// ATempoWorldSettings said it had to wait. TickInternal handles held requests first, once it no

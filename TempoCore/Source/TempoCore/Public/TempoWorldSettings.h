@@ -115,14 +115,14 @@ private:
 
 	// Warns when Chaos's own settings will integrate a game frame more coarsely than Tempo's steps,
 	// drop time, or tick on their own clock.
-	void CheckPhysicsSettings() const;
+	void CheckPhysicsSettings();
 
 	bool HasStepsToRun() const { return StepsToSimulate.IsSet() && StepsToSimulate.GetValue() > 0; }
 
 	// In a paused FixedStep world, runs the steps a Step asked for that don't complete a game frame,
-	// between frames, and starts the game frame when one does. While a client keeps stepping, also
-	// serves its RPCs between frames until its next Step, until it goes quiet or a request needs a
-	// game frame.
+	// between frames, and starts the game frame when one does, or when a request held for it is
+	// waiting. While a client keeps stepping, also serves its RPCs between frames until its next Step,
+	// until the wait times out or a request needs a game frame.
 	void OnBeginFrame();
 
 	void RunStepsBetweenFrames();
@@ -192,10 +192,10 @@ private:
 	// so it runs in that frame, rather than landing in the frame's RPC pump and running in the next.
 	bool bClientStepping = false;
 
-	mutable bool bWarnedNoStepSubscriber = false;
+	bool bWarnedNoStepSubscriber = false;
 
 	// The steps per second and steps per game frame CheckPhysicsSettings last checked.
-	mutable FIntPoint LastCheckedStepSettings = FIntPoint::ZeroValue;
+	FIntPoint LastCheckedStepSettings = FIntPoint::ZeroValue;
 
 	// The time settings that change what a step is. A change to anything else (steps per game frame)
 	// regroups steps into game frames and leaves a Step in progress running.

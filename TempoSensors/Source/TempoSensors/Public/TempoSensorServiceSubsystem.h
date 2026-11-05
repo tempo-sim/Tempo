@@ -85,8 +85,9 @@ protected:
 	FDelegateHandle BetweenFramesPollHandle;
 
 	// The active sensors, gathered once per engine frame: OnBetweenFramesPoll runs every millisecond or
-	// so and ForEachActiveSensor walks every actor component. No frame passes between those steps, so the
-	// set can't change under it.
+	// so and ForEachActiveSensor walks every actor component. The set can change between steps (spawn
+	// and destroy RPCs run there), but a sensor spawned there has nothing to read back until a frame
+	// ticks, and the weak pointers drop one that is destroyed.
 	TArray<TWeakObjectPtr<UActorComponent>> BetweenFramesSensors;
 	uint64 BetweenFramesSensorsFrame = MAX_uint64;
 

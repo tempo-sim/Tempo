@@ -158,24 +158,37 @@ void UTempoSensorServiceSubsystem::OnWorldTickStart(UWorld* World, ELevelTick Ti
 	}
 }
 
+namespace
+{
+	// Sends every measurement whose readback has completed. The decode tasks respond to their gRPC
+	// requests from worker threads, so they must finish before the game thread handles gRPC events
+	// again.
+	void SendMeasurementsAndWait(TConstArrayView<ITempoSensorInterface*> Sensors)
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsSendMeasurements);
+		TArray<TFuture<void>> SendMeasurementsTasks;
+		for (ITempoSensorInterface* Sensor : Sensors)
+		{
+			if (TOptional<TFuture<void>> Future = Sensor->SendMeasurements())
+			{
+				SendMeasurementsTasks.Add(MoveTemp(Future.GetValue()));
+			}
+		}
+		for (const TFuture<void>& SendMeasurementsTask : SendMeasurementsTasks)
+		{
+			SendMeasurementsTask.Wait();
+		}
+	}
+}
+
 void UTempoSensorServiceSubsystem::SendCompletedMeasurements()
 {
-	TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsSendMeasurements);
-	TArray<TFuture<void>> SendMeasurementsTasks;
-	ForEachActiveSensor([&SendMeasurementsTasks](ITempoSensorInterface* Sensor)
+	TArray<ITempoSensorInterface*> Sensors;
+	ForEachActiveSensor([&Sensors](ITempoSensorInterface* Sensor)
 	{
-		if (TOptional<TFuture<void>> Future = Sensor->SendMeasurements())
-		{
-			SendMeasurementsTasks.Add(MoveTemp(Future.GetValue()));
-		}
+		Sensors.Add(Sensor);
 	});
-
-	// The decode tasks respond to their gRPC requests from worker threads, so they must finish before
-	// the game thread handles gRPC events again.
-	for (const TFuture<void>& SendMeasurementsTask : SendMeasurementsTasks)
-	{
-		SendMeasurementsTask.Wait();
-	}
+	SendMeasurementsAndWait(Sensors);
 }
 
 void UTempoSensorServiceSubsystem::OnBetweenFramesPoll(UWorld* World)
@@ -245,18 +258,7 @@ void UTempoSensorServiceSubsystem::OnBetweenFramesPoll(UWorld* World)
 		}
 	}
 
-	TArray<TFuture<void>> SendMeasurementsTasks;
-	for (ITempoSensorInterface* Sensor : Sensors)
-	{
-		if (TOptional<TFuture<void>> Future = Sensor->SendMeasurements())
-		{
-			SendMeasurementsTasks.Add(MoveTemp(Future.GetValue()));
-		}
-	}
-	for (const TFuture<void>& SendMeasurementsTask : SendMeasurementsTasks)
-	{
-		SendMeasurementsTask.Wait();
-	}
+	SendMeasurementsAndWait(Sensors);
 }
 
 TempoSensors::MeasurementType ToProtoMeasurementType(EMeasurementType ImageType)
