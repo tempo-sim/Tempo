@@ -44,6 +44,11 @@ public:
 	// Respond to pending measurement requests. Returns a future, so these can be parallelized.
 	virtual TOptional<TFuture<void>> SendMeasurements() = 0;
 
+	// Whether any request is waiting for a measurement. Between frames, a sensor with none isn't sent:
+	// a readback that completes then is kept until a request arrives, or until the next game frame
+	// sends it. A sensor that can't say returns true and is always sent.
+	virtual bool HasPendingMeasurementRequests() const { return true; }
+
 	// Execute any pending capture scheduled by MaybeMarkPendingCapture. Called from the subsystem
 	// after OnWorldTickEnd, when all actor transforms are final and SendAllEndOfFrameUpdates has run.
 	virtual void ExecutePendingCapture() {}

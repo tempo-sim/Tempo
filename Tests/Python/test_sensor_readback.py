@@ -800,3 +800,63 @@ def test_a_slower_sensor_captures_on_multiples_of_its_period(camera_rig, fixed_s
     off_grid = [t for t in times if abs(t / period - round(t / period)) > 1e-6]
     assert not off_grid, f"captures at {times} s are not on multiples of the {period} s period"
     assert all(abs((b - a) - period) < 1e-6 for a, b in zip(times, times[1:])), f"captures at {times} s are not one period apart"
+
+
+async def _sequence_ids_while_stepping(owner, sensor, steps):
+    """Read a depth stream continuously while stepping back to back, without waiting on the stream
+    between steps, and return the sequence ids it delivered."""
+    stream = ts.stream_depth_images(owner=owner, sensor=sensor).__aiter__()
+    ids = []
+
+    async def consume():
+        async for image in stream:
+            ids.append(image.header.sequence_id)
+
+    consumer = asyncio.ensure_future(consume())
+    try:
+        await asyncio.sleep(0.05)
+        for _ in range(steps):
+            await tc.step()
+        # The last captures' readbacks finish in the frames after they were taken.
+        for _ in range(3):
+            await asyncio.sleep(0.05)
+            await tc.step()
+    finally:
+        consumer.cancel()
+        try:
+            await consumer
+        except (asyncio.CancelledError, RuntimeError):
+            pass
+        try:
+            await stream.aclose()
+        except (RuntimeError, asyncio.CancelledError):
+            pass
+    return ids
+
+
+@pytest.mark.parametrize("steps_per_game_frame", [1, 4])
+def test_a_stream_read_while_stepping_drops_no_capture(camera_rig, fixed_step, steps_per_game_frame):
+    """A stream read while the client steps without waiting on it must receive every capture.
+
+    With pipelined rendering a capture can be taken on a request that an earlier capture's readback
+    then answers, so its own readback has no request until the stream asks again, which it does only
+    once its last response is written. Sending that readback before then drops the capture."""
+    owner, sensor = camera_rig
+    rate_hz = fixed_step / steps_per_game_frame
+    original_rate = tw.get_property(actor=owner, component=sensor, property="RateHz").float_value
+    tw.set_property(actor=owner, component=sensor, property="RateHz", value=WorldControl.Value(float_value=rate_hz))
+    tc.set_steps_per_game_frame(steps_per_game_frame=steps_per_game_frame)
+    _pipelined(True)
+    try:
+        ids = asyncio.run(_sequence_ids_while_stepping(owner, sensor, 20 * steps_per_game_frame))
+    finally:
+        _pipelined(False)
+        tc.set_steps_per_game_frame(steps_per_game_frame=1)
+        tw.set_property(actor=owner, component=sensor, property="RateHz", value=WorldControl.Value(float_value=original_rate))
+
+    # The first captures absorb the rate change and a depth reconfigure.
+    ids = ids[2:]
+    assert len(ids) >= 10, f"only {len(ids)} captures arrived: {ids}"
+    gaps = [b - a for a, b in zip(ids, ids[1:])]
+    dropped = [(a, b) for a, b in zip(ids, ids[1:]) if b - a != 1]
+    assert not dropped, f"captures were dropped between sequence ids {dropped} (all ids {ids}, gaps {gaps})"

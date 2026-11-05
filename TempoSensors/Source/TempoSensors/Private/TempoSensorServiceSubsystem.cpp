@@ -258,6 +258,11 @@ void UTempoSensorServiceSubsystem::OnBetweenFramesPoll(UWorld* World)
 		}
 	}
 
+	// Only sensors with a request waiting. A capture can be taken on a request that an earlier capture's
+	// readback then answers, and a stream asks again only once that response is written, so its own
+	// readback can complete with no request yet. Sent then, it would be dropped. Kept, it goes to the
+	// stream's next request, or to the next game frame's send, so nothing is held past a game frame.
+	Sensors.RemoveAll([](const ITempoSensorInterface* Sensor) { return !Sensor->HasPendingMeasurementRequests(); });
 	SendMeasurementsAndWait(Sensors);
 }
 
