@@ -86,7 +86,7 @@ void UTempoEngineServiceSubsystem::RegisterServices(FTempoServer& Server)
 	Server.RegisterService<EngineService>(
 		SimpleRequestHandler(&EngineAsyncService::RequestSetConsoleVariable, &UTempoEngineServiceSubsystem::SetConsoleVariable),
 		SimpleRequestHandler(&EngineAsyncService::RequestGetConsoleVariable, &UTempoEngineServiceSubsystem::GetConsoleVariable),
-		SimpleRequestHandler(&EngineAsyncService::RequestExecConsoleCommand, &UTempoEngineServiceSubsystem::ExecConsoleCommand).AtStepBoundary(),
+		SimpleRequestHandler(&EngineAsyncService::RequestExecConsoleCommand, &UTempoEngineServiceSubsystem::ExecConsoleCommand).NoSubstep(),
 		SimpleRequestHandler(&EngineAsyncService::RequestGetEngineInfo, &UTempoEngineServiceSubsystem::GetEngineInfo)
 	);
 }

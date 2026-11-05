@@ -87,7 +87,7 @@ substeps, between frames. World time and delta seconds are the latest substep's,
 the right time with plain `GetWorld()->GetTimeSeconds()`. Nothing else moves: actors don't tick,
 timers don't fire, Chaos doesn't step and `GFrameCounter` stays put, until the step's frame ticks
 over all of its substeps. An RPC that changes the step grid, loads a level or changes engine state
-declares `.AtStepBoundary()` at registration; while a step is part-way through, its requests are
+declares `.NoSubstep()` at registration; while a step is part-way through, its requests are
 held, the step runs to its end, and they're handled in that step's frame. Per-substep work belongs
 on `ATempoWorldSettings::OnSubstep`.
 

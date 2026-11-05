@@ -24,7 +24,7 @@ class TEMPOCORE_API UTempoServiceProvider : public UInterface
  * seconds are the latest substep's, but nothing else has moved: actors and components have
  * not ticked, timers have not fired, and GFrameCounter is the last frame's. An RPC that
  * needs a step boundary and a world tick (it changes the step grid, loads a level, or
- * changes engine state) declares it at registration with AtStepBoundary().
+ * changes engine state) declares it at registration with NoSubstep().
  */
 class TEMPOCORE_API ITempoServiceProvider
 {

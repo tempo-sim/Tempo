@@ -341,7 +341,7 @@ void FTempoServer::TickInternal()
 		return;
 	}
 
-	if (!bHoldStepBoundaryRequests && !HeldRequestTags.IsEmpty())
+	if (!bHoldNoSubstepRequests && !HeldRequestTags.IsEmpty())
 	{
 		const TArray<int32> HeldTags = MoveTemp(HeldRequestTags);
 		HeldRequestTags.Reset();
@@ -477,7 +477,7 @@ void FTempoServer::HandleEventForTag(int32 Tag, bool bOk)
 			}
 		case FRequestManager::REQUESTED: // A request has been received.
 			{
-				if (bHoldStepBoundaryRequests && (*RequestManager)->IsAtStepBoundary())
+				if (bHoldNoSubstepRequests && (*RequestManager)->IsNoSubstep())
 				{
 					HeldRequestTags.Add(Tag);
 					break;

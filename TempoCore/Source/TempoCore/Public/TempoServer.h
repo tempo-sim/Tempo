@@ -61,14 +61,14 @@ struct TRequestHandler
 	// grid, loads or leaves a level, or changes engine state. While a step is part-way through its
 	// substeps, its requests are held; the step then runs to its end, and they are handled in that
 	// step's frame.
-	TRequestHandler AtStepBoundary() const
+	TRequestHandler NoSubstep() const
 	{
 		TRequestHandler Handler(*this);
-		Handler.bAtStepBoundary = true;
+		Handler.bNoSubstep = true;
 		return Handler;
 	}
 
-	bool IsAtStepBoundary() const { return bAtStepBoundary; }
+	bool IsNoSubstep() const { return bNoSubstep; }
 
 	void AcceptRequests(grpc::ServerContext* Context, RequestType* Request, ResponderType<ResponseType>* Responder, grpc::ServerCompletionQueue* CompletionQueue, void* Tag)
 	{
@@ -112,7 +112,7 @@ private:
 	TDelegate<void(const RequestType&, const TResponseDelegate<ResponseType>&)> HandleDelegate;
 	TDelegate<void(grpc::ServerContext*, RequestType*, ResponderType<ResponseType>*, grpc::CompletionQueue*, grpc::ServerCompletionQueue*, void*)> AcceptDelegate;
 	FWeakObjectPtr ActiveObject;
-	bool bAtStepBoundary = false;
+	bool bNoSubstep = false;
 };
 
 template <class ServiceType, class RequestType, class ResponseType, class UserObjectType, bool Const>
@@ -167,7 +167,7 @@ struct FRequestManager : TSharedFromThis<FRequestManager>
 	virtual void HandleAndRespond() = 0;
 	virtual FRequestManager* Duplicate(int32 NewTag) const = 0;
 	virtual const FName GetServiceName() const = 0;
-	virtual bool IsAtStepBoundary() const = 0;
+	virtual bool IsNoSubstep() const = 0;
 	virtual void Activate(UObject* Object) = 0;
 	virtual void Deactivate() = 0;
 	virtual const FWeakObjectPtr& GetActiveObject() const = 0;
@@ -199,9 +199,9 @@ public:
 		return ServiceName;
 	}
 
-	virtual bool IsAtStepBoundary() const override
+	virtual bool IsNoSubstep() const override
 	{
-		return Handler->IsAtStepBoundary();
+		return Handler->IsNoSubstep();
 	}
 
 	virtual void Activate(UObject* Object) override
@@ -394,9 +394,9 @@ public:
 	// substeps a client drives between frames, outside TickInternal.
 	bool PumpEvents(TFunctionRef<bool()> ShouldStop, double QuietTimeoutSeconds, double PollIntervalSeconds, TFunctionRef<void()> OnPoll);
 
-	// While set, a new request to an RPC declared AtStepBoundary is held back rather than handled.
+	// While set, a new request to an RPC declared NoSubstep is held back rather than handled.
 	// TickInternal handles held requests first, once this is cleared.
-	void SetHoldStepBoundaryRequests(bool bHold) { bHoldStepBoundaryRequests = bHold; }
+	void SetHoldNoSubstepRequests(bool bHold) { bHoldNoSubstepRequests = bHold; }
 
 	bool HasHeldRequests() const { return !HeldRequestTags.IsEmpty(); }
 
@@ -466,7 +466,7 @@ protected:
 
 	bool bIsInitialized = false;
 
-	bool bHoldStepBoundaryRequests = false;
+	bool bHoldNoSubstepRequests = false;
 	TArray<int32> HeldRequestTags;
 
 	int32 TagAllocator = 0;

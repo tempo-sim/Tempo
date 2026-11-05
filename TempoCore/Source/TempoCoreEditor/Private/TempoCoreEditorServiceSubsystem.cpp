@@ -16,12 +16,12 @@ using OpenLevelRequest = TempoCoreEditor::OpenLevelRequest;
 void UTempoCoreEditorServiceSubsystem::RegisterServices(FTempoServer& Server)
 {
 	Server.RegisterService<TempoCoreEditorService>(
-			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestPlayInEditor, &UTempoCoreEditorServiceSubsystem::PlayInEditor).AtStepBoundary(),
-			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestSimulate, &UTempoCoreEditorServiceSubsystem::Simulate).AtStepBoundary(),
-			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestStop, &UTempoCoreEditorServiceSubsystem::Stop).AtStepBoundary(),
-			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestSaveLevel, &UTempoCoreEditorServiceSubsystem::SaveLevel).AtStepBoundary(),
-			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestOpenLevel, &UTempoCoreEditorServiceSubsystem::OpenLevel).AtStepBoundary(),
-			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestNewLevel, &UTempoCoreEditorServiceSubsystem::NewLevel).AtStepBoundary()
+			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestPlayInEditor, &UTempoCoreEditorServiceSubsystem::PlayInEditor).NoSubstep(),
+			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestSimulate, &UTempoCoreEditorServiceSubsystem::Simulate).NoSubstep(),
+			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestStop, &UTempoCoreEditorServiceSubsystem::Stop).NoSubstep(),
+			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestSaveLevel, &UTempoCoreEditorServiceSubsystem::SaveLevel).NoSubstep(),
+			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestOpenLevel, &UTempoCoreEditorServiceSubsystem::OpenLevel).NoSubstep(),
+			SimpleRequestHandler(&TempoCoreEditorAsyncService::RequestNewLevel, &UTempoCoreEditorServiceSubsystem::NewLevel).NoSubstep()
 		);
 }
 

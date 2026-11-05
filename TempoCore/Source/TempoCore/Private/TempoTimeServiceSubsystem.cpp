@@ -45,9 +45,9 @@ namespace
 void UTempoTimeServiceSubsystem::RegisterServices(FTempoServer& Server)
 {
 	Server.RegisterService<TimeService>(
-		SimpleRequestHandler(&TimeAsyncService::RequestSetTimeMode, &UTempoTimeServiceSubsystem::SetTimeMode).AtStepBoundary(),
-		SimpleRequestHandler(&TimeAsyncService::RequestSetSimStepsPerSecond, &UTempoTimeServiceSubsystem::SetSimStepsPerSecond).AtStepBoundary(),
-		SimpleRequestHandler(&TimeAsyncService::RequestSetSubstepsPerStep, &UTempoTimeServiceSubsystem::SetSubstepsPerStep).AtStepBoundary(),
+		SimpleRequestHandler(&TimeAsyncService::RequestSetTimeMode, &UTempoTimeServiceSubsystem::SetTimeMode).NoSubstep(),
+		SimpleRequestHandler(&TimeAsyncService::RequestSetSimStepsPerSecond, &UTempoTimeServiceSubsystem::SetSimStepsPerSecond).NoSubstep(),
+		SimpleRequestHandler(&TimeAsyncService::RequestSetSubstepsPerStep, &UTempoTimeServiceSubsystem::SetSubstepsPerStep).NoSubstep(),
 		SimpleRequestHandler(&TimeAsyncService::RequestAdvanceSteps, &UTempoTimeServiceSubsystem::AdvanceSteps),
 		SimpleRequestHandler(&TimeAsyncService::RequestPlay, &UTempoTimeServiceSubsystem::Play),
 		SimpleRequestHandler(&TimeAsyncService::RequestPause, &UTempoTimeServiceSubsystem::Pause),

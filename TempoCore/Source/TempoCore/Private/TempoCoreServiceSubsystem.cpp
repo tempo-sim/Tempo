@@ -38,14 +38,14 @@ using SetEngineScalabilityRequest = TempoCore::SetEngineScalabilityRequest;
 void UTempoCoreServiceSubsystem::RegisterServices(FTempoServer& Server)
 {
 	Server.RegisterService<TempoCoreService>(
-		SimpleRequestHandler(&TempoCoreAsyncService::RequestLoadLevel, &UTempoCoreServiceSubsystem::LoadLevel).AtStepBoundary(),
-		SimpleRequestHandler(&TempoCoreAsyncService::RequestFinishLoadingLevel, &UTempoCoreServiceSubsystem::FinishLoadingLevel).AtStepBoundary(),
+		SimpleRequestHandler(&TempoCoreAsyncService::RequestLoadLevel, &UTempoCoreServiceSubsystem::LoadLevel).NoSubstep(),
+		SimpleRequestHandler(&TempoCoreAsyncService::RequestFinishLoadingLevel, &UTempoCoreServiceSubsystem::FinishLoadingLevel).NoSubstep(),
 		SimpleRequestHandler(&TempoCoreAsyncService::RequestGetCurrentLevelName, &UTempoCoreServiceSubsystem::GetCurrentLevelName),
 		SimpleRequestHandler(&TempoCoreAsyncService::RequestGetAvailableLevels, &UTempoCoreServiceSubsystem::GetAvailableLevels),
-		SimpleRequestHandler(&TempoCoreAsyncService::RequestQuit, &UTempoCoreServiceSubsystem::Quit).AtStepBoundary(),
+		SimpleRequestHandler(&TempoCoreAsyncService::RequestQuit, &UTempoCoreServiceSubsystem::Quit).NoSubstep(),
 		SimpleRequestHandler(&TempoCoreAsyncService::RequestSetMainViewportRenderEnabled, &UTempoCoreServiceSubsystem::SetRenderMainViewportEnabled),
 		SimpleRequestHandler(&TempoCoreAsyncService::RequestSetControlMode, &UTempoCoreServiceSubsystem::SetControlMode),
-		SimpleRequestHandler(&TempoCoreAsyncService::RequestSetEngineScalability, &UTempoCoreServiceSubsystem::SetEngineScalability).AtStepBoundary()
+		SimpleRequestHandler(&TempoCoreAsyncService::RequestSetEngineScalability, &UTempoCoreServiceSubsystem::SetEngineScalability).NoSubstep()
 	);
 }
 

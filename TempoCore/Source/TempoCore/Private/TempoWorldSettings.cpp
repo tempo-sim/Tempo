@@ -79,7 +79,7 @@ void ATempoWorldSettings::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		Completion(ETempoStepResult::AbortedByExternalPause);
 	}
 	SubstepsIntoStep = 0;
-	UpdateStepBoundaryHold();
+	UpdateNoSubstepHold();
 
 	if (PendingStepCompletion)
 	{
@@ -232,7 +232,7 @@ void ATempoWorldSettings::OnTimeSettingsChanged()
 	{
 		UE_LOG(LogTempoCore, Warning, TEXT("Time settings changed %d substeps into a step. Actors will not tick over those substeps."), SubstepsIntoStep);
 		SubstepsIntoStep = 0;
-		UpdateStepBoundaryHold();
+		UpdateNoSubstepHold();
 	}
 
 	SyncFixedPointTime();
@@ -546,7 +546,7 @@ void ATempoWorldSettings::RunClientSubsteps()
 	{
 		TGuardValue<bool> InLoopGuard(bInSubstepLoop, true);
 		TGuardValue<float> DeltaSecondsGuard(World->DeltaTimeSeconds, World->DeltaTimeSeconds);
-		UpdateStepBoundaryHold();
+		UpdateNoSubstepHold();
 
 		while (true)
 		{
@@ -611,7 +611,7 @@ void ATempoWorldSettings::RunClientSubsteps()
 	}
 
 	bClientSubstepping = bRanSubstep;
-	UpdateStepBoundaryHold();
+	UpdateNoSubstepHold();
 }
 
 void ATempoWorldSettings::RunSubstep()
@@ -632,7 +632,7 @@ void ATempoWorldSettings::RunSubstep()
 	const double SubstepSeconds = (StepEndTime - StepStartTime) / SubstepsPerStep;
 	World->TimeSeconds = SubstepsIntoStep >= SubstepsPerStep ? StepEndTime : StepStartTime + SubstepSeconds * SubstepsIntoStep;
 	World->DeltaTimeSeconds = SubstepSeconds;
-	UpdateStepBoundaryHold();
+	UpdateNoSubstepHold();
 
 	if (SubstepsPerStep > 1 && !OnSubstep.IsBound() && !bWarnedNoSubstepSubscriber)
 	{
@@ -656,12 +656,12 @@ void ATempoWorldSettings::RunSubstepsToStepEnd()
 		RunSubstep();
 	}
 	SubstepsIntoStep = 0;
-	UpdateStepBoundaryHold();
+	UpdateNoSubstepHold();
 }
 
-void ATempoWorldSettings::UpdateStepBoundaryHold() const
+void ATempoWorldSettings::UpdateNoSubstepHold() const
 {
-	FTempoServer::Get().SetHoldStepBoundaryRequests(bInSubstepLoop || SubstepsIntoStep > 0);
+	FTempoServer::Get().SetHoldNoSubstepRequests(bInSubstepLoop || SubstepsIntoStep > 0);
 }
 
 void ATempoWorldSettings::SetDefaultAutoExposureBias()

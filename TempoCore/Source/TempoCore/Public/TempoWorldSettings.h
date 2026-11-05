@@ -118,7 +118,7 @@ private:
 	// Runs whatever substeps the step has left, from FixupDeltaSeconds.
 	void RunSubstepsToStepEnd();
 
-	void UpdateStepBoundaryHold() const;
+	void UpdateNoSubstepHold() const;
 
 #if WITH_EDITOR
 	// Bridges Tempo's game pause (the pauser player state) and the editor's PIE pause
