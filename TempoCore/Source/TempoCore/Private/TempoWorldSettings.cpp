@@ -278,6 +278,20 @@ bool ATempoWorldSettings::Step(int32 NumSteps, TFunction<void(ETempoStepResult)>
 	return true;
 }
 
+void ATempoWorldSettings::Play()
+{
+	if (StepsToSimulate.IsSet())
+	{
+		if (PendingStepCompletion)
+		{
+			FirePendingStepCompletion(ETempoStepResult::AbortedByExternalPause);
+		}
+		StepsToSimulate.Reset();
+	}
+
+	SetPaused(false);
+}
+
 bool ATempoWorldSettings::Substep(TFunction<void(ETempoStepResult)> OnComplete)
 {
 	if (bSubstepRequested || (StepsToSimulate.IsSet() && StepsToSimulate.GetValue() > 0))

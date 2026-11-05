@@ -126,7 +126,12 @@ void UTempoTimeServiceSubsystem::SetSimStepsPerSecond(const SetSimStepsPerSecond
 
 void UTempoTimeServiceSubsystem::Play(const TempoEmpty& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
 {
-	if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0))
+	if (ATempoWorldSettings* WorldSettings = Cast<ATempoWorldSettings>(GetWorld()->GetWorldSettings());
+		WorldSettings && UGameplayStatics::GetPlayerController(GetWorld(), 0))
+	{
+		WorldSettings->Play();
+	}
+	else if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0))
 	{
 		PlayerController->SetPause(false);
 	}

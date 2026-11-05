@@ -40,6 +40,10 @@ public:
 	// progress.
 	bool Substep(TFunction<void(ETempoStepResult)> OnComplete = {});
 
+	// Unpause, ending any step in progress (its completion fires as aborted). Without that, a step's
+	// re-pause at the end of its frame would undo a Play that arrived during the frame.
+	void Play();
+
 	// Fires once per substep in FixedStep mode, in order, with the substep's length and its end time.
 	// While it fires, world time (GetTimeSeconds) is that end time and GetDeltaSeconds is that length.
 	// The substeps a client drives with Substep run between frames, and the rest run just before the

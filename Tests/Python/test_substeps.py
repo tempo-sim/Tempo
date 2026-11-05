@@ -2,6 +2,8 @@
 
 """Integration tests for FixedStep substeps (SubstepsPerStep, the Substep RPC) against a packaged sim."""
 
+import time
+
 import pytest
 
 import tempo_sim.tempo_core as tc
@@ -106,6 +108,19 @@ def test_pause_part_way_through_holds_and_keeps_the_grid(substeps):
     for _ in range(SUBSTEPS_PER_STEP - 1):
         tc.substep()
     assert sim_time() == pytest.approx(t0 + step_seconds, abs=1e-9)
+
+
+def test_play_right_after_a_step_boundary_rpc_part_way_through_keeps_playing(substeps):
+    # The held RPC runs the step to its end with an internal step that re-pauses when its frame ends.
+    # A Play that lands in that same frame must end the step rather than be undone by its re-pause.
+    step_seconds, _ = substeps
+    tc.substep()
+    tc.set_sim_steps_per_second(sim_steps_per_second=int(round(1.0 / step_seconds)))
+    tc.play()
+    t0 = sim_time()
+    time.sleep(0.5)
+    assert sim_time() > t0, "the sim was paused again after play()"
+    tc.pause()
 
 
 def test_sim_time_never_goes_back_across_frames(substeps):
