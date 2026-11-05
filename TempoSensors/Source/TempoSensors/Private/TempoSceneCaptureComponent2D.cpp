@@ -9,6 +9,9 @@
 
 #include "TempoCoreSettings.h"
 #include "TempoCoreUtils.h"
+#include "TempoWorldSettings.h"
+
+#include <cmath>
 
 #include "Engine/TextureRenderTarget2D.h"
 #include "Kismet/GameplayStatics.h"
@@ -748,21 +751,79 @@ float GetTimerPeriod(float RateHz)
 	return 1.0 / FMath::Max(UE_KINDA_SMALL_NUMBER, RateHz);
 }
 
-void UTempoSceneCaptureComponent2D::RestartCaptureTimer()
+namespace
+{
+// When a newly started capture timer is first due, from now.
+//
+// In FixedStep, at the next multiple of the period in sim time, so that every sensor at a rate
+// captures on the same steps, and in every run. Periods are counted in whole steps, so a period of a
+// whole number of steps lands on its step exactly. That holds only when the timer is set from its own
+// callback: FTimerManager holds a timer set before it has ticked in a frame (while paused, between
+// frames) pending, and starts counting its delay only once its next tick has added that tick's delta.
+// So OnCaptureTimerFired re-arms the timer this way on every firing, and captures follow the grid from
+// the first one, wherever the timer was started. Otherwise, one period from now.
+//
+// Either way, the float just below that delay. FTimerManager fires a timer only once it is strictly
+// overdue, and its clock and a timer's expiries are sums of the same floats (frame deltas and the
+// period), so a timer due exactly on a frame, as one is whenever its period is a whole number of
+// frames, would fire a frame late, every period. One float below breaks that tie exactly. A period
+// that is not a whole number of frames in float (a rate float can't hold exactly) makes no such
+// guarantee, since its expiries drift against the frames regardless.
+float GetFirstCaptureDelay(const UWorld* World, float RateHz)
 {
 	const float TimerPeriod = GetTimerPeriod(RateHz);
-	// Due a hair before each period ends; see UTempoTiledSceneCaptureComponent::RestartCaptureTimer.
-	GetWorld()->GetTimerManager().SetTimer(TimerHandle, this, &UTempoSceneCaptureComponent2D::MaybeCapture, TimerPeriod, true, TimerPeriod * (1.0f - 1e-3f));
+	double FirstDelay = TimerPeriod;
+
+	const UTempoCoreSettings* CoreSettings = GetDefault<UTempoCoreSettings>();
+	const ATempoWorldSettings* WorldSettings = Cast<ATempoWorldSettings>(World->GetWorldSettings());
+	if (WorldSettings && World->IsGameWorld() && CoreSettings->GetTimeMode() == ETimeMode::FixedStep)
+	{
+		// The timer clock advances by whole game frames, so count from the current game frame's start:
+		// part-way through one, sim time has moved over steps the timer clock hasn't yet.
+		const int32 StepsPerSecond = CoreSettings->GetSimulatedStepsPerSecond();
+		const int32 StepsIntoGameFrame = WorldSettings->GetStepsIntoGameFrame();
+		const uint64 Steps = WorldSettings->GetFixedStepsCount() - StepsIntoGameFrame;
+		const double Now = World->GetTimeSeconds() - static_cast<double>(StepsIntoGameFrame) / StepsPerSecond;
+		const double Rate = FMath::Max<double>(UE_KINDA_SMALL_NUMBER, RateHz);
+
+		const double NextPeriod = FMath::FloorToDouble(static_cast<double>(Steps) * Rate / StepsPerSecond) + 1.0;
+		FirstDelay = NextPeriod / Rate - Now;
+		// Only right after switching to FixedStep, when sim time is still off the step grid, can a
+		// period shorter than a step put that multiple behind it.
+		while (FirstDelay <= 0.0)
+		{
+			FirstDelay += 1.0 / Rate;
+		}
+	}
+
+	return std::nextafter(static_cast<float>(FirstDelay), 0.0f);
+}
 }
 
-void UTempoSceneCaptureComponent2D::MaybeCapture()
+void UTempoSceneCaptureComponent2D::RestartCaptureTimer()
 {
-	const float TimerPeriod = GetTimerPeriod(RateHz);
-	if (!FMath::IsNearlyEqual(GetWorld()->GetTimerManager().GetTimerRate(TimerHandle), TimerPeriod))
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	World->GetTimerManager().SetTimer(TimerHandle, this, &UTempoSceneCaptureComponent2D::OnCaptureTimerFired, GetTimerPeriod(RateHz), true, GetFirstCaptureDelay(World, RateHz));
+}
+
+void UTempoSceneCaptureComponent2D::OnCaptureTimerFired()
+{
+	OnCaptureTimer();
+
+	UWorld* World = GetWorld();
+	if ((World->IsGameWorld() && GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep)
+		|| !FMath::IsNearlyEqual(World->GetTimerManager().GetTimerRate(TimerHandle), GetTimerPeriod(RateHz)))
 	{
 		RestartCaptureTimer();
 	}
+}
 
+void UTempoSceneCaptureComponent2D::OnCaptureTimer()
+{
 	if (!HasPendingRequests())
 	{
 		return;

@@ -112,7 +112,18 @@ frame runs between frames:
 - **Some RPCs need a game frame.** Time settings, level loads and console commands run the rest of
   the game frame's steps and are handled once it has ticked.
 
-Sensor rates are rounded to game frames, since sensors capture only when the world ticks.
+Sensors capture only when the world ticks, so their rates are rounded to game frames. In Fixed Step
+mode a sensor's captures fall on multiples of its period in sim time, so every sensor at a rate
+captures on the same steps, in every run.
+
+!!! note "Unreal timers on the Fixed Step grid"
+
+    `FTimerManager` fires a timer only once it is strictly overdue, and its clock and a timer's
+    expiries are sums of the same floats. So in Fixed Step a timer started on a frame boundary, whose
+    period is a whole number of frames, is exactly due on every later frame rather than overdue,
+    and fires a frame late each time: with a period of one frame, every other frame. Tempo's sensors
+    start their timers due the float just below their first period (`std::nextafter`), which breaks
+    that tie exactly; a timer of your own that should fire on the frame grid needs the same.
 
 !!! warning "Chaos only follows steps through its own settings"
 

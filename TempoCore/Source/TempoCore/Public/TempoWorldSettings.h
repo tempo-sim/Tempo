@@ -43,6 +43,10 @@ public:
 	int32 GetStepsIntoGameFrame() const { return StepsIntoGameFrame; }
 	int32 GetStepsUntilGameFrame() const;
 
+	// FixedStep steps of sim time, counting those part-way through the current game frame. Sim time is
+	// this many steps of 1 / SimulatedStepsPerSecond (on the step grid, after the first step).
+	uint64 GetFixedStepsCount() const { return FixedStepsCount; }
+
 	// Whether a request to a GameFrameOnly RPC must wait: between frames, outside a world tick, or
 	// part-way through a game frame. FTempoServer asks before handling one.
 	bool ShouldHoldGameFrameOnlyRequests() const { return bInStepLoop || StepsIntoGameFrame > 0; }

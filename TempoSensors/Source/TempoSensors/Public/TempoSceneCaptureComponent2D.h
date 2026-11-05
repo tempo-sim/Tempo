@@ -501,12 +501,18 @@ protected:
 	// gets its own staging texture, preventing tearing when multiple frames are in flight.
 	FTempoStagingTextureRing StagingRing;
 
-private:
-	// Starts or restarts the timer that calls MaybeCapture
-	virtual void RestartCaptureTimer();
+	// Starts or restarts the capture timer at RateHz; see GetFirstCaptureDelay.
+	void RestartCaptureTimer();
 
-	// Capture a frame, if any client has requested one.
-	virtual void MaybeCapture();
+	// Called by the capture timer once per period. Captures a frame, if any client has requested one.
+	// A component whose captures an outer owner executes overrides it to mark one pending instead.
+	virtual void OnCaptureTimer();
+
+private:
+	// The capture timer's callback: calls OnCaptureTimer, then re-arms the timer. In FixedStep it re-arms
+	// on every firing, for the next multiple of the period in sim time; otherwise only when RateHz has
+	// changed.
+	void OnCaptureTimerFired();
 
 	// Our Queue of pending texture reads.
 	FTextureReadQueue TextureReadQueue;
