@@ -6,6 +6,7 @@
 #include "TempoCoreUtils.h"
 #include "TempoServerEndpoint.h"
 #include "TempoServiceProvider.h"
+#include "TempoWorldSettings.h"
 #include "TempoCore.h"
 
 #include "HAL/PlatformMisc.h"
@@ -35,6 +36,7 @@ FTempoServer::FTempoServer()
 	{
 		if (UTempoCoreUtils::IsGameWorld(World))
 		{
+			GameWorld = World;
 			// The server has nothing to do with movie scene sequences, but this event fires in exactly the right conditions:
 			// After world time has been updated for the current frame, before Actor ticks have begun, and even when paused.
 			OnMovieSceneSequenceTickHandle = World->AddMovieSceneSequenceTickHandler(
@@ -53,6 +55,10 @@ FTempoServer::FTempoServer()
 			World->OnWorldBeginPlay.Remove(OnWorldBeginPlayHandle);
 			World->RemoveMovieSceneSequenceTickHandler(OnMovieSceneSequenceTickHandle);
 			OnMovieSceneSequenceTickHandle.Reset();
+			if (GameWorld.Get() == World)
+			{
+				GameWorld.Reset();
+			}
 		}
 	});
 
@@ -341,7 +347,7 @@ void FTempoServer::TickInternal()
 		return;
 	}
 
-	if (!bHoldGameFrameOnlyRequests && !HeldRequestTags.IsEmpty())
+	if (!HeldRequestTags.IsEmpty() && !ShouldHoldGameFrameOnlyRequests())
 	{
 		const TArray<int32> HeldTags = MoveTemp(HeldRequestTags);
 		HeldRequestTags.Reset();
@@ -414,6 +420,13 @@ void FTempoServer::TickInternal()
 	}
 }
 
+bool FTempoServer::ShouldHoldGameFrameOnlyRequests() const
+{
+	const UWorld* World = GameWorld.Get();
+	const ATempoWorldSettings* WorldSettings = World ? Cast<ATempoWorldSettings>(World->GetWorldSettings()) : nullptr;
+	return WorldSettings && WorldSettings->ShouldHoldGameFrameOnlyRequests();
+}
+
 bool FTempoServer::PumpEvents(TFunctionRef<bool()> ShouldStop, double QuietTimeoutSeconds, double PollIntervalSeconds, TFunctionRef<void()> OnPoll)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(TempoServerPumpEvents);
@@ -477,7 +490,7 @@ void FTempoServer::HandleEventForTag(int32 Tag, bool bOk)
 			}
 		case FRequestManager::REQUESTED: // A request has been received.
 			{
-				if (bHoldGameFrameOnlyRequests && (*RequestManager)->IsGameFrameOnly())
+				if ((*RequestManager)->IsGameFrameOnly() && ShouldHoldGameFrameOnlyRequests())
 				{
 					HeldRequestTags.Add(Tag);
 					break;

@@ -43,6 +43,10 @@ public:
 	int32 GetStepsIntoGameFrame() const { return StepsIntoGameFrame; }
 	int32 GetStepsUntilGameFrame() const;
 
+	// Whether a request to a GameFrameOnly RPC must wait: between frames, outside a world tick, or
+	// part-way through a game frame. FTempoServer asks before handling one.
+	bool ShouldHoldGameFrameOnlyRequests() const { return bInStepLoop || StepsIntoGameFrame > 0; }
+
 	// Unpause, ending any step in progress (its completion fires as aborted). Without that, a step's
 	// re-pause at the end of its frame would undo a Play that arrived during the frame.
 	void Play();
@@ -133,7 +137,6 @@ private:
 
 	void EnsureTickEndHandle();
 
-	void UpdateGameFrameOnlyHold() const;
 
 #if WITH_EDITOR
 	// Bridges Tempo's game pause (the pauser player state) and the editor's PIE pause

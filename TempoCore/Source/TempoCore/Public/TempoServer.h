@@ -394,10 +394,9 @@ public:
 	// steps a client advances between frames, outside TickInternal.
 	bool PumpEvents(TFunctionRef<bool()> ShouldStop, double QuietTimeoutSeconds, double PollIntervalSeconds, TFunctionRef<void()> OnPoll);
 
-	// While set, a new request to an RPC declared GameFrameOnly is held back rather than handled.
-	// TickInternal handles held requests first, once this is cleared.
-	void SetHoldGameFrameOnlyRequests(bool bHold) { bHoldGameFrameOnlyRequests = bHold; }
-
+	// Whether a request to an RPC declared GameFrameOnly has been held back, because the game world's
+	// ATempoWorldSettings said it had to wait. TickInternal handles held requests first, once it no
+	// longer does.
 	bool HasHeldRequests() const { return !HeldRequestTags.IsEmpty(); }
 
 protected:
@@ -466,8 +465,13 @@ protected:
 
 	bool bIsInitialized = false;
 
-	bool bHoldGameFrameOnlyRequests = false;
+	bool ShouldHoldGameFrameOnlyRequests() const;
+
 	TArray<int32> HeldRequestTags;
+
+	// The game world the server pumps from, whose ATempoWorldSettings decides whether a GameFrameOnly
+	// request must wait.
+	TWeakObjectPtr<UWorld> GameWorld;
 
 	int32 TagAllocator = 0;
 	TMap<int32, TSharedPtr<FRequestManager>> RequestManagers;

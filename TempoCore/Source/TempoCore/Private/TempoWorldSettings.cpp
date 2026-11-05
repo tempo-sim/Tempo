@@ -76,7 +76,6 @@ void ATempoWorldSettings::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 	FCoreDelegates::OnBeginFrame.Remove(BeginFrameHandle);
 	StepsIntoGameFrame = 0;
-	UpdateGameFrameOnlyHold();
 
 	if (PendingStepCompletion)
 	{
@@ -234,7 +233,6 @@ void ATempoWorldSettings::OnTimeSettingsChanged()
 		{
 			UE_LOG(LogTempoCore, Warning, TEXT("Time settings changed %d steps into a game frame. Actors will not tick over those steps."), StepsIntoGameFrame);
 			StepsIntoGameFrame = 0;
-			UpdateGameFrameOnlyHold();
 		}
 
 		SyncFixedPointTime();
@@ -605,7 +603,6 @@ void ATempoWorldSettings::RunStepsBetweenFrames()
 	{
 		TGuardValue<bool> InLoopGuard(bInStepLoop, true);
 		TGuardValue<float> DeltaSecondsGuard(World->DeltaTimeSeconds, World->DeltaTimeSeconds);
-		UpdateGameFrameOnlyHold();
 
 		while (true)
 		{
@@ -666,7 +663,6 @@ void ATempoWorldSettings::RunStepsBetweenFrames()
 	}
 
 	bClientStepping = bRanStep;
-	UpdateGameFrameOnlyHold();
 }
 
 void ATempoWorldSettings::StartGameFrame()
@@ -692,7 +688,6 @@ void ATempoWorldSettings::RunStep()
 	const double StepEndTime = static_cast<double>(++FixedStepsCount) / GetDefault<UTempoCoreSettings>()->GetSimulatedStepsPerSecond();
 	World->TimeSeconds = StepEndTime;
 	World->DeltaTimeSeconds = StepEndTime - StepStartTime;
-	UpdateGameFrameOnlyHold();
 
 	if (GetStepsPerGameFrame() > 1 && !OnStep.IsBound() && !bWarnedNoStepSubscriber)
 	{
@@ -720,12 +715,6 @@ void ATempoWorldSettings::RunStepsToGameFrameEnd()
 		}
 	}
 	StepsIntoGameFrame = 0;
-	UpdateGameFrameOnlyHold();
-}
-
-void ATempoWorldSettings::UpdateGameFrameOnlyHold() const
-{
-	FTempoServer::Get().SetHoldGameFrameOnlyRequests(bInStepLoop || StepsIntoGameFrame > 0);
 }
 
 void ATempoWorldSettings::SetDefaultAutoExposureBias()
