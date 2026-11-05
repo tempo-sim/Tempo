@@ -205,6 +205,13 @@ def test_a_removed_struct_member_is_breaking(baseline):
     ("a new enumerator", lambda new: new["enums"][0]["enumerators"].append("Expert")),
     ("a new component", lambda new: widget(new)["components"].append(
         {"name": "Extra", "class": "/Script/Engine.MeshThing"})),
+    ("a new struct", lambda new: new["structs"].append(
+        {"name": "FOtherSettings", "value_expressible": True, "members": []})),
+    ("a new struct member", lambda new: new["structs"][0]["members"].append(
+        {"name": "Extra", "kind": "bool", "type": "bool", "readable": True, "writable": True,
+         "value_expressible": True})),
+    ("a new enum", lambda new: new["enums"].append(
+        {"name": "EOtherMode", "enumerators": ["On", "Off"]})),
     ("a new class", lambda new: new["classes"].append(
         {"name": "Other", "path": "/Script/Engine.Other", "super": "/Script/CoreUObject.Object",
          "package": "/Script/Engine", "abstract": False, "blueprint": False,
