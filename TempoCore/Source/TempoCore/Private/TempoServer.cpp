@@ -399,16 +399,7 @@ void FTempoServer::TickInternal()
 				// write) are waited on too.
 				if (TimeMode == ETimeMode::FixedStep)
 				{
-					bool bAnyUnflushed = false;
-					for (const auto& Elem : RequestManagers)
-					{
-						if (Elem.Value->HasUnflushedWork())
-						{
-							bAnyUnflushed = true;
-							break;
-						}
-					}
-					bProcessedPendingEvents = !bAnyUnflushed;
+					bProcessedPendingEvents = !HasUnflushedWork();
 				}
 				else
 				{
@@ -471,6 +462,18 @@ bool FTempoServer::PumpEvents(TFunctionRef<bool()> ShouldStop, double TimeoutSec
 		}
 	}
 	return true;
+}
+
+bool FTempoServer::HasUnflushedWork() const
+{
+	for (const auto& Elem : RequestManagers)
+	{
+		if (Elem.Value->HasUnflushedWork())
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 void FTempoServer::HandleEventForTag(int32 Tag, bool bOk)

@@ -399,6 +399,10 @@ public:
 	// longer does.
 	bool HasHeldRequests() const { return !HeldRequestTags.IsEmpty(); }
 
+	// Whether any request has a write or finish in flight, or responses queued behind one. A stream
+	// asks its handler for its next response only once these drain.
+	bool HasUnflushedWork() const;
+
 protected:
 	void Initialize();
 	void Deinitialize();
