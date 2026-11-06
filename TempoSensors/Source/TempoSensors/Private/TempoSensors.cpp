@@ -86,8 +86,8 @@ void FTempoSensorsModule::OnBeginFrame()
 		LastMaxGPUFramesInFlight = Bound;
 
 		// The bound only protects Vulkan's frame-counted recycling if that recycling waits longer than
-		// the bound. The plugin's Config/Engine.ini sets the variable to fit the default bound; a
-		// project that changes either one on its own gets a warning rather than a device loss.
+		// the bound. The default bound of 1 fits under the engine's default delay of 2; a project that
+		// raises the bound without the variable gets a warning rather than a device loss.
 		if (bLimit && GDynamicRHI && GDynamicRHI->GetInterfaceType() == ERHIInterfaceType::Vulkan)
 		{
 			if (const IConsoleVariable* RecycleDelay = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Vulkan.NumFramesToWaitForResourceDelete")))
@@ -95,7 +95,7 @@ void FTempoSensorsModule::OnBeginFrame()
 				if (Bound >= RecycleDelay->GetInt())
 				{
 					UE_LOG(LogTempoSensors, Warning,
-						TEXT("MaxGPUFramesInFlight (%d as enforced) is not below r.Vulkan.NumFramesToWaitForResourceDelete (%d): the GPU may read uniform-buffer memory the RHI has already recycled (VK_ERROR_DEVICE_LOST). Raise the console variable in [ConsoleVariables] or lower the bound."),
+						TEXT("MaxGPUFramesInFlight (%d as enforced) is not below r.Vulkan.NumFramesToWaitForResourceDelete (%d): the GPU may read uniform-buffer memory the RHI has already recycled (VK_ERROR_DEVICE_LOST). Lower the bound, or raise the console variable knowing it holds every freed GPU resource that many frames (VRAM cost = delay x memory freed per frame)."),
 						Bound, RecycleDelay->GetInt());
 				}
 			}
