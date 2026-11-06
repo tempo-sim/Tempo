@@ -55,10 +55,11 @@ public:
 	// re-pause at the end of its frame would undo a Play that arrived during the frame.
 	void Play();
 
-	// Fires once per step in FixedStep mode, in order, with the step's length and its end time. While
-	// it fires, world time (GetTimeSeconds) is that end time and GetDeltaSeconds is that length. A step
-	// a client advances on its own runs between frames; the rest of a game frame's steps run just
-	// before the frame ticks. With one step per game frame (the default) that is once per frame.
+	// Fires once per step, in order, with the step's length and its end time. While it fires, world time
+	// (GetTimeSeconds) is that end time and GetDeltaSeconds is that length. In FixedStep, a step a client
+	// advances on its own runs between frames; the rest of a game frame's steps run just before the
+	// frame ticks. With one step per game frame (the default) that is once per frame. In WallClock every
+	// frame is one step, of the frame's measured length, and StepsPerGameFrame doesn't apply.
 	//
 	// Only world time and delta seconds move from step to step within a game frame. No actor or
 	// component ticks, no timer fires, Chaos does not step and GFrameCounter does not advance until
@@ -136,6 +137,9 @@ private:
 
 	// Runs the game frame's next step: moves world time to its end and fires OnStep.
 	void RunStep();
+
+	// Fires OnStep for a WallClock frame, which is one step, at the frame's end time.
+	void RunWallClockStep(float StepSeconds);
 
 	// Runs whatever steps the game frame has left, from FixupDeltaSeconds.
 	void RunStepsToGameFrameEnd();

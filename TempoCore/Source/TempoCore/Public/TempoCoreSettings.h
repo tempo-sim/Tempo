@@ -81,7 +81,8 @@ private:
 
 	// The number of FixedStep steps in each game frame: the world ticks once every this many steps, over
 	// all of them. ATempoWorldSettings::OnStep fires once per step, each at its own sim time, and a
-	// client that advances one step at a time has its other RPCs handled between them.
+	// client that advances one step at a time has its other RPCs handled between them. FixedStep only:
+	// in WallClock every frame is one step.
 	UPROPERTY(EditAnywhere, Config, Category="Time|FixedStep", meta=(ClampMin=1, UIMin=1, UIMax=100))
 	int32 StepsPerGameFrame = 1;
 

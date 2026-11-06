@@ -144,39 +144,44 @@ float ATempoWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealDelta
 	{
 	case ETimeMode::WallClock:
 		{
-			// Every step is a frame in WallClock mode, so count a requested step down on every stepped
-			// frame. The re-pause happens at the end of this frame in OnWorldTickEnd.
-			//
-			// A discrete step advances by a fixed quantum (the same one FixedStep uses) rather than
-			// measured real time. The measured WallClock delta here is just the real time between
-			// unpausing and this call - sub-frame input-to-tick latency that varies by machine - so
-			// it's meaningless for a single step. A fixed quantum makes a step reproducible.
-			if (StepsToSimulate.IsSet())
+			const float WallClockStepSeconds = [&]() -> float
 			{
-				--StepsToSimulate.GetValue();
-				MarkIfFinalSteppedFrame();
-				return 1.0 / Settings->GetSimulatedStepsPerSecond();
-			}
+				// Every step is a frame in WallClock mode, so count a requested step down on every stepped
+				// frame. The re-pause happens at the end of this frame in OnWorldTickEnd.
+				//
+				// A discrete step advances by a fixed quantum (the same one FixedStep uses) rather than
+				// measured real time. The measured WallClock delta here is just the real time between
+				// unpausing and this call - sub-frame input-to-tick latency that varies by machine - so
+				// it's meaningless for a single step. A fixed quantum makes a step reproducible.
+				if (StepsToSimulate.IsSet())
+				{
+					--StepsToSimulate.GetValue();
+					MarkIfFinalSteppedFrame();
+					return 1.0 / Settings->GetSimulatedStepsPerSecond();
+				}
 
-			// RealDeltaSeconds is not reliable, so we compute our own.
-			const double TimeSinceRealTimeBegan = FPlatformTime::ToSeconds64(FPlatformTime::Cycles64() - CyclesWhenTimeModeChanged);
-			const float WallClockDeltaSeconds = TimeSinceRealTimeBegan - (SimTime - SimTimeWhenTimeModeChanged);
-			const double MaxTimeStep = Settings->GetMaxWallClockTimeStep();
-			if (MaxTimeStep > 0.0 && WallClockDeltaSeconds > MaxTimeStep)
-			{
-				UE_LOG(LogTempoCore, Warning, TEXT("Large time step detected. Clamping to max: %.3f"), MaxTimeStep);
-				// Overwrite time sync as if the current SimTime corresponds to MaxTimeStep seconds ago.
-				CyclesWhenTimeModeChanged = FPlatformTime::Cycles64() - MaxTimeStep / FPlatformTime::GetSecondsPerCycle64();
-				SimTimeWhenTimeModeChanged = SimTime;
-				return MaxTimeStep;
-			}
-			if (ensureAlwaysMsgf(WallClockDeltaSeconds >= 0.0, TEXT("WallClockDeltaSeconds was not positive: %f"), WallClockDeltaSeconds))
-			{
-				return WallClockDeltaSeconds;
-			}
+				// RealDeltaSeconds is not reliable, so we compute our own.
+				const double TimeSinceRealTimeBegan = FPlatformTime::ToSeconds64(FPlatformTime::Cycles64() - CyclesWhenTimeModeChanged);
+				const float WallClockDeltaSeconds = TimeSinceRealTimeBegan - (SimTime - SimTimeWhenTimeModeChanged);
+				const double MaxTimeStep = Settings->GetMaxWallClockTimeStep();
+				if (MaxTimeStep > 0.0 && WallClockDeltaSeconds > MaxTimeStep)
+				{
+					UE_LOG(LogTempoCore, Warning, TEXT("Large time step detected. Clamping to max: %.3f"), MaxTimeStep);
+					// Overwrite time sync as if the current SimTime corresponds to MaxTimeStep seconds ago.
+					CyclesWhenTimeModeChanged = FPlatformTime::Cycles64() - MaxTimeStep / FPlatformTime::GetSecondsPerCycle64();
+					SimTimeWhenTimeModeChanged = SimTime;
+					return MaxTimeStep;
+				}
+				if (ensureAlwaysMsgf(WallClockDeltaSeconds >= 0.0, TEXT("WallClockDeltaSeconds was not positive: %f"), WallClockDeltaSeconds))
+				{
+					return WallClockDeltaSeconds;
+				}
 
-			// If we failed for any reason, fall back on RealDeltaSeconds.
-			return RealDeltaSeconds;
+				// If we failed for any reason, fall back on RealDeltaSeconds.
+				return RealDeltaSeconds;
+			}();
+			RunWallClockStep(WallClockStepSeconds);
+			return WallClockStepSeconds;
 		}
 	case ETimeMode::FixedStep:
 		{
@@ -703,6 +708,23 @@ void ATempoWorldSettings::RunStep()
 
 	TRACE_CPUPROFILER_EVENT_SCOPE(TempoStep);
 	OnStep.Broadcast(World, World->DeltaTimeSeconds, StepEndTime);
+}
+
+void ATempoWorldSettings::RunWallClockStep(float StepSeconds)
+{
+	// The frame is the step: move world time to its end for OnStep, as RunStep does, then put it back
+	// for the engine to add the frame's delta to, straight after FixupDeltaSeconds returns.
+	UWorld* World = GetWorld();
+	check(World);
+	const double FrameStartTime = World->TimeSeconds;
+	const double StepEndTime = FrameStartTime + StepSeconds;
+	World->TimeSeconds = StepEndTime;
+	World->DeltaTimeSeconds = StepSeconds;
+
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoStep);
+	OnStep.Broadcast(World, StepSeconds, StepEndTime);
+
+	World->TimeSeconds = FrameStartTime;
 }
 
 void ATempoWorldSettings::RunStepsToGameFrameEnd()

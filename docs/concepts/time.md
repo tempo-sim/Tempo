@@ -81,7 +81,8 @@ Editor controls and the API controls agree rather than fighting each other.
 By default every Fixed Step step is a frame: the world ticks once per step. `StepsPerGameFrame`
 groups steps into **game frames** instead, so the world ticks once every `StepsPerGameFrame` steps,
 over all of them. Steps keep their length, `1 / sim_steps_per_second`, and a client keeps calling
-`step()`. Game frames are for whatever must advance more finely than the world ticks, such as a
+`step()`. Game frames are Fixed Step only: in Wall Clock mode every frame is one step, whatever
+`StepsPerGameFrame` says. Game frames are for whatever must advance more finely than the world ticks, such as a
 physics plugin, and for a client that needs to act between those finer steps.
 
 ```python
@@ -105,7 +106,8 @@ frame runs between frames:
   transmission time) give the latest step's time.
 - **Nothing else does.** Actors don't tick, timers don't fire, and sensors don't capture until
   the game frame ticks, over all of its steps at once. Code that must run every step subscribes to
-  `ATempoWorldSettings::OnStep`.
+  `ATempoWorldSettings::OnStep`. It fires in Wall Clock mode too, once per frame, with the frame's
+  measured length.
 - **Earlier captures still arrive.** With `Pipelined Rendering`, a frame's measurements are read
   back after the frame, so they reach the client between the next game frame's steps as soon as
   the GPU has finished them.
