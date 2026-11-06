@@ -298,6 +298,7 @@ void FTempoServer::Deinitialize()
 	Services.Empty();
 	RequestManagers.Empty();
 	HeldRequestTags.Reset();
+	DeferredEvents.Reset();
 
 	if (!BoundSocketPath.IsEmpty())
 	{
@@ -356,6 +357,8 @@ void FTempoServer::TickInternal()
 			HandleEventForTag(HeldTag, true);
 		}
 	}
+
+	HandleDeferredEvents();
 
 	const UTempoCoreSettings* Settings = GetDefault<UTempoCoreSettings>();
 	const ETimeMode TimeMode = Settings->GetTimeMode();
@@ -427,6 +430,8 @@ bool FTempoServer::PumpEvents(TFunctionRef<bool()> ShouldStop, double TimeoutSec
 		return ShouldStop();
 	}
 
+	HandleDeferredEvents();
+
 	const int64 PollIntervalNanoSeconds = FMath::Max<int64>(1, static_cast<int64>(PollIntervalSeconds * 1.e9));
 	const gpr_timespec PollInterval {PollIntervalNanoSeconds / 1000000000, static_cast<int32>(PollIntervalNanoSeconds % 1000000000), GPR_TIMESPAN};
 	const double DeadlineSeconds = FPlatformTime::Seconds() + TimeoutSeconds;
@@ -474,6 +479,70 @@ bool FTempoServer::HasUnflushedWork() const
 		}
 	}
 	return false;
+}
+
+bool FTempoServer::FinishWrites(double TimeoutSeconds)
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoServerFinishWrites);
+
+	if (!bIsInitialized)
+	{
+		return !HasUnflushedWork();
+	}
+
+	// A completion wakes AsyncNext at once, so the interval only bounds how often the deadline is checked.
+	const gpr_timespec PollInterval {0, 1000000, GPR_TIMESPAN};
+	const double DeadlineSeconds = FPlatformTime::Seconds() + TimeoutSeconds;
+	while (HasUnflushedWork())
+	{
+		int32* Tag;
+		bool bOk;
+		switch (CompletionQueue->AsyncNext(reinterpret_cast<void**>(&Tag), &bOk, PollInterval))
+		{
+		case grpc::CompletionQueue::GOT_EVENT:
+			{
+				// A request with unflushed work has exactly one operation outstanding, a write or a finish,
+				// so its event is that completion. Every other event is left for the next pump.
+				const TSharedPtr<FRequestManager>* RequestManager = RequestManagers.Find(*Tag);
+				if (RequestManager && (*RequestManager)->HasUnflushedWork())
+				{
+					HandleEventForTag(*Tag, bOk);
+				}
+				else
+				{
+					DeferredEvents.Emplace(*Tag, bOk);
+				}
+				break;
+			}
+		case grpc::CompletionQueue::SHUTDOWN:
+			{
+				return false;
+			}
+		case grpc::CompletionQueue::TIMEOUT:
+			{
+				break;
+			}
+		}
+
+		if (FPlatformTime::Seconds() > DeadlineSeconds)
+		{
+			return !HasUnflushedWork();
+		}
+	}
+	return true;
+}
+
+void FTempoServer::HandleDeferredEvents()
+{
+	if (DeferredEvents.IsEmpty())
+	{
+		return;
+	}
+	const TArray<TPair<int32, bool>> Events = MoveTemp(DeferredEvents);
+	for (const TPair<int32, bool>& Event : Events)
+	{
+		HandleEventForTag(Event.Key, Event.Value);
+	}
 }
 
 void FTempoServer::HandleEventForTag(int32 Tag, bool bOk)

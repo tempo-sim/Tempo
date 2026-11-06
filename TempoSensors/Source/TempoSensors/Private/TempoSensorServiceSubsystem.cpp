@@ -13,6 +13,7 @@
 #include "TempoCoreSettings.h"
 #include "TempoSensorsSettings.h"
 #include "TempoWorldSettings.h"
+#include "TempoServer.h"
 
 #include "Components/SceneCaptureComponent.h"
 #include "Engine/GameViewportClient.h"
@@ -152,6 +153,22 @@ void UTempoSensorServiceSubsystem::OnWorldTickStart(UWorld* World, ELevelTick Ti
 			{
 				Sensor->BlockUntilMeasurementsReady();
 			});
+		}
+
+		// Finish the writes in flight first. A stream asks for its next measurement only once its last
+		// response is written, and this frame's server tick, which would finish them, runs after this
+		// send. A readback sent between frames whose write is still in flight, when the wait for the
+		// client's next Step times out and this frame runs paused, would otherwise leave the next
+		// readback with no request here, and it would be dropped. Only write completions are handled,
+		// so no RPC runs inside the world tick.
+		if (GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep)
+		{
+			FTempoServer& Server = FTempoServer::Get();
+			if (Server.HasUnflushedWork())
+			{
+				TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsFinishWritesBeforeSend);
+				Server.FinishWrites(ATempoWorldSettings::GetWriteFinishTimeoutSeconds());
+			}
 		}
 
 		SendCompletedMeasurements();

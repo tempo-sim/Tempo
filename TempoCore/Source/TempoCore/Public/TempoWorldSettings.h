@@ -71,6 +71,10 @@ public:
 	// next one, so sensors can read back and send measurements without waiting for a frame to end.
 	static FTempoBetweenFramesPollDelegate OnBetweenFramesPoll;
 
+	// How long a frame's sensor send waits for in-flight gRPC writes to finish first
+	// (Tempo.WriteFinishTimeoutMs).
+	static double GetWriteFinishTimeoutSeconds();
+
 	virtual void SetPauserPlayerState(APlayerState* PlayerState) override;
 
 	float GetDefaultAutoExposureBias();

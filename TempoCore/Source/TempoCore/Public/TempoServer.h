@@ -403,6 +403,12 @@ public:
 	// asks its handler for its next response only once these drain.
 	bool HasUnflushedWork() const;
 
+	// Handles write and finish completions until no request has unflushed work, or for at most
+	// TimeoutSeconds, and nothing else: any other event, such as a new request, is set aside for the
+	// next TickInternal or PumpEvents to handle first, in order. Safe where an RPC handler must not
+	// run, such as inside the world tick before its time has moved. Returns whether the writes drained.
+	bool FinishWrites(double TimeoutSeconds);
+
 protected:
 	void Initialize();
 	void Deinitialize();
@@ -472,6 +478,10 @@ protected:
 	bool ShouldHoldGameFrameOnlyRequests() const;
 
 	TArray<int32> HeldRequestTags;
+
+	// Events FinishWrites set aside, in the order they arrived.
+	TArray<TPair<int32, bool>> DeferredEvents;
+	void HandleDeferredEvents();
 
 	// The game world the server pumps from, whose ATempoWorldSettings decides whether a GameFrameOnly
 	// request must wait.

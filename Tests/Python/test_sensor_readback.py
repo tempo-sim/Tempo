@@ -862,3 +862,34 @@ def test_a_stream_read_while_stepping_drops_no_capture(camera_rig, fixed_step, s
     gaps = [b - a for a, b in zip(ids, ids[1:])]
     dropped = [(a, b) for a, b in zip(ids, ids[1:]) if b - a != 1]
     assert not dropped, f"captures were dropped between sequence ids {dropped} (all ids {ids}, gaps {gaps})"
+
+
+@pytest.mark.parametrize("steps_per_game_frame", [1, 4])
+def test_a_stream_read_across_paused_frames_drops_no_capture(camera_rig, fixed_step, steps_per_game_frame):
+    """A stream read while the client's steps keep missing the between-frames wait must receive
+    every capture.
+
+    When the wait for the next Step times out, the frame runs paused, and its measurement send comes
+    before its server tick. A readback sent during the wait whose write is still in flight leaves
+    the next readback with no request at that send. A one-millisecond wait makes almost every step
+    miss it."""
+    owner, sensor = camera_rig
+    rate_hz = fixed_step / steps_per_game_frame
+    original_rate = tw.get_property(actor=owner, component=sensor, property="RateHz").float_value
+    tw.set_property(actor=owner, component=sensor, property="RateHz", value=WorldControl.Value(float_value=rate_hz))
+    tc.set_steps_per_game_frame(steps_per_game_frame=steps_per_game_frame)
+    tc.exec_console_command(command="Tempo.StepWaitTimeoutMs 1")
+    _pipelined(True)
+    try:
+        ids = asyncio.run(_sequence_ids_while_stepping(owner, sensor, 20 * steps_per_game_frame))
+    finally:
+        _pipelined(False)
+        tc.exec_console_command(command="Tempo.StepWaitTimeoutMs 50")
+        tc.set_steps_per_game_frame(steps_per_game_frame=1)
+        tw.set_property(actor=owner, component=sensor, property="RateHz", value=WorldControl.Value(float_value=original_rate))
+
+    # The first captures absorb the rate change and a depth reconfigure.
+    ids = ids[2:]
+    assert len(ids) >= 10, f"only {len(ids)} captures arrived: {ids}"
+    dropped = [(a, b) for a, b in zip(ids, ids[1:]) if b - a != 1]
+    assert not dropped, f"captures were dropped between sequence ids {dropped} (all ids {ids})"
