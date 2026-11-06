@@ -908,7 +908,14 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 		// gap and back on the next frame queues two back-to-back InitFinalRenderTargetAndStaging
 		// calls and lets the render thread catch a half-initialized RT (the lidar hit the same
 		// failure mode; see UTempoLidar::FramesWithoutColor for the symmetric fix).
-		++FramesWithoutDepth;
+		//
+		// Count engine frames, not calls: between frames, while a client advances steps, this runs
+		// every millisecond or so with no frame passing.
+		if (LastFrameWithoutDepth != GFrameCounter)
+		{
+			LastFrameWithoutDepth = GFrameCounter;
+			++FramesWithoutDepth;
+		}
 		if (bDepthEnabled && FramesWithoutDepth >= DepthOffDebounceFrames)
 		{
 			SetDepthEnabled(false);

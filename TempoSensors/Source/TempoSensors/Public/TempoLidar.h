@@ -558,6 +558,7 @@ protected:
 	// Frames seen without any color request. Resets to 0 whenever a request with include_color
 	// is observed; bColorEnabled flips off only when this exceeds ColorOffDebounceFrames.
 	int32 FramesWithoutColor = 0;
+	uint64 LastFrameWithoutColor = MAX_uint64;
 	static constexpr int32 ColorOffDebounceFrames = 30;
 
 	TArray<FLidarScanRequest> PendingRequests;

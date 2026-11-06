@@ -91,28 +91,12 @@ void UTempoTiledSceneCaptureComponent::BeginPlay()
 	}
 }
 
-void UTempoTiledSceneCaptureComponent::Activate(bool bReset)
-{
-	// Super::Activate calls InitRenderTarget() (the subclass override) in game worlds.
-	// It does not start its own capture timer because ShouldManageOwnTimer() returns false.
-	Super::Activate(bReset);
-
-	if (UTempoCoreUtils::IsGameWorld(this))
-	{
-		RestartCaptureTimer();
-	}
-}
-
 void UTempoTiledSceneCaptureComponent::Deactivate()
 {
 	Super::Deactivate();
 
 	if (UTempoCoreUtils::IsGameWorld(this))
 	{
-		if (UWorld* World = GetWorld())
-		{
-			World->GetTimerManager().ClearTimer(TimerHandle);
-		}
 		TextureReadQueue.Empty();
 	}
 }
@@ -154,18 +138,17 @@ void UTempoTiledSceneCaptureComponent::TickComponent(float DeltaTime, ELevelTick
 	TryApplyPendingReconfigure();
 }
 
+void UTempoTiledSceneCaptureComponent::OnCaptureTimer()
+{
+	MaybeMarkPendingCapture();
+}
+
 void UTempoTiledSceneCaptureComponent::MaybeMarkPendingCapture()
 {
 	UWorld* World = GetWorld();
 	if (!World)
 	{
 		return;
-	}
-
-	const float TimerPeriod = 1.0f / FMath::Max(UE_KINDA_SMALL_NUMBER, RateHz);
-	if (!FMath::IsNearlyEqual(World->GetTimerManager().GetTimerRate(TimerHandle), TimerPeriod))
-	{
-		RestartCaptureTimer();
 	}
 
 	if (!HasPendingRequests())
@@ -228,15 +211,6 @@ void UTempoTiledSceneCaptureComponent::ExecutePendingCapture()
 	}
 	bNeedsCapture = false;
 	RenderCapture();
-}
-
-void UTempoTiledSceneCaptureComponent::RestartCaptureTimer()
-{
-	if (UWorld* World = GetWorld())
-	{
-		const float TimerPeriod = 1.0f / FMath::Max(UE_KINDA_SMALL_NUMBER, RateHz);
-		World->GetTimerManager().SetTimer(TimerHandle, this, &UTempoTiledSceneCaptureComponent::MaybeMarkPendingCapture, TimerPeriod, true);
-	}
 }
 
 int32 UTempoTiledSceneCaptureComponent::GetMaxTextureQueueSize() const

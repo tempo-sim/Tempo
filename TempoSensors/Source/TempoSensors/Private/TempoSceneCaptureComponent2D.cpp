@@ -9,6 +9,9 @@
 
 #include "TempoCoreSettings.h"
 #include "TempoCoreUtils.h"
+#include "TempoWorldSettings.h"
+
+#include <cmath>
 
 #include "Engine/TextureRenderTarget2D.h"
 #include "Kismet/GameplayStatics.h"
@@ -748,20 +751,95 @@ float GetTimerPeriod(float RateHz)
 	return 1.0 / FMath::Max(UE_KINDA_SMALL_NUMBER, RateHz);
 }
 
-void UTempoSceneCaptureComponent2D::RestartCaptureTimer()
+namespace
+{
+// When a newly started capture timer is first due, from now.
+//
+// In FixedStep, at the next multiple of the period in sim time, so that every sensor at a rate
+// captures on the same steps, and in every run. A period of a whole number of steps is counted in
+// those steps, so it lands on its step exactly, whatever the rate's float holds. That holds only when
+// the timer is set from its own callback: FTimerManager holds a timer set before it has ticked in a
+// frame (while paused, between frames) pending, and starts counting its delay only once its next tick
+// has added that tick's delta, so a timer started there first fires a game frame late. So
+// OnCaptureTimerFired re-arms the timer this way on every firing, and from that first firing on,
+// captures follow the grid wherever the timer was started. Otherwise, one period from now.
+//
+// Either way, the float just below that delay. FTimerManager fires a timer only once it is strictly
+// overdue, and its clock and a timer's expiries are sums of the same floats (frame deltas and the
+// period), so a timer due exactly on a frame, as one is whenever its period is a whole number of
+// frames, would fire a frame late, every period. One float below breaks that tie exactly. A period
+// that is not a whole number of frames in float (a rate float can't hold exactly) makes no such
+// guarantee, since its expiries drift against the frames regardless.
+float GetFirstCaptureDelay(const UWorld* World, float RateHz)
 {
 	const float TimerPeriod = GetTimerPeriod(RateHz);
-	GetWorld()->GetTimerManager().SetTimer(TimerHandle, this, &UTempoSceneCaptureComponent2D::MaybeCapture, TimerPeriod, true);
+	double FirstDelay = TimerPeriod;
+
+	const UTempoCoreSettings* CoreSettings = GetDefault<UTempoCoreSettings>();
+	const ATempoWorldSettings* WorldSettings = Cast<ATempoWorldSettings>(World->GetWorldSettings());
+	if (WorldSettings && World->IsGameWorld() && CoreSettings->GetTimeMode() == ETimeMode::FixedStep)
+	{
+		// The timer clock advances by whole game frames, so count from the current game frame's start:
+		// part-way through one, sim time has moved over steps the timer clock hasn't yet.
+		const int32 StepsPerSecond = CoreSettings->GetSimulatedStepsPerSecond();
+		const int32 StepsIntoGameFrame = WorldSettings->GetStepsIntoGameFrame();
+		const uint64 Steps = WorldSettings->GetFixedStepsCount() - StepsIntoGameFrame;
+		const double Now = World->GetTimeSeconds() - static_cast<double>(StepsIntoGameFrame) / StepsPerSecond;
+		const double Rate = FMath::Max<double>(UE_KINDA_SMALL_NUMBER, RateHz);
+
+		const double PeriodSteps = StepsPerSecond / Rate;
+		const int64 WholePeriodSteps = FMath::RoundToInt64(PeriodSteps);
+		if (WholePeriodSteps >= 1 && FMath::IsNearlyEqual(PeriodSteps, static_cast<double>(WholePeriodSteps), PeriodSteps * 1.e-6))
+		{
+			// In whole steps, exactly. Through the rate's float, the multiple this timer just fired on can
+			// come out a hair short of itself, which a floor would count as still ahead, and the timer
+			// would fire again on the very next frame.
+			const uint64 PeriodStepsCount = static_cast<uint64>(WholePeriodSteps);
+			const uint64 NextSteps = (Steps / PeriodStepsCount + 1) * PeriodStepsCount;
+			FirstDelay = static_cast<double>(NextSteps) / StepsPerSecond - Now;
+		}
+		else
+		{
+			const double NextPeriod = FMath::FloorToDouble(static_cast<double>(Steps) * Rate / StepsPerSecond) + 1.0;
+			FirstDelay = NextPeriod / Rate - Now;
+			// A multiple that falls on a step can come out a hair short of it, as above; a thousandth of a
+			// step is the slack. Right after switching to FixedStep, when sim time is still off the step
+			// grid, a period shorter than a step can also put that multiple behind it.
+			while (FirstDelay <= 1.e-3 / StepsPerSecond)
+			{
+				FirstDelay += 1.0 / Rate;
+			}
+		}
+	}
+
+	return std::nextafter(static_cast<float>(FirstDelay), 0.0f);
+}
 }
 
-void UTempoSceneCaptureComponent2D::MaybeCapture()
+void UTempoSceneCaptureComponent2D::RestartCaptureTimer()
 {
-	const float TimerPeriod = GetTimerPeriod(RateHz);
-	if (!FMath::IsNearlyEqual(GetWorld()->GetTimerManager().GetTimerRate(TimerHandle), TimerPeriod))
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	World->GetTimerManager().SetTimer(TimerHandle, this, &UTempoSceneCaptureComponent2D::OnCaptureTimerFired, GetTimerPeriod(RateHz), true, GetFirstCaptureDelay(World, RateHz));
+}
+
+void UTempoSceneCaptureComponent2D::OnCaptureTimerFired()
+{
+	OnCaptureTimer();
+
+	UWorld* World = GetWorld();
+	if ((World->IsGameWorld() && GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep)
+		|| !FMath::IsNearlyEqual(World->GetTimerManager().GetTimerRate(TimerHandle), GetTimerPeriod(RateHz)))
 	{
 		RestartCaptureTimer();
 	}
+}
 
+void UTempoSceneCaptureComponent2D::OnCaptureTimer()
+{
 	if (!HasPendingRequests())
 	{
 		return;

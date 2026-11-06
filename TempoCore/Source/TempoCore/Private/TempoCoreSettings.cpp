@@ -57,6 +57,13 @@ void UTempoCoreSettings::SetSimulatedStepsPerSecond(int32 SimulatedStepsPerSecon
 	TempoCoreTimeSettingsChangedEvent.Broadcast();
 }
 
+void UTempoCoreSettings::SetStepsPerGameFrame(int32 StepsPerGameFrameIn)
+{
+	StepsPerGameFrame = StepsPerGameFrameIn;
+
+	TempoCoreTimeSettingsChangedEvent.Broadcast();
+}
+
 void UTempoCoreSettings::SetRenderMainViewport(bool bInRenderMainViewport)
 {
 	if (bRenderMainViewport != bInRenderMainViewport)
@@ -72,7 +79,8 @@ void UTempoCoreSettings::PostEditChangeProperty(FPropertyChangedEvent& PropertyC
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 
 	if (PropertyChangedEvent.Property->GetName() == GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, TimeMode) ||
-		(TimeMode == ETimeMode::FixedStep && PropertyChangedEvent.Property->GetName() == GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, SimulatedStepsPerSecond)))
+		(TimeMode == ETimeMode::FixedStep && (PropertyChangedEvent.Property->GetName() == GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, SimulatedStepsPerSecond)
+			|| PropertyChangedEvent.Property->GetName() == GET_MEMBER_NAME_CHECKED(UTempoCoreSettings, StepsPerGameFrame))))
 	{
 		TempoCoreTimeSettingsChangedEvent.Broadcast();
 	}

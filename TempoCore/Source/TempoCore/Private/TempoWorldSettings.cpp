@@ -4,7 +4,11 @@
 
 #include "TempoCore.h"
 #include "TempoCoreSettings.h"
+#include "TempoServer.h"
 #include "EngineUtils.h"
+#include "HAL/IConsoleManager.h"
+#include "Misc/CoreDelegates.h"
+#include "PhysicsEngine/PhysicsSettings.h"
 #include "UnrealClient.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Kismet/GameplayStatics.h"
@@ -17,8 +21,18 @@
 
 #include <cmath>
 
+FTempoBetweenFramesPollDelegate ATempoWorldSettings::OnBetweenFramesPoll;
+
 namespace
 {
+	TAutoConsoleVariable<float> CVarStepWaitTimeoutMs(
+		TEXT("Tempo.StepWaitTimeoutMs"), 50.0f,
+		TEXT("How long the world waits between frames for a client's next Step before letting a paused frame run."));
+
+	TAutoConsoleVariable<float> CVarStepPollIntervalMs(
+		TEXT("Tempo.StepPollIntervalMs"), 1.0f,
+		TEXT("How often sensor readbacks are polled while the world waits between frames for a client's next Step."));
+
 	// These values result in relatively consistent perceived brightness across a huge range of scene intensity.
 	constexpr float ExposureBiasToBrightnessScale = 3.93342962372f;
 	constexpr float ExposureBiasToBrightnessOffset = -34.1331407526f;
@@ -29,7 +43,12 @@ void ATempoWorldSettings::BeginPlay()
 	Super::BeginPlay();
 
 	SettingsChangedHandle = GetMutableDefault<UTempoCoreSettings>()->TempoCoreTimeSettingsChangedEvent.AddUObject(this, &ATempoWorldSettings::OnTimeSettingsChanged);
+	LastTimeMode = GetDefault<UTempoCoreSettings>()->GetTimeMode();
+	LastSimulatedStepsPerSecond = GetDefault<UTempoCoreSettings>()->GetSimulatedStepsPerSecond();
 	SyncFixedPointTime();
+	CheckPhysicsSettings();
+
+	BeginFrameHandle = FCoreDelegates::OnBeginFrame.AddUObject(this, &ATempoWorldSettings::OnBeginFrame);
 
 	if (!bManualDefaultAutoExposureBias)
 	{
@@ -54,6 +73,9 @@ void ATempoWorldSettings::BeginPlay()
 void ATempoWorldSettings::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	Super::EndPlay(EndPlayReason);
+
+	FCoreDelegates::OnBeginFrame.Remove(BeginFrameHandle);
+	StepsIntoGameFrame = 0;
 
 	if (PendingStepCompletion)
 	{
@@ -103,68 +125,84 @@ float ATempoWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealDelta
 
 	const UTempoCoreSettings* Settings = GetDefault<UTempoCoreSettings>();
 
-	// Count down a requested step on every simulated frame, regardless of time mode, so Step works
-	// in WallClock mode too. The re-pause happens at the end of this frame in OnWorldTickEnd.
-	const bool bStepping = StepsToSimulate.IsSet();
-	if (bStepping)
-	{
-		--StepsToSimulate.GetValue();
-	}
-
-#if WITH_EDITOR
 	// On the final stepped frame, set the engine's frame-step flag, exactly as the editor's "Advance
 	// Single Frame" button does. The renderer treats a frame-stepped frame as not paused (see
 	// FSceneView's bWorldIsPaused), which keeps motion blur / TAA from smearing when the camera is
 	// moved. Without it, a Tempo-initiated step re-pauses (in OnWorldTickEnd) before the frame is
 	// rendered, so the render sees a paused world and leaves the smear in place.
-	if (bStepping && StepsToSimulate.GetValue() == 0 && GetWorld()->IsPlayInEditor())
+	auto MarkIfFinalSteppedFrame = [this]()
 	{
-		GetWorld()->bDebugFrameStepExecution = true;
-	}
+#if WITH_EDITOR
+		if (StepsToSimulate.IsSet() && StepsToSimulate.GetValue() == 0 && GetWorld()->IsPlayInEditor())
+		{
+			GetWorld()->bDebugFrameStepExecution = true;
+		}
 #endif
+	};
 
 	switch (Settings->GetTimeMode())
 	{
 	case ETimeMode::WallClock:
 		{
-			// A discrete step advances by a fixed quantum (the same one FixedStep uses) rather than
-			// measured real time. The measured WallClock delta here is just the real time between
-			// unpausing and this call - sub-frame input-to-tick latency that varies by machine - so
-			// it's meaningless for a single step. A fixed quantum makes a step reproducible.
-			if (bStepping)
+			const float WallClockStepSeconds = [&]() -> float
 			{
-				return 1.0 / Settings->GetSimulatedStepsPerSecond();
-			}
+				// Every step is a frame in WallClock mode, so count a requested step down on every stepped
+				// frame. The re-pause happens at the end of this frame in OnWorldTickEnd.
+				//
+				// A discrete step advances by a fixed quantum (the same one FixedStep uses) rather than
+				// measured real time. The measured WallClock delta here is just the real time between
+				// unpausing and this call - sub-frame input-to-tick latency that varies by machine - so
+				// it's meaningless for a single step. A fixed quantum makes a step reproducible.
+				if (StepsToSimulate.IsSet())
+				{
+					--StepsToSimulate.GetValue();
+					MarkIfFinalSteppedFrame();
+					return 1.0 / Settings->GetSimulatedStepsPerSecond();
+				}
 
-			// RealDeltaSeconds is not reliable, so we compute our own.
-			const double TimeSinceRealTimeBegan = FPlatformTime::ToSeconds64(FPlatformTime::Cycles64() - CyclesWhenTimeModeChanged);
-			const float WallClockDeltaSeconds = TimeSinceRealTimeBegan - (SimTime - SimTimeWhenTimeModeChanged);
-			const double MaxTimeStep = Settings->GetMaxWallClockTimeStep();
-			if (MaxTimeStep > 0.0 && WallClockDeltaSeconds > MaxTimeStep)
-			{
-				UE_LOG(LogTempoCore, Warning, TEXT("Large time step detected. Clamping to max: %.3f"), MaxTimeStep);
-				// Overwrite time sync as if the current SimTime corresponds to MaxTimeStep seconds ago.
-				CyclesWhenTimeModeChanged = FPlatformTime::Cycles64() - MaxTimeStep / FPlatformTime::GetSecondsPerCycle64();
-				SimTimeWhenTimeModeChanged = SimTime;
-				return MaxTimeStep;
-			}
-			if (ensureAlwaysMsgf(WallClockDeltaSeconds >= 0.0, TEXT("WallClockDeltaSeconds was not positive: %f"), WallClockDeltaSeconds))
-			{
-				return WallClockDeltaSeconds;
-			}
+				// RealDeltaSeconds is not reliable, so we compute our own.
+				const double TimeSinceRealTimeBegan = FPlatformTime::ToSeconds64(FPlatformTime::Cycles64() - CyclesWhenTimeModeChanged);
+				const float WallClockDeltaSeconds = TimeSinceRealTimeBegan - (SimTime - SimTimeWhenTimeModeChanged);
+				const double MaxTimeStep = Settings->GetMaxWallClockTimeStep();
+				if (MaxTimeStep > 0.0 && WallClockDeltaSeconds > MaxTimeStep)
+				{
+					UE_LOG(LogTempoCore, Warning, TEXT("Large time step detected. Clamping to max: %.3f"), MaxTimeStep);
+					// Overwrite time sync as if the current SimTime corresponds to MaxTimeStep seconds ago.
+					CyclesWhenTimeModeChanged = FPlatformTime::Cycles64() - MaxTimeStep / FPlatformTime::GetSecondsPerCycle64();
+					SimTimeWhenTimeModeChanged = SimTime;
+					return MaxTimeStep;
+				}
+				if (ensureAlwaysMsgf(WallClockDeltaSeconds >= 0.0, TEXT("WallClockDeltaSeconds was not positive: %f"), WallClockDeltaSeconds))
+				{
+					return WallClockDeltaSeconds;
+				}
 
-			// If we failed for any reason, fall back on RealDeltaSeconds.
-			return RealDeltaSeconds;
+				// If we failed for any reason, fall back on RealDeltaSeconds.
+				return RealDeltaSeconds;
+			}();
+			RunWallClockStep(WallClockStepSeconds);
+			return WallClockStepSeconds;
 		}
 	case ETimeMode::FixedStep:
 		{
-			const float FixedStepDeltaSeconds = static_cast<double>(++FixedStepsCount) / Settings->GetSimulatedStepsPerSecond() - SimTime;
+			// Run what is left of this game frame's steps (all of them, unless some ran between frames),
+			// each at its own time. Then move world time back to the game frame's start and return the
+			// whole game frame, so this frame's actors tick over it.
+			RunStepsToGameFrameEnd();
+			MarkIfFinalSteppedFrame();
+			const double GameFrameEndTime = GetWorld()->TimeSeconds;
+			const float FixedStepDeltaSeconds = GameFrameEndTime - GameFrameStartTime;
 			if (ensureAlwaysMsgf(FixedStepDeltaSeconds >= 0.0, TEXT("FixedStepDeltaSeconds was not positive: %f"), FixedStepDeltaSeconds))
 			{
+				// The engine adds the returned delta to world time straight after this call, with no game
+				// code in between, so nothing sees time move back. Starting from the game frame's end less
+				// the (float) delta lands world time on the game frame's end exactly.
+				GetWorld()->TimeSeconds = GameFrameEndTime - FixedStepDeltaSeconds;
 				return FixedStepDeltaSeconds;
 			}
 
 			// If we failed for any reason, fall back on DeltaSeconds.
+			GetWorld()->TimeSeconds = GameFrameStartTime;
 			return DeltaSeconds;
 		}
 	default:
@@ -178,12 +216,36 @@ float ATempoWorldSettings::FixupDeltaSeconds(float DeltaSeconds, float RealDelta
 
 void ATempoWorldSettings::OnTimeSettingsChanged()
 {
-	if (PendingStepCompletion)
+	// Steps per game frame only regroups steps into game frames: a Step in progress keeps counting,
+	// and the next game frame starts where the change took effect (always at a game frame boundary,
+	// since the RPC is GameFrameOnly).
+	const UTempoCoreSettings* Settings = GetDefault<UTempoCoreSettings>();
+	const bool bStepChanged = Settings->GetTimeMode() != LastTimeMode || Settings->GetSimulatedStepsPerSecond() != LastSimulatedStepsPerSecond;
+	LastTimeMode = Settings->GetTimeMode();
+	LastSimulatedStepsPerSecond = Settings->GetSimulatedStepsPerSecond();
+
+	if (bStepChanged)
 	{
-		FirePendingStepCompletion(ETempoStepResult::AbortedByTimeSettingsChanged);
+		// The completion fires, but the remaining steps keep running on the new grid (not AbortStep): a
+		// step running unpaused, in frames, re-pauses only when its count runs out.
+		if (PendingStepCompletion)
+		{
+			FirePendingStepCompletion(ETempoStepResult::AbortedByTimeSettingsChanged);
+		}
+
+		// The time RPCs wait for a game frame boundary, so only a settings change made some other way
+		// (the editor's settings panel) can land part-way through a game frame. Its steps have run and
+		// world time has moved over them; leave it there, and start the next game frame from it.
+		if (StepsIntoGameFrame > 0)
+		{
+			UE_LOG(LogTempoCore, Warning, TEXT("Time settings changed %d steps into a game frame. Actors will not tick over those steps."), StepsIntoGameFrame);
+			StepsIntoGameFrame = 0;
+		}
+
+		SyncFixedPointTime();
 	}
 
-	SyncFixedPointTime();
+	CheckPhysicsSettings();
 }
 
 void ATempoWorldSettings::SyncFixedPointTime()
@@ -195,8 +257,9 @@ void ATempoWorldSettings::SyncFixedPointTime()
 
 	CyclesWhenTimeModeChanged = FPlatformTime::Cycles64();
 	SimTimeWhenTimeModeChanged = SimTime;
-	// SimTime could be one representable float under the fixed step time.
-	FixedStepsCount = static_cast<uint64>(std::nextafterf(SimTime, TNumericLimits<float>::Max()) * Settings->GetSimulatedStepsPerSecond());
+	// SimTime could be a hair under a step's time. The slack, a thousandth of a step, counts it as on
+	// that step; anything further off the grid snaps to the next step on the first one run.
+	FixedStepsCount = static_cast<uint64>(FMath::FloorToDouble(SimTime * Settings->GetSimulatedStepsPerSecond() + 1.e-3));
 }
 
 bool ATempoWorldSettings::Step(int32 NumSteps, TFunction<void(ETempoStepResult)> OnComplete)
@@ -206,9 +269,24 @@ bool ATempoWorldSettings::Step(int32 NumSteps, TFunction<void(ETempoStepResult)>
 		return false;
 	}
 
-	SetPaused(false);
-	StepsToSimulate = NumSteps;
+	UWorld* World = GetWorld();
+	const bool bFixedStep = World->IsGameWorld() && GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep;
 
+	// Whole game frames from a game frame boundary start now, as a step always has: the rest of this
+	// frame runs unpaused, and renders as the frame before a stepped one always has. With one step per
+	// game frame that is every Step, and in WallClock every step is a frame. Other steps start from
+	// the next OnBeginFrame, between frames; pause first if playing, so no frame runs on its own in
+	// between.
+	if (!bFixedStep || (StepsIntoGameFrame == 0 && NumSteps >= GetStepsPerGameFrame()))
+	{
+		SetPaused(false);
+	}
+	else if (!World->IsPaused())
+	{
+		SetPaused(true);
+	}
+
+	StepsToSimulate = NumSteps;
 	if (OnComplete)
 	{
 		PendingStepCompletion = MoveTemp(OnComplete);
@@ -216,12 +294,30 @@ bool ATempoWorldSettings::Step(int32 NumSteps, TFunction<void(ETempoStepResult)>
 
 	// Pause and fire completion at the end of the final stepped frame (not during FixupDeltaSeconds),
 	// so the stepped frame's actor ticks observe IsPaused() == false.
-	if (!TickEndHandle.IsValid())
-	{
-		TickEndHandle = FWorldDelegates::OnWorldTickEnd.AddUObject(this, &ATempoWorldSettings::OnWorldTickEnd);
-	}
+	EnsureTickEndHandle();
 
 	return true;
+}
+
+int32 ATempoWorldSettings::GetStepsUntilGameFrame() const
+{
+	if (GetDefault<UTempoCoreSettings>()->GetTimeMode() != ETimeMode::FixedStep)
+	{
+		return 1;
+	}
+	return FMath::Max(1, GetStepsPerGameFrame() - StepsIntoGameFrame);
+}
+
+void ATempoWorldSettings::Play()
+{
+	AbortStep(ETempoStepResult::AbortedByExternalPause);
+	SetPaused(false);
+}
+
+void ATempoWorldSettings::Pause()
+{
+	AbortStep(ETempoStepResult::AbortedByExternalPause);
+	SetPaused(true);
 }
 
 void ATempoWorldSettings::OnWorldTickEnd(UWorld* World, ELevelTick TickType, float DeltaSeconds)
@@ -244,8 +340,26 @@ void ATempoWorldSettings::OnWorldTickEnd(UWorld* World, ELevelTick TickType, flo
 
 	if (StepsToSimulate.GetValue() == 0)
 	{
+		StepsToSimulate.Reset();
 		SetPaused(true);
 		FirePendingStepCompletion(ETempoStepResult::Completed);
+		return;
+	}
+
+	// More steps to go. In FixedStep, keep playing while they fill whole game frames; otherwise pause,
+	// and OnBeginFrame runs the rest between frames.
+	if (GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep
+		&& (StepsIntoGameFrame > 0 || StepsToSimulate.GetValue() < GetStepsPerGameFrame()))
+	{
+		SetPaused(true);
+	}
+}
+
+void ATempoWorldSettings::EnsureTickEndHandle()
+{
+	if (!TickEndHandle.IsValid())
+	{
+		TickEndHandle = FWorldDelegates::OnWorldTickEnd.AddUObject(this, &ATempoWorldSettings::OnWorldTickEnd);
 	}
 }
 
@@ -261,15 +375,29 @@ void ATempoWorldSettings::FirePendingStepCompletion(ETempoStepResult Result)
 	PendingStepCompletion = nullptr;
 	if (Completion)
 	{
+		// A client that waited on its Step is likely to send the next one as soon as it hears back.
+		if (Result == ETempoStepResult::Completed)
+		{
+			bClientStepping = true;
+		}
 		Completion(Result);
 	}
+}
+
+void ATempoWorldSettings::AbortStep(ETempoStepResult Result)
+{
+	if (PendingStepCompletion)
+	{
+		FirePendingStepCompletion(Result);
+	}
+	StepsToSimulate.Reset();
 }
 
 void ATempoWorldSettings::SetPaused(bool bPaused)
 {
 	if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0))
 	{
-		TGuardValue<bool> SelfPausingGuard(bSelfPausing, bPaused);
+		TGuardValue<bool> SelfPausingGuard(bSelfPausing, true);
 		PlayerController->SetPause(bPaused);
 	}
 #if WITH_EDITOR
@@ -281,6 +409,7 @@ void ATempoWorldSettings::SetPaused(bool bPaused)
 		// editor's PIE pause directly.
 		if (!bPaused)
 		{
+			TGuardValue<bool> SelfPausingGuard(bSelfPausing, true);
 			OnUnpaused();
 		}
 		MirrorPauseToEditor(bPaused);
@@ -294,12 +423,13 @@ void ATempoWorldSettings::SetPaused(bool bPaused)
 
 void ATempoWorldSettings::OnUnpaused()
 {
-	if (PendingStepCompletion)
+	// An unpause from outside (the UI, the editor, a game mode) ends a Step in progress. Tempo's own,
+	// for a stepped game frame or a Play, doesn't.
+	if (!bSelfPausing)
 	{
-		FirePendingStepCompletion(ETempoStepResult::AbortedByExternalPause);
+		AbortStep(ETempoStepResult::AbortedByExternalPause);
 	}
 
-	StepsToSimulate.Reset();
 	SyncFixedPointTime();
 }
 
@@ -309,9 +439,9 @@ void ATempoWorldSettings::SetPauserPlayerState(APlayerState* PlayerState)
 	{
 		OnUnpaused();
 	}
-	else if (PendingStepCompletion && !bSelfPausing)
+	else if (!bSelfPausing)
 	{
-		FirePendingStepCompletion(ETempoStepResult::AbortedByExternalPause);
+		AbortStep(ETempoStepResult::AbortedByExternalPause);
 	}
 
 	Super::SetPauserPlayerState(PlayerState);
@@ -354,9 +484,9 @@ void ATempoWorldSettings::OnEditorSingleStep()
 
 	// The editor's "Advance Single Frame" button only clears its own pause flag
 	// (bDebugPauseExecution) and leaves Tempo's game pause in place, so by itself it does nothing.
-	// Route it through Tempo's Step to advance a single frame. Tempo re-pauses at the end of the
-	// stepped frame, in sync with the editor's own frame-step re-pause.
-	Step();
+	// Route it through Tempo's Step to advance to the end of the game frame. Tempo re-pauses at the
+	// end of the stepped frame, in sync with the editor's own frame-step re-pause.
+	Step(GetStepsUntilGameFrame());
 }
 
 void ATempoWorldSettings::MirrorPauseToEditor(bool bPaused)
@@ -382,6 +512,239 @@ void ATempoWorldSettings::MirrorPauseToEditor(bool bPaused)
 	}
 }
 #endif
+
+int32 ATempoWorldSettings::GetStepsPerGameFrame() const
+{
+	const int32 StepsPerGameFrame = GetDefault<UTempoCoreSettings>()->GetStepsPerGameFrame();
+	return StepsPerGameFrame > 1 && UPhysicsSettings::Get()->bTickPhysicsAsync ? 1 : StepsPerGameFrame;
+}
+
+void ATempoWorldSettings::CheckPhysicsSettings()
+{
+	const UTempoCoreSettings* Settings = GetDefault<UTempoCoreSettings>();
+	if (!GetWorld() || !GetWorld()->IsGameWorld() || Settings->GetTimeMode() != ETimeMode::FixedStep)
+	{
+		return;
+	}
+
+	// Time settings change far more often than these two do (every time mode switch), so warn once
+	// per combination rather than on every change.
+	const FIntPoint StepSettings(Settings->GetSimulatedStepsPerSecond(), Settings->GetStepsPerGameFrame());
+	if (StepSettings == LastCheckedStepSettings)
+	{
+		return;
+	}
+	LastCheckedStepSettings = StepSettings;
+
+	const UPhysicsSettings* PhysicsSettings = UPhysicsSettings::Get();
+	const int32 StepsPerGameFrame = Settings->GetStepsPerGameFrame();
+	const double GameFrameSeconds = static_cast<double>(StepsPerGameFrame) / Settings->GetSimulatedStepsPerSecond();
+
+	if (StepsPerGameFrame <= 1)
+	{
+		return;
+	}
+
+	// Async physics runs Chaos on its own thread at its own step size, and can drop steps to keep up,
+	// so no Tempo step corresponds to a set of its steps. GetStepsPerGameFrame then reports one step per
+	// game frame, so the game frame the checks below describe never runs.
+	if (PhysicsSettings->bTickPhysicsAsync)
+	{
+		UE_LOG(LogTempoCore, Error, TEXT("StepsPerGameFrame is %d, but the physics settings tick physics asynchronously, which Tempo's steps can't follow. Using one step per game frame."), StepsPerGameFrame);
+		return;
+	}
+
+	// Without substepping Chaos clamps a frame to MaxPhysicsDeltaTime; with it, to MaxSubsteps substeps
+	// of MaxSubstepDeltaTime, checked below (FChaosScene::SetUpForFrame).
+	if (!PhysicsSettings->bSubstepping && GameFrameSeconds > PhysicsSettings->MaxPhysicsDeltaTime)
+	{
+		UE_LOG(LogTempoCore, Warning, TEXT("A FixedStep game frame (%.4fs) is longer than the physics settings' MaxPhysicsDeltaTime (%.4fs), so Chaos will simulate less time than each game frame advances."),
+			GameFrameSeconds, PhysicsSettings->MaxPhysicsDeltaTime);
+	}
+
+	// Chaos divides each frame's delta into ceil(delta / MaxSubstepDeltaTime) substeps, at most
+	// MaxSubsteps of them (FPhysicsSolverBase::AdvanceAndDispatch_External). The slack absorbs float
+	// error in a setting that matches exactly.
+	const int32 ChaosSubsteps = PhysicsSettings->bSubstepping ? FMath::CeilToInt32(GameFrameSeconds / PhysicsSettings->MaxSubstepDeltaTime - 1.e-3) : 1;
+	if (PhysicsSettings->bSubstepping && ChaosSubsteps > PhysicsSettings->MaxSubsteps)
+	{
+		UE_LOG(LogTempoCore, Warning, TEXT("The physics settings' MaxSubsteps (%d) is too few for MaxSubstepDeltaTime (%.4fs) over a %.4fs game frame, so Chaos will simulate less time than each game frame advances."),
+			PhysicsSettings->MaxSubsteps, PhysicsSettings->MaxSubstepDeltaTime, GameFrameSeconds);
+	}
+	else if (ChaosSubsteps < StepsPerGameFrame)
+	{
+		UE_LOG(LogTempoCore, Warning, TEXT("Chaos will integrate each game frame in %d substep(s), coarser than Tempo's %d steps. If this project simulates Chaos bodies, enable substepping in the physics settings with MaxSubstepDeltaTime at most %.5fs and MaxSubsteps at least %d."),
+			ChaosSubsteps, StepsPerGameFrame, GameFrameSeconds / StepsPerGameFrame, StepsPerGameFrame);
+	}
+}
+
+void ATempoWorldSettings::OnBeginFrame()
+{
+	UWorld* World = GetWorld();
+	if (!World || !World->IsGameWorld() || GetDefault<UTempoCoreSettings>()->GetTimeMode() != ETimeMode::FixedStep || !World->IsPaused())
+	{
+		bClientStepping = false;
+		return;
+	}
+
+	RunStepsBetweenFrames();
+}
+
+void ATempoWorldSettings::RunStepsBetweenFrames()
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoStepsBetweenFrames);
+
+	UWorld* World = GetWorld();
+	check(World);
+	FTempoServer& Server = FTempoServer::Get();
+	const int32 StepsPerGameFrame = GetStepsPerGameFrame();
+	const double WaitTimeoutSeconds = CVarStepWaitTimeoutMs.GetValueOnGameThread() / 1000.0;
+	const double PollIntervalSeconds = CVarStepPollIntervalMs.GetValueOnGameThread() / 1000.0;
+
+	{
+		TGuardValue<bool> InLoopGuard(bInStepLoop, true);
+
+		while (true)
+		{
+			// Between a client's steps, serve its RPCs until it asks for the next one, which then runs in
+			// this frame rather than landing in its RPC pump and running in the next. If the next Step
+			// doesn't come within the wait timeout, stop waiting (other RPCs don't extend it), and let
+			// paused frames run until the client steps again.
+			//
+			// Writes in flight are finished first, as a game frame's server tick finishes them. A stream
+			// asks for its next measurement only once its last response is written, and a readback that
+			// completes before then is kept for that request. Left stalled behind a client's queued steps,
+			// the writes would finish only in the next game frame's server tick, after that frame's
+			// measurement send has found no request and dropped the readback. A client that stops reading
+			// holds each step for at most the wait timeout.
+			const bool bStepsQueued = HasStepsToRun();
+			if (!bStepsQueued || Server.HasUnflushedWork())
+			{
+				if (!bStepsQueued && !bClientStepping)
+				{
+					break;
+				}
+				if (!Server.PumpEvents(
+					[this, &Server, World]() { return (HasStepsToRun() && !Server.HasUnflushedWork()) || Server.HasHeldRequests() || !World->IsPaused(); },
+					WaitTimeoutSeconds, PollIntervalSeconds,
+					[World]() { OnBetweenFramesPoll.Broadcast(World); })
+					&& !HasStepsToRun())
+				{
+					bClientStepping = false;
+					break;
+				}
+			}
+
+			// A Play has taken the world over, and its frames run the rest of the game frame's steps. Or
+			// the client went quiet, or sent a request that needs a game frame.
+			if (!World->IsPaused() || !HasStepsToRun())
+			{
+				break;
+			}
+
+			// From a game frame boundary, whole game frames run their steps in their own frames.
+			if (StepsIntoGameFrame == 0 && StepsToSimulate.GetValue() >= StepsPerGameFrame)
+			{
+				StartGameFrame();
+				break;
+			}
+
+			RunStep();
+			--StepsToSimulate.GetValue();
+
+			// The game frame is done: tick it now. The Step's completion fires once it has.
+			if (StepsIntoGameFrame >= StepsPerGameFrame)
+			{
+				StartGameFrame();
+				break;
+			}
+
+			if (StepsToSimulate.GetValue() == 0)
+			{
+				StepsToSimulate.Reset();
+				FirePendingStepCompletion(ETempoStepResult::Completed);
+			}
+			OnBetweenFramesPoll.Broadcast(World);
+		}
+	}
+
+	// A request held for the game frame, whether it arrived while waiting here or in an earlier paused
+	// frame's RPC pump, ends the wait for the client's next step but not the game frame's steps: the
+	// frame runs the rest of them, so it lands where it would have, and the request is handled after.
+	if (StepsIntoGameFrame > 0 && !HasStepsToRun() && Server.HasHeldRequests() && World->IsPaused())
+	{
+		StepsToSimulate = StepsPerGameFrame - StepsIntoGameFrame;
+		StartGameFrame();
+	}
+}
+
+void ATempoWorldSettings::StartGameFrame()
+{
+	EnsureTickEndHandle();
+	SetPaused(false);
+}
+
+void ATempoWorldSettings::RunStep()
+{
+	UWorld* World = GetWorld();
+	check(World);
+
+	if (StepsIntoGameFrame == 0)
+	{
+		GameFrameStartTime = World->TimeSeconds;
+	}
+	++StepsIntoGameFrame;
+
+	// A step ends on the step grid. Only the first one after switching to FixedStep can start off it,
+	// and so be shorter.
+	const double StepStartTime = World->TimeSeconds;
+	const double StepEndTime = static_cast<double>(++FixedStepsCount) / GetDefault<UTempoCoreSettings>()->GetSimulatedStepsPerSecond();
+	World->TimeSeconds = StepEndTime;
+	World->DeltaTimeSeconds = StepEndTime - StepStartTime;
+
+	if (GetStepsPerGameFrame() > 1 && !OnStep.IsBound() && !bWarnedNoStepSubscriber)
+	{
+		bWarnedNoStepSubscriber = true;
+		UE_LOG(LogTempoCore, Warning, TEXT("StepsPerGameFrame is %d, but nothing subscribes to ATempoWorldSettings::OnStep, so steps between game frames only advance time."), GetStepsPerGameFrame());
+	}
+
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoStep);
+	OnStep.Broadcast(World, World->DeltaTimeSeconds, StepEndTime);
+}
+
+void ATempoWorldSettings::RunWallClockStep(float StepSeconds)
+{
+	// The frame is the step: move world time to its end for OnStep, as RunStep does, then put it back
+	// for the engine to add the frame's delta to, straight after FixupDeltaSeconds returns.
+	UWorld* World = GetWorld();
+	check(World);
+	const double FrameStartTime = World->TimeSeconds;
+	const double StepEndTime = FrameStartTime + StepSeconds;
+	World->TimeSeconds = StepEndTime;
+	World->DeltaTimeSeconds = StepSeconds;
+
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoStep);
+	OnStep.Broadcast(World, StepSeconds, StepEndTime);
+
+	World->TimeSeconds = FrameStartTime;
+}
+
+void ATempoWorldSettings::RunStepsToGameFrameEnd()
+{
+	UWorld* World = GetWorld();
+	check(World);
+
+	const int32 StepsPerGameFrame = GetStepsPerGameFrame();
+	while (StepsIntoGameFrame < StepsPerGameFrame)
+	{
+		RunStep();
+		if (HasStepsToRun())
+		{
+			--StepsToSimulate.GetValue();
+		}
+	}
+	StepsIntoGameFrame = 0;
+}
 
 void ATempoWorldSettings::SetDefaultAutoExposureBias()
 {

@@ -37,6 +37,29 @@ struct FTempoEmptyService
 	using Response = TempoCore::Empty;
 };
 
+// The ROS Step service stays std_srvs/Empty: it reports nothing of where the step left the game frame.
+template <>
+struct TToROSConverter<std_srvs::srv::Empty::Response, TempoCore::StepResponse>
+{
+	static std_srvs::srv::Empty::Response Convert(const TempoCore::StepResponse& TempoValue)
+	{
+		return std_srvs::srv::Empty::Response();
+	}
+};
+
+struct FTempoStepService
+{
+	using Request = TempoCore::Empty;
+	using Response = TempoCore::StepResponse;
+};
+
+template <>
+struct TImplicitToROSConverter<FTempoStepService>
+{
+	using FromType = FTempoStepService;
+	using ToType = std_srvs::srv::Empty;
+};
+
 template <>
 struct TImplicitToROSConverter<FTempoEmptyService>
 {
@@ -56,9 +79,9 @@ struct TFromROSConverter<tempo_core_ros_bridge::srv::AdvanceSteps::Request, Temp
 };
 
 template <>
-struct TToROSConverter<tempo_core_ros_bridge::srv::AdvanceSteps::Response, TempoCore::Empty>
+struct TToROSConverter<tempo_core_ros_bridge::srv::AdvanceSteps::Response, TempoCore::StepResponse>
 {
-	static tempo_core_ros_bridge::srv::AdvanceSteps::Response Convert(const TempoCore::Empty& TempoValue)
+	static tempo_core_ros_bridge::srv::AdvanceSteps::Response Convert(const TempoCore::StepResponse& TempoValue)
 	{
 		return tempo_core_ros_bridge::srv::AdvanceSteps::Response();
 	}
@@ -118,7 +141,7 @@ struct TToROSConverter<tempo_core_ros_bridge::srv::SetTimeMode::Response, TempoC
 struct FTempoAdvanceStepsService
 {
 	using Request = TempoCore::AdvanceStepsRequest;
-	using Response = TempoCore::Empty;
+	using Response = TempoCore::StepResponse;
 };
 
 template <>

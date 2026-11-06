@@ -8,6 +8,8 @@
 
 #include "CoreMinimal.h"
 
+#include <atomic>
+
 #include "TempoSensorServiceSubsystem.generated.h"
 
 namespace TempoCore
@@ -69,6 +71,25 @@ public:
 
 protected:
 	void OnRenderFrameCompleted() const;
+
+	// Sends every measurement whose readback has completed, waiting for the decode tasks.
+	void SendCompletedMeasurements();
+
+	// Polled between the steps a client advances between frames; see ATempoWorldSettings::OnBetweenFramesPoll.
+	void OnBetweenFramesPoll(UWorld* World);
+
+	// Set while a between-frames readback poll is queued on the render thread, so OnBetweenFramesPoll (which
+	// runs far more often than the render thread drains) never queues a second.
+	TSharedRef<std::atomic<bool>> BetweenFramesReadbackPollInFlight = MakeShared<std::atomic<bool>>(false);
+
+	FDelegateHandle BetweenFramesPollHandle;
+
+	// The active sensors, gathered once per engine frame: OnBetweenFramesPoll runs every millisecond or
+	// so and ForEachActiveSensor walks every actor component. The set can change between steps (spawn
+	// and destroy RPCs run there), but a sensor spawned there has nothing to read back until a frame
+	// ticks, and the weak pointers drop one that is destroyed.
+	TArray<TWeakObjectPtr<UActorComponent>> BetweenFramesSensors;
+	uint64 BetweenFramesSensorsFrame = MAX_uint64;
 
 	template <typename RequestType, typename ResponseType>
 	void RequestImages(const RequestType& Request, const TResponseDelegate<ResponseType>& ResponseContinuation) const;

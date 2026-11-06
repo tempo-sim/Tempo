@@ -59,7 +59,9 @@ tc.quit()
 The console and engine-info RPCs work in the editor with or without a play session, as well as in a
 packaged build. The others need a game running: in the editor, that means a play session.
 
-`advance_steps(steps=N)` advances several fixed steps in one call.
+`advance_steps(steps=N)` advances several fixed steps in one call. Both it and `step` report
+whether the last step completed a game frame and how many steps remain until the next one; see
+[Game frames](../concepts/time.md#game-frames).
 
 !!! note "One step at a time"
 

@@ -12,6 +12,8 @@
 
 #include "TempoCoreSettings.h"
 #include "TempoSensorsSettings.h"
+#include "TempoWorldSettings.h"
+#include "TempoServer.h"
 
 #include "Components/SceneCaptureComponent.h"
 #include "Engine/GameViewportClient.h"
@@ -71,11 +73,15 @@ void UTempoSensorServiceSubsystem::Initialize(FSubsystemCollectionBase& Collecti
 	FWorldDelegates::OnWorldTickStart.AddUObject(this, &UTempoSensorServiceSubsystem::OnWorldTickStart);
 	FWorldDelegates::OnWorldTickEnd.AddUObject(this, &UTempoSensorServiceSubsystem::OnWorldTickEnd);
 	FCoreDelegates::OnEndFrameRT.AddUObject(this, &UTempoSensorServiceSubsystem::OnRenderFrameCompleted);
+
+	BetweenFramesPollHandle = ATempoWorldSettings::OnBetweenFramesPoll.AddUObject(this, &UTempoSensorServiceSubsystem::OnBetweenFramesPoll);
 }
 
 void UTempoSensorServiceSubsystem::Deinitialize()
 {
 	Super::Deinitialize();
+
+	ATempoWorldSettings::OnBetweenFramesPoll.Remove(BetweenFramesPollHandle);
 
 	FTempoServer::Get().DeactivateService<SensorService>();
 }
@@ -173,21 +179,134 @@ void UTempoSensorServiceSubsystem::OnWorldTickStart(UWorld* World, ELevelTick Ti
 			});
 		}
 
+		// Finish the writes in flight first. A stream asks for its next measurement only once its last
+		// response is written, and this frame's server tick, which would finish them, runs after this
+		// send. A readback sent between frames whose write is still in flight, when the wait for the
+		// client's next Step times out and this frame runs paused, would otherwise leave the next
+		// readback with no request here, and it would be dropped. Only write completions are handled:
+		// no new request runs inside the world tick, and a stream's re-invoked handler only registers
+		// its next request (see FTempoServer::FinishWrites). No timeout: the server tick that follows
+		// would wait for the same writes as long as they take.
+		if (GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep)
+		{
+			FTempoServer& Server = FTempoServer::Get();
+			if (Server.HasUnflushedWork())
+			{
+				TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsFinishWritesBeforeSend);
+				Server.FinishWrites();
+			}
+		}
+
+		SendCompletedMeasurements();
+	}
+}
+
+namespace
+{
+	// Sends every measurement whose readback has completed. The decode tasks respond to their gRPC
+	// requests from worker threads, so they must finish before the game thread handles gRPC events
+	// again.
+	void SendMeasurementsAndWait(TConstArrayView<ITempoSensorInterface*> Sensors)
+	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsSendMeasurements);
 		TArray<TFuture<void>> SendMeasurementsTasks;
-		ForEachActiveSensor([&SendMeasurementsTasks](ITempoSensorInterface* Sensor)
+		for (ITempoSensorInterface* Sensor : Sensors)
 		{
 			if (TOptional<TFuture<void>> Future = Sensor->SendMeasurements())
 			{
 				SendMeasurementsTasks.Add(MoveTemp(Future.GetValue()));
 			}
-		});
-
+		}
 		for (const TFuture<void>& SendMeasurementsTask : SendMeasurementsTasks)
 		{
 			SendMeasurementsTask.Wait();
 		}
 	}
+}
+
+void UTempoSensorServiceSubsystem::SendCompletedMeasurements()
+{
+	TArray<ITempoSensorInterface*> Sensors;
+	ForEachActiveSensor([&Sensors](ITempoSensorInterface* Sensor)
+	{
+		Sensors.Add(Sensor);
+	});
+	SendMeasurementsAndWait(Sensors);
+}
+
+void UTempoSensorServiceSubsystem::OnBetweenFramesPoll(UWorld* World)
+{
+	if (World != GetWorld())
+	{
+		return;
+	}
+
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsBetweenFramesPoll);
+
+	if (BetweenFramesSensorsFrame != GFrameCounter)
+	{
+		BetweenFramesSensorsFrame = GFrameCounter;
+		BetweenFramesSensors.Reset();
+		ForEachActiveSensor([this](ITempoSensorInterface* Sensor)
+		{
+			BetweenFramesSensors.Add(Cast<UActorComponent>(Sensor));
+		});
+	}
+
+	TArray<ITempoSensorInterface*> Sensors;
+	for (const TWeakObjectPtr<UActorComponent>& Component : BetweenFramesSensors)
+	{
+		if (ITempoSensorInterface* Sensor = Cast<ITempoSensorInterface>(Component.Get()))
+		{
+			Sensors.Add(Sensor);
+		}
+	}
+
+	// Readbacks are otherwise polled only at the render thread's end of frame, and a client advancing
+	// steps holds the next frame off for many of them. Poll from a render command instead; it is
+	// non-blocking, exactly like the end-of-frame poll. A sensor is only destroyed after the render
+	// thread has drained the commands queued before its destruction began, so the raw pointers outlive
+	// this command.
+	if (!BetweenFramesReadbackPollInFlight->load())
+	{
+		TArray<ITempoSensorInterface*> AwaitingRender;
+		for (ITempoSensorInterface* Sensor : Sensors)
+		{
+			if (Sensor->IsAwaitingRender())
+			{
+				AwaitingRender.Add(Sensor);
+			}
+		}
+		if (!AwaitingRender.IsEmpty())
+		{
+			BetweenFramesReadbackPollInFlight->store(true);
+			ENQUEUE_RENDER_COMMAND(TempoBetweenFramesReadbackPoll)(
+				[AwaitingRender = MoveTemp(AwaitingRender), InFlight = BetweenFramesReadbackPollInFlight](FRHICommandListImmediate& RHICmdList)
+				{
+					TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsBetweenFramesReadbackPoll);
+
+					// A fence only reads as complete once the RHI has processed the GPU's completed work.
+					// An RHI without an interrupt thread (Vulkan without timeline semaphores or with few
+					// task threads) does that only when it submits, and between frames nothing submits.
+					// A dispatch always ends in a submit, even with nothing recorded, which processes
+					// whatever has completed, so the next poll sees it. It never waits on the GPU.
+					RHICmdList.ImmediateFlush(EImmediateFlushType::DispatchToRHIThread);
+
+					for (ITempoSensorInterface* Sensor : AwaitingRender)
+					{
+						Sensor->OnRenderCompleted();
+					}
+					InFlight->store(false);
+				});
+		}
+	}
+
+	// Only sensors with a request waiting. A capture can be taken on a request that an earlier capture's
+	// readback then answers, and a stream asks again only once that response is written, so its own
+	// readback can complete with no request yet. Sent then, it would be dropped. Kept, it goes to the
+	// stream's next request, or to the next game frame's send, so nothing is held past a game frame.
+	Sensors.RemoveAll([](const ITempoSensorInterface* Sensor) { return !Sensor->HasPendingMeasurementRequests(); });
+	SendMeasurementsAndWait(Sensors);
 }
 
 TempoSensors::MeasurementType ToProtoMeasurementType(EMeasurementType ImageType)

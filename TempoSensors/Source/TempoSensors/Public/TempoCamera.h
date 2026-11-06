@@ -468,6 +468,7 @@ protected:
 	// Frames seen without any depth request. Resets to 0 on every frame a depth request is
 	// observed; bDepthEnabled flips off only when this exceeds DepthOffDebounceFrames.
 	int32 FramesWithoutDepth = 0;
+	uint64 LastFrameWithoutDepth = MAX_uint64;
 	static constexpr int32 DepthOffDebounceFrames = 30;
 
 	// The minimum depth this camera can measure (if depth is enabled). Will be set to the global near clip plane.

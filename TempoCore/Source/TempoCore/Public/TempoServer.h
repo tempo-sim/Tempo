@@ -57,6 +57,19 @@ struct TRequestHandler
 		AcceptDelegate.BindRaw(Service, AcceptFunc);
 	}
 
+	// Marks an RPC that may only run in a game frame, inside a world tick: one that changes the step
+	// grid, loads or leaves a level, or changes engine state. While a game frame is part-way through
+	// its steps, its requests are held; the game frame then runs the rest of its steps, and they are
+	// handled in its frame.
+	TRequestHandler GameFrameOnly() const
+	{
+		TRequestHandler Handler(*this);
+		Handler.bGameFrameOnly = true;
+		return Handler;
+	}
+
+	bool IsGameFrameOnly() const { return bGameFrameOnly; }
+
 	void AcceptRequests(grpc::ServerContext* Context, RequestType* Request, ResponderType<ResponseType>* Responder, grpc::ServerCompletionQueue* CompletionQueue, void* Tag)
 	{
 		check(AcceptDelegate.IsBound());
@@ -99,6 +112,7 @@ private:
 	TDelegate<void(const RequestType&, const TResponseDelegate<ResponseType>&)> HandleDelegate;
 	TDelegate<void(grpc::ServerContext*, RequestType*, ResponderType<ResponseType>*, grpc::CompletionQueue*, grpc::ServerCompletionQueue*, void*)> AcceptDelegate;
 	FWeakObjectPtr ActiveObject;
+	bool bGameFrameOnly = false;
 };
 
 template <class ServiceType, class RequestType, class ResponseType, class UserObjectType, bool Const>
@@ -153,6 +167,7 @@ struct FRequestManager : TSharedFromThis<FRequestManager>
 	virtual void HandleAndRespond() = 0;
 	virtual FRequestManager* Duplicate(int32 NewTag) const = 0;
 	virtual const FName GetServiceName() const = 0;
+	virtual bool IsGameFrameOnly() const = 0;
 	virtual void Activate(UObject* Object) = 0;
 	virtual void Deactivate() = 0;
 	virtual const FWeakObjectPtr& GetActiveObject() const = 0;
@@ -182,6 +197,11 @@ public:
 	virtual const FName GetServiceName() const override
 	{
 		return ServiceName;
+	}
+
+	virtual bool IsGameFrameOnly() const override
+	{
+		return Handler->IsGameFrameOnly();
 	}
 
 	virtual void Activate(UObject* Object) override
@@ -368,6 +388,30 @@ public:
 		DeactivateService(ServiceName);
 	}
 
+	// Handles gRPC events on the game thread until ShouldStop returns true, or for at most
+	// TimeoutSeconds. OnPoll runs every PollIntervalSeconds, whether the queue is idle or busy.
+	// Returns whether ShouldStop ended it. This is how ATempoWorldSettings serves RPCs between the
+	// steps a client advances between frames, outside TickInternal.
+	bool PumpEvents(TFunctionRef<bool()> ShouldStop, double TimeoutSeconds, double PollIntervalSeconds, TFunctionRef<void()> OnPoll);
+
+	// Whether a request to an RPC declared GameFrameOnly has been held back, because the game world's
+	// ATempoWorldSettings said it had to wait. TickInternal handles held requests first, once it no
+	// longer does.
+	bool HasHeldRequests() const { return !HeldRequestTags.IsEmpty(); }
+
+	// Whether any request has a write or finish in flight, or responses queued behind one. A stream
+	// asks its handler for its next response only once these drain.
+	bool HasUnflushedWork() const;
+
+	// Handles write and finish completions until no request has unflushed work, and nothing else: any
+	// other event, such as a new request, is set aside for the next TickInternal or PumpEvents to handle
+	// first, in order. So no new request is handled where this runs, such as inside the world tick
+	// before its time has moved. A stream's handler is re-invoked when its last write completes, which
+	// every streaming handler answers by registering interest and responding later (see
+	// ITempoServiceProvider); one that responded at once would run here, and keep this from draining.
+	// Like a FixedStep server tick, it waits as long as the writes take.
+	void FinishWrites();
+
 protected:
 	void Initialize();
 	void Deinitialize();
@@ -433,6 +477,18 @@ protected:
 	void HandleEventForTag(int32 Tag, bool bOk);
 
 	bool bIsInitialized = false;
+
+	bool ShouldHoldGameFrameOnlyRequests() const;
+
+	TArray<int32> HeldRequestTags;
+
+	// Events FinishWrites set aside, in the order they arrived.
+	TArray<TPair<int32, bool>> DeferredEvents;
+	void HandleDeferredEvents();
+
+	// The game world the server pumps from, whose ATempoWorldSettings decides whether a GameFrameOnly
+	// request must wait.
+	TWeakObjectPtr<UWorld> GameWorld;
 
 	int32 TagAllocator = 0;
 	TMap<int32, TSharedPtr<FRequestManager>> RequestManagers;

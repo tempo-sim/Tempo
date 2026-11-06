@@ -22,7 +22,6 @@ class TEMPOSENSORS_API UTempoTiledSceneCaptureComponent : public UTempoSceneCapt
 
 public:
 	virtual void BeginPlay() override;
-	virtual void Activate(bool bReset = false) override;
 	virtual void Deactivate() override;
 	// Bind the label-override listener. Registration, not BeginPlay, is the right pair for the
 	// unbind in OnUnregister — a re-register cycle runs both without touching BeginPlay/EndPlay.
@@ -35,7 +34,6 @@ public:
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	virtual bool ShouldManageOwnReadback() const override { return false; }
-	virtual bool ShouldManageOwnTimer() const override { return false; }
 
 	// Begin ITempoSensorInterface
 	virtual FString GetOwnerName() const override;
@@ -46,15 +44,19 @@ public:
 	virtual void OnRenderCompleted() override;
 	virtual void BlockUntilMeasurementsReady() const override;
 	virtual TOptional<TFuture<void>> SendMeasurements() { return TOptional<TFuture<void>>(); }
+	virtual bool HasPendingMeasurementRequests() const override { return HasPendingRequests(); }
 	virtual bool HasPendingCapture() const override { return bNeedsCapture; }
 	virtual void ExecutePendingCapture() override;
 	// End ITempoSensorInterface
 
 protected:
-	// Called by the capture timer. Runs common guard checks; sets bNeedsCapture if all pass.
-	// Subclasses should not override this — override RenderCapture instead.
+	// The capture timer marks a capture pending, for ExecutePendingCapture to run once the frame's
+	// transforms are final.
+	virtual void OnCaptureTimer() override;
+
+	// Runs common guard checks; sets bNeedsCapture if all pass. Subclasses should not override this —
+	// override RenderCapture instead.
 	virtual void MaybeMarkPendingCapture();
-	virtual void RestartCaptureTimer() override;
 
 	// Returns the number of currently active tiles. Used by MaybeMarkPendingCapture.
 	virtual int32 GetNumActiveTiles() const PURE_VIRTUAL(UTempoTiledSceneCaptureComponent::GetNumActiveTiles, return 0; );
@@ -115,8 +117,6 @@ protected:
 	// UPROPERTY-referenced here, and in-flight render commands still hold raw pointers.
 	UPROPERTY(Transient)
 	TArray<UMaterialInstanceDynamic*> RetainedPPMs;
-
-	FTimerHandle TimerHandle;
 
 	uint8 bReconfigurePending = false;
 	bool bNeedsCapture = false;

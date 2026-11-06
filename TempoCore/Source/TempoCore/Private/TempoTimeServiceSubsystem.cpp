@@ -21,7 +21,9 @@ using TimeAsyncService = TempoCore::TimeService::AsyncService;
 using TempoEmpty = TempoCore::Empty;
 using TimeModeRequest = TempoCore::TimeModeRequest;
 using SetSimStepsPerSecondRequest = TempoCore::SetSimStepsPerSecondRequest;
+using SetStepsPerGameFrameRequest = TempoCore::SetStepsPerGameFrameRequest;
 using AdvanceStepsRequest = TempoCore::AdvanceStepsRequest;
+using StepResponse = TempoCore::StepResponse;
 using GetSimTimeResponse = TempoCore::GetSimTimeResponse;
 
 namespace
@@ -39,13 +41,36 @@ namespace
 		}
 		return grpc::Status(grpc::StatusCode::UNKNOWN, "Step ended with an unknown result");
 	}
+
+	// Steps NumSteps and responds with where the last step left the game frame, once it completes.
+	void StepAndRespond(ATempoWorldSettings* WorldSettings, int32 NumSteps, const TResponseDelegate<StepResponse>& ResponseContinuation)
+	{
+		const TResponseDelegate<StepResponse> Continuation = ResponseContinuation;
+		const TWeakObjectPtr<ATempoWorldSettings> WeakWorldSettings(WorldSettings);
+		const bool bAccepted = WorldSettings->Step(NumSteps, [Continuation, WeakWorldSettings](ETempoStepResult Result)
+		{
+			StepResponse Response;
+			if (const ATempoWorldSettings* Settings = WeakWorldSettings.Get())
+			{
+				Response.set_game_frame(Settings->GetStepsIntoGameFrame() == 0);
+				Response.set_steps_until_game_frame(Settings->GetStepsUntilGameFrame());
+			}
+			Continuation.ExecuteIfBound(Response, StepResultToStatus(Result));
+		});
+
+		if (!bAccepted)
+		{
+			ResponseContinuation.ExecuteIfBound(StepResponse(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Another step is already in progress"));
+		}
+	}
 }
 
 void UTempoTimeServiceSubsystem::RegisterServices(FTempoServer& Server)
 {
 	Server.RegisterService<TimeService>(
-		SimpleRequestHandler(&TimeAsyncService::RequestSetTimeMode, &UTempoTimeServiceSubsystem::SetTimeMode),
-		SimpleRequestHandler(&TimeAsyncService::RequestSetSimStepsPerSecond, &UTempoTimeServiceSubsystem::SetSimStepsPerSecond),
+		SimpleRequestHandler(&TimeAsyncService::RequestSetTimeMode, &UTempoTimeServiceSubsystem::SetTimeMode).GameFrameOnly(),
+		SimpleRequestHandler(&TimeAsyncService::RequestSetSimStepsPerSecond, &UTempoTimeServiceSubsystem::SetSimStepsPerSecond).GameFrameOnly(),
+		SimpleRequestHandler(&TimeAsyncService::RequestSetStepsPerGameFrame, &UTempoTimeServiceSubsystem::SetStepsPerGameFrame).GameFrameOnly(),
 		SimpleRequestHandler(&TimeAsyncService::RequestAdvanceSteps, &UTempoTimeServiceSubsystem::AdvanceSteps),
 		SimpleRequestHandler(&TimeAsyncService::RequestPlay, &UTempoTimeServiceSubsystem::Play),
 		SimpleRequestHandler(&TimeAsyncService::RequestPause, &UTempoTimeServiceSubsystem::Pause),
@@ -123,7 +148,12 @@ void UTempoTimeServiceSubsystem::SetSimStepsPerSecond(const SetSimStepsPerSecond
 
 void UTempoTimeServiceSubsystem::Play(const TempoEmpty& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
 {
-	if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0))
+	if (ATempoWorldSettings* WorldSettings = Cast<ATempoWorldSettings>(GetWorld()->GetWorldSettings());
+		WorldSettings && UGameplayStatics::GetPlayerController(GetWorld(), 0))
+	{
+		WorldSettings->Play();
+	}
+	else if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0))
 	{
 		PlayerController->SetPause(false);
 	}
@@ -136,39 +166,55 @@ void UTempoTimeServiceSubsystem::Play(const TempoEmpty& Request, const TResponse
 	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
 }
 
-void UTempoTimeServiceSubsystem::AdvanceSteps(const AdvanceStepsRequest& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
+void UTempoTimeServiceSubsystem::SetStepsPerGameFrame(const SetStepsPerGameFrameRequest& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
+{
+	const int32 RequestedStepsPerGameFrame = Request.steps_per_game_frame();
+
+	if (RequestedStepsPerGameFrame < 1)
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::OUT_OF_RANGE, "Steps per game frame must be >= 1"));
+		return;
+	}
+
+	if (!Cast<ATempoWorldSettings>(GetWorld()->GetWorldSettings()))
+	{
+		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "SetStepsPerGameFrame has no effect unless using TempoWorldSettings"));
+		return;
+	}
+
+	GetMutableDefault<UTempoCoreSettings>()->SetStepsPerGameFrame(RequestedStepsPerGameFrame);
+
+	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status_OK);
+}
+
+void UTempoTimeServiceSubsystem::AdvanceSteps(const AdvanceStepsRequest& Request, const TResponseDelegate<StepResponse>& ResponseContinuation) const
 {
 	const int32 RequestedSteps = Request.steps();
 
 	if (RequestedSteps < 1)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::OUT_OF_RANGE, "Steps must be >= 1"));
+		ResponseContinuation.ExecuteIfBound(StepResponse(), grpc::Status(grpc::StatusCode::OUT_OF_RANGE, "Steps must be >= 1"));
 		return;
 	}
 
 	ATempoWorldSettings* WorldSettings = Cast<ATempoWorldSettings>(GetWorld()->GetWorldSettings());
 	if (!WorldSettings)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "AdvanceSteps is only supported when using TempoWorldSettings"));
+		ResponseContinuation.ExecuteIfBound(StepResponse(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "AdvanceSteps is only supported when using TempoWorldSettings"));
 		return;
 	}
 
-	const TResponseDelegate<TempoEmpty> Continuation = ResponseContinuation;
-	const bool bAccepted = WorldSettings->Step(RequestedSteps, [Continuation](ETempoStepResult Result)
-	{
-		Continuation.ExecuteIfBound(TempoEmpty(), StepResultToStatus(Result));
-	});
-
-	if (!bAccepted)
-	{
-		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Another step is already in progress"));
-	}
+	StepAndRespond(WorldSettings, RequestedSteps, ResponseContinuation);
 }
-
 
 void UTempoTimeServiceSubsystem::Pause(const TempoEmpty& Request, const TDelegate<void(const TempoEmpty&, grpc::Status)>& ResponseContinuation) const
 {
-	if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0))
+	if (ATempoWorldSettings* WorldSettings = Cast<ATempoWorldSettings>(GetWorld()->GetWorldSettings());
+		WorldSettings && UGameplayStatics::GetPlayerController(GetWorld(), 0))
+	{
+		WorldSettings->Pause();
+	}
+	else if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0))
 	{
 		PlayerController->SetPause(true);
 	}
@@ -181,25 +227,16 @@ void UTempoTimeServiceSubsystem::Pause(const TempoEmpty& Request, const TDelegat
 	ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status());
 }
 
-void UTempoTimeServiceSubsystem::Step(const TempoEmpty& Request, const TResponseDelegate<TempoEmpty>& ResponseContinuation) const
+void UTempoTimeServiceSubsystem::Step(const TempoEmpty& Request, const TResponseDelegate<StepResponse>& ResponseContinuation) const
 {
 	ATempoWorldSettings* WorldSettings = Cast<ATempoWorldSettings>(GetWorld()->GetWorldSettings());
 	if (!WorldSettings)
 	{
-		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Step is only supported when using TempoWorldSettings"));
+		ResponseContinuation.ExecuteIfBound(StepResponse(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Step is only supported when using TempoWorldSettings"));
 		return;
 	}
 
-	const TResponseDelegate<TempoEmpty> Continuation = ResponseContinuation;
-	const bool bAccepted = WorldSettings->Step(1, [Continuation](ETempoStepResult Result)
-	{
-		Continuation.ExecuteIfBound(TempoEmpty(), StepResultToStatus(Result));
-	});
-
-	if (!bAccepted)
-	{
-		ResponseContinuation.ExecuteIfBound(TempoEmpty(), grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Another step is already in progress"));
-	}
+	StepAndRespond(WorldSettings, 1, ResponseContinuation);
 }
 
 void UTempoTimeServiceSubsystem::GetSimTime(const TempoEmpty& Request, const TResponseDelegate<GetSimTimeResponse>& ResponseContinuation) const

@@ -100,6 +100,9 @@ def sim_server():
         *endpoint_args,
         "-stdout",
         "-fullstdoutlogoutput",
+        # Extra launch arguments, split on whitespace: for running a group under different engine
+        # settings, such as an RHI's threading cvars.
+        *os.environ.get("TEMPO_SIM_EXTRA_ARGS", "").split(),
     ]
     # Capture the sim's full stdout/stderr. Prefer the report dir (TEMPO_TEST_REPORT_DIR) so the log
     # is uploaded as a CI artifact for post-mortem; fall back to a temp file locally.

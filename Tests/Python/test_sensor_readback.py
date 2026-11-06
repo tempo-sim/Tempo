@@ -67,6 +67,7 @@ import tempo_sim.tempo_world as tw
 import tempo_sim.TempoCore.Geometry_pb2 as Geometry
 import tempo_sim.TempoCore.Time_pb2 as Time
 import tempo_sim.TempoSensors.Sensors_pb2 as SensorsPb
+import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
 
 pytestmark = pytest.mark.sensors
 
@@ -94,6 +95,7 @@ MAX_RAY_M = 500.0
 # How long to wait for the test level to come up. A level swap tears the gRPC services down and
 # back up, so the first calls after it can fail before they start answering.
 LEVEL_LOAD_TIMEOUT_S = 120.0
+LEVEL_WARM_UP_S = 1.0
 
 
 def _vec(x, y, z):
@@ -213,6 +215,13 @@ def readback_level(sim_server):
         pytest.fail(
             f"{LEVEL} did not come up within {LEVEL_LOAD_TIMEOUT_S}s; the sim last reported {last}"
         )
+
+    # A level's first frames can render before it is ready to (sky capture, shader and mesh setup), so
+    # a capture a few frames after the load can come back without the scene in it. Let it run for a
+    # moment first. Nothing else gives it that time: a stepping client gets one frame per step.
+    tc.set_time_mode(time_mode=Time.TM_WALL_CLOCK)
+    tc.play()
+    time.sleep(LEVEL_WARM_UP_S)
 
     # Left loaded on purpose. Reloading on teardown would cost another transition, and the tests
     # that follow in this session are better off on a level that has a sensor rig in it.
@@ -619,3 +628,268 @@ def test_sequence_ids_are_continuous(camera_rig, pipelining):
         assert statistics.pstdev(deltas) < 1e-4, (
             f"capture times did not advance uniformly in fixed-step mode: {deltas}"
         )
+
+
+
+STEPS_PER_GAME_FRAME = 20
+
+
+async def _steps_until_frame_arrives(owner, sensor, steps_per_game_frame):
+    """Capture a frame in one game frame, then advance the next one step at a time, pausing between
+    steps so the GPU can finish. Returns how many steps ran before the frame arrived, or None if it
+    was still outstanding when only the step that completes the game frame was left."""
+    stream = ts.stream_color_images(owner=owner, sensor=sensor).__aiter__()
+    pending = asyncio.ensure_future(stream.__anext__())
+    try:
+        await asyncio.sleep(0.05)
+        await tc.advance_steps(steps=steps_per_game_frame)
+
+        for steps in range(steps_per_game_frame):
+            if pending.done():
+                pending.result()
+                return steps
+            if steps == steps_per_game_frame - 1:
+                break
+            await tc.step()
+            await asyncio.sleep(0.02)
+        return None
+    finally:
+        # Close the stream, or the camera keeps its color request pending into later tests.
+        pending.cancel()
+        try:
+            await stream.aclose()
+        except (RuntimeError, asyncio.CancelledError):
+            pass
+
+
+def test_a_pipelined_frame_arrives_between_game_frames(camera_rig):
+    """A pipelined frame is read back after its own frame ends. While a client advances the next game
+    frame one step at a time, no frame ends, so the readback has to be noticed between steps: by
+    polling the frame's fence, and by getting the RHI to process the GPU's completed work, which
+    some RHIs only do when something submits."""
+    owner, sensor = camera_rig
+    _pipelined(True)
+    tc.set_steps_per_game_frame(steps_per_game_frame=STEPS_PER_GAME_FRAME)
+    try:
+        arrived_after = asyncio.run(_steps_until_frame_arrives(owner, sensor, STEPS_PER_GAME_FRAME))
+    finally:
+        tc.set_steps_per_game_frame(steps_per_game_frame=1)
+        _pipelined(False)
+
+    assert arrived_after is not None, (
+        f"the frame was still outstanding after {STEPS_PER_GAME_FRAME - 1} steps "
+        f"({(STEPS_PER_GAME_FRAME - 1) * 20} ms of wall clock), so it would only have arrived with the "
+        "next game frame"
+    )
+
+
+async def _capture_each_game_frame(owner, sensor, steps_per_game_frame, game_frames):
+    """Advance one game frame at a time with a depth request pending, and collect what each yields:
+    the image, or None if no capture came within a few seconds.
+
+    Depth, so the camera's depth stays on: turning it on or off reconfigures the camera, which skips
+    captures until the reconfigure has applied. A test before this one may have left it on, and with
+    color alone the camera would turn it off part-way through."""
+    stream = ts.stream_depth_images(owner=owner, sensor=sensor).__aiter__()
+    images = []
+    pending = None
+    try:
+        for _ in range(game_frames):
+            if pending is None:
+                pending = asyncio.ensure_future(stream.__anext__())
+            await asyncio.sleep(0.05)
+            await tc.advance_steps(steps=steps_per_game_frame)
+            # asyncio.wait, not wait_for: a missed capture must leave the read pending for the next
+            # game frame, and cancelling it would end the stream.
+            done, _ = await asyncio.wait({pending}, timeout=5.0)
+            if done:
+                images.append(pending.result())
+                pending = None
+            else:
+                images.append(None)
+    finally:
+        if pending is not None:
+            pending.cancel()
+        try:
+            await stream.aclose()
+        except (RuntimeError, asyncio.CancelledError):
+            pass
+    return images
+
+
+def test_a_sensor_at_the_game_frame_rate_captures_every_game_frame(camera_rig, fixed_step):
+    """A sensor whose rate equals the game frame rate must capture in every game frame.
+
+    The timer manager fires a timer only once it is strictly overdue. A capture timer restarted on a
+    frame boundary, as a rate change restarts it, is due exactly on every later frame, so without
+    allowance it fires every other frame and halves the capture rate."""
+    owner, sensor = camera_rig
+    steps_per_game_frame = 2
+    rate_hz = fixed_step / steps_per_game_frame
+    original_rate = tw.get_property(actor=owner, component=sensor, property="RateHz").float_value
+    tw.set_property(actor=owner, component=sensor, property="RateHz", value=WorldControl.Value(float_value=rate_hz))
+    tc.set_steps_per_game_frame(steps_per_game_frame=steps_per_game_frame)
+    try:
+        # One stream throughout, so the camera's depth stays requested. Its first game frame runs the old
+        # timer, whose callback re-arms it at the new rate, and absorbs the reconfigure if depth was off;
+        # a second stream would leave a gap long enough for the camera to turn depth off again.
+        images = asyncio.run(_capture_each_game_frame(owner, sensor, steps_per_game_frame, 7))[1:]
+    finally:
+        tc.set_steps_per_game_frame(steps_per_game_frame=1)
+        tw.set_property(actor=owner, component=sensor, property="RateHz", value=WorldControl.Value(float_value=original_rate))
+
+    missed = [index for index, image in enumerate(images) if image is None]
+    assert not missed, f"no capture in game frames {missed} of {len(images)}, at {rate_hz} Hz with one game frame per period"
+
+
+
+async def _capture_times(owner, sensor, captures, max_steps_per_capture):
+    """Step one step at a time with a depth request pending, and collect the capture times of the
+    first `captures` captures. A capture that hasn't come within `max_steps_per_capture` steps is
+    recorded as None."""
+    stream = ts.stream_depth_images(owner=owner, sensor=sensor).__aiter__()
+    times = []
+    pending = None
+    try:
+        for _ in range(captures):
+            pending = asyncio.ensure_future(stream.__anext__())
+            await asyncio.sleep(0.05)
+            for _ in range(max_steps_per_capture):
+                await tc.step()
+                done, _ = await asyncio.wait({pending}, timeout=1.0)
+                if done:
+                    break
+            if pending.done():
+                times.append(pending.result().header.capture_time_s)
+                pending = None
+            else:
+                times.append(None)
+                break
+    finally:
+        if pending is not None:
+            pending.cancel()
+        try:
+            await stream.aclose()
+        except (RuntimeError, asyncio.CancelledError):
+            pass
+    return times
+
+
+def test_a_slower_sensor_captures_on_multiples_of_its_period(camera_rig, fixed_step):
+    """In FixedStep a sensor's captures fall on multiples of its period in sim time.
+
+    A capture timer's phase would otherwise come from whenever it happened to start: a level load in
+    WallClock, a rate change, a switch of time mode. A sensor slower than the frame rate would then
+    capture on different steps from run to run, and two sensors at one rate on alternate ones."""
+    owner, sensor = camera_rig
+    rate_hz = fixed_step / 2.0
+    period = 1.0 / rate_hz
+    original_rate = tw.get_property(actor=owner, component=sensor, property="RateHz").float_value
+    tw.set_property(actor=owner, component=sensor, property="RateHz", value=WorldControl.Value(float_value=rate_hz))
+    try:
+        # One stream throughout, so the camera's depth stays requested; a second stream would leave a
+        # gap long enough for the camera to turn depth off again, delaying a capture by a step. Its
+        # first two captures absorb the rate change: the timer's next fire is on the old cadence and
+        # may have been armed before the change, so it re-arms one old period on, and only that fire's
+        # re-arm aligns to the new period. Either can also absorb a depth reconfigure.
+        all_times = asyncio.run(_capture_times(owner, sensor, 7, 4))
+        assert None not in all_times, f"a capture didn't come within 4 steps: {all_times}"
+        times = all_times[2:]
+    finally:
+        tw.set_property(actor=owner, component=sensor, property="RateHz", value=WorldControl.Value(float_value=original_rate))
+
+    assert None not in times, f"a capture didn't come within 4 steps: {times}"
+    off_grid = [t for t in times if abs(t / period - round(t / period)) > 1e-6]
+    assert not off_grid, f"captures at {times} s are not on multiples of the {period} s period (first two, dropped: {all_times[:2]})"
+    assert all(abs((b - a) - period) < 1e-6 for a, b in zip(times, times[1:])), f"captures at {times} s are not one period apart"
+
+
+async def _sequence_ids_while_stepping(owner, sensor, steps):
+    """Read a depth stream continuously while stepping back to back, without waiting on the stream
+    between steps, and return the sequence ids it delivered."""
+    stream = ts.stream_depth_images(owner=owner, sensor=sensor).__aiter__()
+    ids = []
+
+    async def consume():
+        async for image in stream:
+            ids.append(image.header.sequence_id)
+
+    consumer = asyncio.ensure_future(consume())
+    try:
+        await asyncio.sleep(0.05)
+        for _ in range(steps):
+            await tc.step()
+        # The last captures' readbacks finish in the frames after they were taken.
+        for _ in range(3):
+            await asyncio.sleep(0.05)
+            await tc.step()
+    finally:
+        consumer.cancel()
+        try:
+            await consumer
+        except (asyncio.CancelledError, RuntimeError):
+            pass
+        try:
+            await stream.aclose()
+        except (RuntimeError, asyncio.CancelledError):
+            pass
+    return ids
+
+
+@pytest.mark.parametrize("steps_per_game_frame", [1, 4])
+def test_a_stream_read_while_stepping_drops_no_capture(camera_rig, fixed_step, steps_per_game_frame):
+    """A stream read while the client steps without waiting on it must receive every capture.
+
+    With pipelined rendering a capture can be taken on a request that an earlier capture's readback
+    then answers, so its own readback has no request until the stream asks again, which it does only
+    once its last response is written. Sending that readback before then drops the capture."""
+    owner, sensor = camera_rig
+    rate_hz = fixed_step / steps_per_game_frame
+    original_rate = tw.get_property(actor=owner, component=sensor, property="RateHz").float_value
+    tw.set_property(actor=owner, component=sensor, property="RateHz", value=WorldControl.Value(float_value=rate_hz))
+    tc.set_steps_per_game_frame(steps_per_game_frame=steps_per_game_frame)
+    _pipelined(True)
+    try:
+        ids = asyncio.run(_sequence_ids_while_stepping(owner, sensor, 20 * steps_per_game_frame))
+    finally:
+        _pipelined(False)
+        tc.set_steps_per_game_frame(steps_per_game_frame=1)
+        tw.set_property(actor=owner, component=sensor, property="RateHz", value=WorldControl.Value(float_value=original_rate))
+
+    # The first captures absorb the rate change and a depth reconfigure.
+    ids = ids[2:]
+    assert len(ids) >= 10, f"only {len(ids)} captures arrived: {ids}"
+    gaps = [b - a for a, b in zip(ids, ids[1:])]
+    dropped = [(a, b) for a, b in zip(ids, ids[1:]) if b - a != 1]
+    assert not dropped, f"captures were dropped between sequence ids {dropped} (all ids {ids}, gaps {gaps})"
+
+
+@pytest.mark.parametrize("steps_per_game_frame", [1, 4])
+def test_a_stream_read_across_paused_frames_drops_no_capture(camera_rig, fixed_step, steps_per_game_frame):
+    """A stream read while the client's steps keep missing the between-frames wait must receive
+    every capture.
+
+    When the wait for the next Step times out, the frame runs paused, and its measurement send comes
+    before its server tick. A readback sent during the wait whose write is still in flight leaves
+    the next readback with no request at that send. A one-millisecond wait makes almost every step
+    miss it."""
+    owner, sensor = camera_rig
+    rate_hz = fixed_step / steps_per_game_frame
+    original_rate = tw.get_property(actor=owner, component=sensor, property="RateHz").float_value
+    tw.set_property(actor=owner, component=sensor, property="RateHz", value=WorldControl.Value(float_value=rate_hz))
+    tc.set_steps_per_game_frame(steps_per_game_frame=steps_per_game_frame)
+    tc.exec_console_command(command="Tempo.StepWaitTimeoutMs 1")
+    _pipelined(True)
+    try:
+        ids = asyncio.run(_sequence_ids_while_stepping(owner, sensor, 20 * steps_per_game_frame))
+    finally:
+        _pipelined(False)
+        tc.exec_console_command(command="Tempo.StepWaitTimeoutMs 50")
+        tc.set_steps_per_game_frame(steps_per_game_frame=1)
+        tw.set_property(actor=owner, component=sensor, property="RateHz", value=WorldControl.Value(float_value=original_rate))
+
+    # The first captures absorb the rate change and a depth reconfigure.
+    ids = ids[2:]
+    assert len(ids) >= 10, f"only {len(ids)} captures arrived: {ids}"
+    dropped = [(a, b) for a, b in zip(ids, ids[1:]) if b - a != 1]
+    assert not dropped, f"captures were dropped between sequence ids {dropped} (all ids {ids})"

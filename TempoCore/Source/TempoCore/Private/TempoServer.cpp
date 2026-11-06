@@ -6,6 +6,7 @@
 #include "TempoCoreUtils.h"
 #include "TempoServerEndpoint.h"
 #include "TempoServiceProvider.h"
+#include "TempoWorldSettings.h"
 #include "TempoCore.h"
 
 #include "HAL/PlatformMisc.h"
@@ -35,6 +36,7 @@ FTempoServer::FTempoServer()
 	{
 		if (UTempoCoreUtils::IsGameWorld(World))
 		{
+			GameWorld = World;
 			// The server has nothing to do with movie scene sequences, but this event fires in exactly the right conditions:
 			// After world time has been updated for the current frame, before Actor ticks have begun, and even when paused.
 			OnMovieSceneSequenceTickHandle = World->AddMovieSceneSequenceTickHandler(
@@ -53,6 +55,10 @@ FTempoServer::FTempoServer()
 			World->OnWorldBeginPlay.Remove(OnWorldBeginPlayHandle);
 			World->RemoveMovieSceneSequenceTickHandler(OnMovieSceneSequenceTickHandle);
 			OnMovieSceneSequenceTickHandle.Reset();
+			if (GameWorld.Get() == World)
+			{
+				GameWorld.Reset();
+			}
 		}
 	});
 
@@ -291,6 +297,8 @@ void FTempoServer::Deinitialize()
 
 	Services.Empty();
 	RequestManagers.Empty();
+	HeldRequestTags.Reset();
+	DeferredEvents.Reset();
 
 	if (!BoundSocketPath.IsEmpty())
 	{
@@ -341,6 +349,17 @@ void FTempoServer::TickInternal()
 		return;
 	}
 
+	if (!HeldRequestTags.IsEmpty() && !ShouldHoldGameFrameOnlyRequests())
+	{
+		const TArray<int32> HeldTags = MoveTemp(HeldRequestTags);
+		for (const int32 HeldTag : HeldTags)
+		{
+			HandleEventForTag(HeldTag, true);
+		}
+	}
+
+	HandleDeferredEvents();
+
 	const UTempoCoreSettings* Settings = GetDefault<UTempoCoreSettings>();
 	const ETimeMode TimeMode = Settings->GetTimeMode();
 	const int32 MaxEventProcessingTimeMicroSeconds = Settings->GetMaxEventProcessingTime();
@@ -383,16 +402,7 @@ void FTempoServer::TickInternal()
 				// write) are waited on too.
 				if (TimeMode == ETimeMode::FixedStep)
 				{
-					bool bAnyUnflushed = false;
-					for (const auto& Elem : RequestManagers)
-					{
-						if (Elem.Value->HasUnflushedWork())
-						{
-							bAnyUnflushed = true;
-							break;
-						}
-					}
-					bProcessedPendingEvents = !bAnyUnflushed;
+					bProcessedPendingEvents = !HasUnflushedWork();
 				}
 				else
 				{
@@ -401,6 +411,140 @@ void FTempoServer::TickInternal()
 				break;
 			}
 		}
+	}
+}
+
+bool FTempoServer::ShouldHoldGameFrameOnlyRequests() const
+{
+	const UWorld* World = GameWorld.Get();
+	const ATempoWorldSettings* WorldSettings = World ? Cast<ATempoWorldSettings>(World->GetWorldSettings()) : nullptr;
+	return WorldSettings && WorldSettings->ShouldHoldGameFrameOnlyRequests();
+}
+
+bool FTempoServer::PumpEvents(TFunctionRef<bool()> ShouldStop, double TimeoutSeconds, double PollIntervalSeconds, TFunctionRef<void()> OnPoll)
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoServerPumpEvents);
+
+	if (!bIsInitialized)
+	{
+		return ShouldStop();
+	}
+
+	HandleDeferredEvents();
+
+	const int64 PollIntervalNanoSeconds = FMath::Max<int64>(1, static_cast<int64>(PollIntervalSeconds * 1.e9));
+	const gpr_timespec PollInterval {PollIntervalNanoSeconds / 1000000000, static_cast<int32>(PollIntervalNanoSeconds % 1000000000), GPR_TIMESPAN};
+	const double DeadlineSeconds = FPlatformTime::Seconds() + TimeoutSeconds;
+	double LastPollSeconds = FPlatformTime::Seconds();
+	while (!ShouldStop())
+	{
+		int32* Tag;
+		bool bOk;
+		bool bPollDue = false;
+		// AsyncNext returns as soon as an event arrives, so the interval adds no latency to a request.
+		switch (CompletionQueue->AsyncNext(reinterpret_cast<void**>(&Tag), &bOk, PollInterval))
+		{
+		case grpc::CompletionQueue::GOT_EVENT:
+			{
+				HandleEventForTag(*Tag, bOk);
+				break;
+			}
+		case grpc::CompletionQueue::SHUTDOWN:
+			{
+				return false;
+			}
+		case grpc::CompletionQueue::TIMEOUT:
+			{
+				bPollDue = true;
+				break;
+			}
+		}
+
+		// On the clock as well as on an idle queue, so a busy one (a client polling, several streams
+		// writing) can't starve the poll.
+		const double NowSeconds = FPlatformTime::Seconds();
+		if (bPollDue || NowSeconds - LastPollSeconds >= PollIntervalSeconds)
+		{
+			OnPoll();
+			LastPollSeconds = FPlatformTime::Seconds();
+		}
+
+		// A deadline, not a quiet period: steady traffic (a client polling, a stream's writes) must
+		// not keep the caller here, which in the editor would freeze it.
+		if (NowSeconds > DeadlineSeconds)
+		{
+			return ShouldStop();
+		}
+	}
+	return true;
+}
+
+bool FTempoServer::HasUnflushedWork() const
+{
+	for (const auto& Elem : RequestManagers)
+	{
+		if (Elem.Value->HasUnflushedWork())
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void FTempoServer::FinishWrites()
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE(TempoServerFinishWrites);
+
+	if (!bIsInitialized)
+	{
+		return;
+	}
+
+	const int32 MaxEventWaitTimeNanoSeconds = GetDefault<UTempoCoreSettings>()->GetMaxEventWaitTime();
+	const gpr_timespec MaxEventWaitTime {0, MaxEventWaitTimeNanoSeconds, GPR_TIMESPAN};
+	while (HasUnflushedWork())
+	{
+		int32* Tag;
+		bool bOk;
+		switch (CompletionQueue->AsyncNext(reinterpret_cast<void**>(&Tag), &bOk, MaxEventWaitTime))
+		{
+		case grpc::CompletionQueue::GOT_EVENT:
+			{
+				// A request with unflushed work has exactly one operation outstanding, a write or a finish,
+				// so its event is that completion. Every other event is left for the next pump.
+				const TSharedPtr<FRequestManager>* RequestManager = RequestManagers.Find(*Tag);
+				if (RequestManager && (*RequestManager)->HasUnflushedWork())
+				{
+					HandleEventForTag(*Tag, bOk);
+				}
+				else
+				{
+					DeferredEvents.Emplace(*Tag, bOk);
+				}
+				break;
+			}
+		case grpc::CompletionQueue::SHUTDOWN:
+			{
+				return;
+			}
+		case grpc::CompletionQueue::TIMEOUT:
+			{
+				break;
+			}
+		}
+	}
+}
+
+void FTempoServer::HandleDeferredEvents()
+{
+	if (DeferredEvents.IsEmpty())
+	{
+		return;
+	}
+	const TArray<TPair<int32, bool>> Events = MoveTemp(DeferredEvents);
+	for (const TPair<int32, bool>& Event : Events)
+	{
+		HandleEventForTag(Event.Key, Event.Value);
 	}
 }
 
@@ -423,6 +567,12 @@ void FTempoServer::HandleEventForTag(int32 Tag, bool bOk)
 			}
 		case FRequestManager::REQUESTED: // A request has been received.
 			{
+				if ((*RequestManager)->IsGameFrameOnly() && ShouldHoldGameFrameOnlyRequests())
+				{
+					HeldRequestTags.Add(Tag);
+					break;
+				}
+
 				// Immediately prepare to receive another request.
 				const int32 NewTag = TagAllocator++;
 				RequestManagers.Emplace(NewTag, (*RequestManager)->Duplicate(NewTag))->Init(CompletionQueue.Get());
