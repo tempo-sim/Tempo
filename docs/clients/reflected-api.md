@@ -733,7 +733,9 @@ An *out* parameter that cannot be carried is dropped from the tuple and the func
 caller never supplies one, so it does not stop the call.
 
 Struct values are plain Rust structs with every field an `Option`, because an unset field is not
-sent. A struct property's accessor returns its proxy, which loads and stores the whole value:
+sent. End a struct literal with `..Default::default()`, as with a request message: a member the
+struct gains in a later build then stays unset rather than breaking the literal, which is why the
+schema diff counts a new member as an addition. A struct property's accessor returns its proxy, which loads and stores the whole value:
 
 ```rust
 use tempo_sample::reflected::structs::FWalkableSlopeOverride;

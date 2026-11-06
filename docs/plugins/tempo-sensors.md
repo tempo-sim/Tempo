@@ -436,8 +436,8 @@ regardless, so a client always knows which simulation frame it is looking at.
 every frame, so the change lands on the next one — no sensor teardown, no reconfigure. Useful for
 running a scene fast and then dropping into lockstep for the frames you actually want to capture.
 
-Pipelined or not, the GPU is held to at most `Max GPU Frames In Flight` (default 32) render-thread
-frames behind. A windowed process gets a bound like that from the viewport present; one rendering
+Pipelined or not, the GPU is held to at most `Max GPU Frames In Flight` (default 1) render-thread
+frames behind. A windowed process gets exactly that bound from the viewport present; one rendering
 with `-RenderOffScreen` has no present, and nothing else in the engine waits for the GPU. That matters
 because the Vulkan RHI recycles uniform-buffer memory and descriptor pools a fixed number of
 render-thread frames after release (`r.Vulkan.NumFramesToWaitForResourceDelete`, 2 by default)
@@ -445,15 +445,20 @@ without a GPU sync point, so a GPU further behind than that reads memory that ha
 someone else — `VK_ERROR_DEVICE_LOST` with a `READ_INVALID` fault in the camera's stitch draws. On a
 saturated GPU with a sim stepping faster than its cameras capture, the lag reaches thirty-plus frames
 and the device is lost within minutes. The throttle writes a GPU fence each render-thread frame and,
-before a frame ends, waits on the one from `Max GPU Frames In Flight` frames earlier; the plugin's
-`Config/Engine.ini` raises the recycling delay to 40 so the bound fits under it, and the module
-warns whenever a project sets the two inconsistently. The throttle lives for the whole process, not
-per world, since GPU lag does not reset at a level change. The bound is generous on purpose: it counts
-the cheap frames between two captures, and a bound of 1 idles the GPU through every one of them (62%
-utilization, 38% fewer images per second in a 100 Hz sim with 5 Hz cameras); at 32 the throughput
-matches an unthrottled run. Every minute the throttle logs how far behind the GPU ran (separately from
-any backlog on the RHI thread, which is not GPU lag) and how often it waited, so a run's log says
-whether the bound was ever needed.
+before a frame ends, waits on the one from `Max GPU Frames In Flight` frames earlier. It lives for the
+whole process, not per world, since GPU lag does not reset at a level change.
+
+A bound of 1 does not undo pipelined rendering: the game thread, the render thread and the GPU still
+overlap by a frame each. It only forbids a deeper GPU backlog, which is free whenever every frame
+captures and costs throughput only when cheap frames sit between two captures (a 100 Hz sim with 5 Hz
+cameras has nineteen, and the GPU idles through them: 62% utilization, 38% fewer images per second).
+A project in that regime may raise the bound above its cheap-frame count, but must then raise the
+console variable above the bound, and that variable holds every freed GPU resource for the delay. Its
+VRAM cost is the delay times the memory the project frees per frame, and a project that frees a lot
+per frame (rebuilt geometry, say) can exhaust VRAM and spill to host memory, which costs far more
+than the throttle's stall ever would. The module warns whenever the two settings are inconsistent. Every minute the
+throttle logs how far behind the GPU ran (separately from any backlog on the RHI thread, which is not
+GPU lag) and how often it waited, so a run's log says whether the bound was ever needed.
 
 ## Performance notes
 

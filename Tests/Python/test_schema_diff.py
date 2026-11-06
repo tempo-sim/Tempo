@@ -195,25 +195,98 @@ def test_a_removed_struct_member_is_breaking(baseline):
     assert breaking == ["struct member Scale removed"]
 
 
-@pytest.mark.parametrize("case,mutate", [
+def struct(schema, name):
+    return next(s for s in schema["structs"] if s["name"] == name)
+
+
+def enum(schema, name):
+    return next(e for e in schema["enums"] if e["name"] == name)
+
+
+def member(members, name):
+    return next(m for m in members if m["name"] == name)
+
+
+WIDGET = "/Script/Engine.Widget"
+NEW_MEMBER = {"name": "Extra", "kind": "bool", "type": "bool", "readable": True, "writable": True,
+              "value_expressible": True}
+
+
+# A new struct member is an addition in both a struct that travels whole and one that does not. For
+# Rust that holds only because a struct literal ends in `..Default::default()`, the same rule a
+# request message's literal follows (docs/clients/rust.md); Python's constructor is keyword-only and
+# C++'s a designated-initializer aggregate, so neither breaks.
+@pytest.mark.parametrize("case,mutate,expected", [
     ("a new property", lambda new: widget(new)["properties"].append(
         {"name": "NewThing", "kind": "bool", "type": "bool",
-         "readable": True, "writable": True, "value_expressible": True})),
+         "readable": True, "writable": True, "value_expressible": True}),
+     (WIDGET, "property NewThing added")),
     ("a new function", lambda new: widget(new)["functions"].append(
         {"name": "NewCall", "signature": "void NewCall()", "callable": True,
-         "positional": True, "parameters": []})),
-    ("a new enumerator", lambda new: new["enums"][0]["enumerators"].append("Expert")),
+         "positional": True, "parameters": []}),
+     (WIDGET, "function NewCall added")),
+    ("a new enumerator", lambda new: enum(new, "EWidgetMode")["enumerators"].append("Expert"),
+     ("EWidgetMode", "enumerator Expert added")),
     ("a new component", lambda new: widget(new)["components"].append(
-        {"name": "Extra", "class": "/Script/Engine.MeshThing"})),
+        {"name": "Extra", "class": "/Script/Engine.MeshThing"}),
+     (WIDGET, "component Extra added")),
+    ("a new struct", lambda new: new["structs"].append(
+        {"name": "FOtherSettings", "value_expressible": True, "members": []}),
+     ("FOtherSettings", "struct added")),
+    ("a new member of a struct passed whole", lambda new: struct(new, "FWidgetSettings")["members"]
+     .append(dict(NEW_MEMBER)),
+     ("FWidgetSettings", "struct member Extra added")),
+    ("a new member of a struct not passed whole", lambda new: struct(new, "FWidgetLimits")["members"]
+     .append(dict(NEW_MEMBER)),
+     ("FWidgetLimits", "struct member Extra added")),
+    ("a new enum", lambda new: new["enums"].append(
+        {"name": "EOtherMode", "enumerators": ["On", "Off"]}),
+     ("EOtherMode", "enum added")),
     ("a new class", lambda new: new["classes"].append(
         {"name": "Other", "path": "/Script/Engine.Other", "super": "/Script/CoreUObject.Object",
          "package": "/Script/Engine", "abstract": False, "blueprint": False,
-         "properties": [], "functions": []})),
+         "properties": [], "functions": []}),
+     ("/Script/Engine.Other", "class added")),
+    # Gaining a capability whose loss is breaking is new surface too.
+    ("a property that became writable", lambda new: member(widget(new)["properties"], "Offset")
+     .update(writable=True),
+     (WIDGET, "property Offset became writable")),
+    ("a function that became callable", lambda new: member(widget(new)["functions"], "Latent")
+     .update(callable=True),
+     (WIDGET, "function Latent is now offered")),
+    ("a function that became positional", lambda new: member(widget(new)["functions"], "ApplyLimits")
+     .update(positional=True),
+     (WIDGET, "function ApplyLimits is now offered")),
+    ("a struct that can now be passed whole", lambda new: struct(new, "FWidgetLimits")
+     .update(value_expressible=True),
+     ("FWidgetLimits", "struct can now be passed as one value")),
+    ("a struct member that became writable", lambda new: member(
+        struct(new, "FWidgetSettings")["members"], "Label").update(writable=True),
+     ("FWidgetSettings", "struct member Label became writable")),
 ])
-def test_additions_break_nothing(baseline, case, mutate):
-    breaking, additions = changes(baseline, mutate)
+def test_additions_break_nothing(baseline, case, mutate, expected):
+    breaking, additions = diff(baseline, mutate)
     assert breaking == [], "{} should not be breaking".format(case)
-    assert len(additions) == 1
+    assert additions == [expected]
+
+
+def test_a_property_that_became_readable_is_an_addition(baseline):
+    # The fixture has no unreadable property, so the old side is the one changed.
+    old = copy.deepcopy(baseline)
+    member(widget(old)["properties"], "bEnabled")["readable"] = False
+    breaking, additions = compare(old, baseline)
+    assert breaking == []
+    assert additions == [(WIDGET, "property bEnabled became readable")]
+
+
+def test_a_function_still_withheld_is_not_an_addition(baseline):
+    """Becoming callable is not enough while an input still cannot travel (ApplyLimits is not
+    positional): the generators still withhold it, so a client has gained nothing."""
+    old = copy.deepcopy(baseline)
+    member(widget(old)["functions"], "ApplyLimits")["callable"] = False
+    breaking, additions = compare(old, baseline)
+    assert breaking == []
+    assert additions == []
 
 
 def test_documentation_changes_are_not_drift(baseline):
