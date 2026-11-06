@@ -454,9 +454,9 @@ captures and costs throughput only when cheap frames sit between two captures (a
 cameras has nineteen, and the GPU idles through them: 62% utilization, 38% fewer images per second).
 A project in that regime may raise the bound above its cheap-frame count, but must then raise the
 console variable above the bound, and that variable holds every freed GPU resource for the delay. Its
-VRAM cost is the delay times the memory the project frees per frame; a sim rebuilding terrain every
-frame freed about 300 MB a frame, and a delay of 40 filled a 24 GB card, spilled to host memory and
-slowed the sim tenfold. The module warns whenever the two settings are inconsistent. Every minute the
+VRAM cost is the delay times the memory the project frees per frame, and a project that frees a lot
+per frame (rebuilt geometry, say) can exhaust VRAM and spill to host memory, which costs far more
+than the throttle's stall ever would. The module warns whenever the two settings are inconsistent. Every minute the
 throttle logs how far behind the GPU ran (separately from any backlog on the RHI thread, which is not
 GPU lag) and how often it waited, so a run's log says whether the bound was ever needed.
 
