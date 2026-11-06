@@ -403,11 +403,11 @@ public:
 	// asks its handler for its next response only once these drain.
 	bool HasUnflushedWork() const;
 
-	// Handles write and finish completions until no request has unflushed work, or for at most
-	// TimeoutSeconds, and nothing else: any other event, such as a new request, is set aside for the
-	// next TickInternal or PumpEvents to handle first, in order. Safe where an RPC handler must not
-	// run, such as inside the world tick before its time has moved. Returns whether the writes drained.
-	bool FinishWrites(double TimeoutSeconds);
+	// Handles write and finish completions until no request has unflushed work, and nothing else: any
+	// other event, such as a new request, is set aside for the next TickInternal or PumpEvents to handle
+	// first, in order. Safe where an RPC handler must not run, such as inside the world tick before its
+	// time has moved. Like a FixedStep server tick, it waits as long as the writes take.
+	void FinishWrites();
 
 protected:
 	void Initialize();

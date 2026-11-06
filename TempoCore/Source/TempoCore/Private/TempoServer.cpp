@@ -481,23 +481,22 @@ bool FTempoServer::HasUnflushedWork() const
 	return false;
 }
 
-bool FTempoServer::FinishWrites(double TimeoutSeconds)
+void FTempoServer::FinishWrites()
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(TempoServerFinishWrites);
 
 	if (!bIsInitialized)
 	{
-		return !HasUnflushedWork();
+		return;
 	}
 
-	// A completion wakes AsyncNext at once, so the interval only bounds how often the deadline is checked.
-	const gpr_timespec PollInterval {0, 1000000, GPR_TIMESPAN};
-	const double DeadlineSeconds = FPlatformTime::Seconds() + TimeoutSeconds;
+	const int32 MaxEventWaitTimeNanoSeconds = GetDefault<UTempoCoreSettings>()->GetMaxEventWaitTime();
+	const gpr_timespec MaxEventWaitTime {0, MaxEventWaitTimeNanoSeconds, GPR_TIMESPAN};
 	while (HasUnflushedWork())
 	{
 		int32* Tag;
 		bool bOk;
-		switch (CompletionQueue->AsyncNext(reinterpret_cast<void**>(&Tag), &bOk, PollInterval))
+		switch (CompletionQueue->AsyncNext(reinterpret_cast<void**>(&Tag), &bOk, MaxEventWaitTime))
 		{
 		case grpc::CompletionQueue::GOT_EVENT:
 			{
@@ -516,20 +515,14 @@ bool FTempoServer::FinishWrites(double TimeoutSeconds)
 			}
 		case grpc::CompletionQueue::SHUTDOWN:
 			{
-				return false;
+				return;
 			}
 		case grpc::CompletionQueue::TIMEOUT:
 			{
 				break;
 			}
 		}
-
-		if (FPlatformTime::Seconds() > DeadlineSeconds)
-		{
-			return !HasUnflushedWork();
-		}
 	}
-	return true;
 }
 
 void FTempoServer::HandleDeferredEvents()

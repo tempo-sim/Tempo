@@ -29,10 +29,6 @@ namespace
 		TEXT("Tempo.StepWaitTimeoutMs"), 50.0f,
 		TEXT("How long the world waits between frames for a client's next Step before letting a paused frame run."));
 
-	TAutoConsoleVariable<float> CVarWriteFinishTimeoutMs(
-		TEXT("Tempo.WriteFinishTimeoutMs"), 50.0f,
-		TEXT("How long a frame's sensor send waits for in-flight gRPC writes to finish first."));
-
 	TAutoConsoleVariable<float> CVarStepPollIntervalMs(
 		TEXT("Tempo.StepPollIntervalMs"), 1.0f,
 		TEXT("How often sensor readbacks are polled while the world waits between frames for a client's next Step."));
@@ -590,11 +586,6 @@ void ATempoWorldSettings::OnBeginFrame()
 	}
 
 	RunStepsBetweenFrames();
-}
-
-double ATempoWorldSettings::GetWriteFinishTimeoutSeconds()
-{
-	return CVarWriteFinishTimeoutMs.GetValueOnGameThread() / 1000.0;
 }
 
 void ATempoWorldSettings::RunStepsBetweenFrames()
