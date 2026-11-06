@@ -787,18 +787,20 @@ def test_a_slower_sensor_captures_on_multiples_of_its_period(camera_rig, fixed_s
     original_rate = tw.get_property(actor=owner, component=sensor, property="RateHz").float_value
     tw.set_property(actor=owner, component=sensor, property="RateHz", value=WorldControl.Value(float_value=rate_hz))
     try:
-        # One stream throughout, so the camera's depth stays requested. Its first capture absorbs the
-        # rate change and the reconfigure if depth was off; a second stream would leave a gap long
-        # enough for the camera to turn depth off again, delaying a capture by a step.
-        times = asyncio.run(_capture_times(owner, sensor, 6, 4))
-        assert None not in times, f"a capture didn't come within 4 steps: {times}"
-        times = times[1:]
+        # One stream throughout, so the camera's depth stays requested; a second stream would leave a
+        # gap long enough for the camera to turn depth off again, delaying a capture by a step. Its
+        # first two captures absorb the rate change: the timer's next fire is on the old cadence and
+        # may have been armed before the change, so it re-arms one old period on, and only that fire's
+        # re-arm aligns to the new period. Either can also absorb a depth reconfigure.
+        all_times = asyncio.run(_capture_times(owner, sensor, 7, 4))
+        assert None not in all_times, f"a capture didn't come within 4 steps: {all_times}"
+        times = all_times[2:]
     finally:
         tw.set_property(actor=owner, component=sensor, property="RateHz", value=WorldControl.Value(float_value=original_rate))
 
     assert None not in times, f"a capture didn't come within 4 steps: {times}"
     off_grid = [t for t in times if abs(t / period - round(t / period)) > 1e-6]
-    assert not off_grid, f"captures at {times} s are not on multiples of the {period} s period"
+    assert not off_grid, f"captures at {times} s are not on multiples of the {period} s period (first two, dropped: {all_times[:2]})"
     assert all(abs((b - a) - period) < 1e-6 for a, b in zip(times, times[1:])), f"captures at {times} s are not one period apart"
 
 
