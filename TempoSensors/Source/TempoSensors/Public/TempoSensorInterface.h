@@ -49,6 +49,9 @@ public:
 	// sends it. A sensor that can't say returns true and is always sent.
 	virtual bool HasPendingMeasurementRequests() const { return true; }
 
+	// Whether ExecutePendingCapture will render this frame.
+	virtual bool HasPendingCapture() const { return false; }
+
 	// Execute any pending capture scheduled by MaybeMarkPendingCapture. Called from the subsystem
 	// after OnWorldTickEnd, when all actor transforms are final and SendAllEndOfFrameUpdates has run.
 	virtual void ExecutePendingCapture() {}

@@ -67,6 +67,8 @@ public:
 	int32 GetMaxRenderBufferSize() const { return MaxRenderBufferSize; }
 	bool GetPipelinedRendering() const { return bPipelinedRendering; }
 	void SetPipelinedRendering(bool bPipelinedRenderingIn);
+	bool GetLimitGPUFramesInFlight() const { return bLimitGPUFramesInFlight; }
+	int32 GetMaxGPUFramesInFlight() const { return MaxGPUFramesInFlight; }
 	FTempoSensorsLabelSettingsChanged TempoSensorsLabelSettingsChangedEvent;
 	FTempoSensorsLabelOverridesChanged TempoSensorsLabelOverridesChangedEvent;
 
@@ -225,4 +227,29 @@ private:
 	// simulation frame the data corresponds to.
 	UPROPERTY(EditAnywhere, Config, Category="Advanced")
 	bool bPipelinedRendering = false;
+
+	// Whether to cap how many render-thread frames the GPU may fall behind. A windowed process gets
+	// this cap from the viewport present; one rendering off-screen has no present and so no cap, and
+	// the Vulkan RHI recycles uniform-buffer memory and descriptor pools a fixed number of render-thread
+	// frames after release with no GPU sync. A GPU more than r.Vulkan.NumFramesToWaitForResourceDelete
+	// (2) frames behind then reads recycled memory: VK_ERROR_DEVICE_LOST with a READ_INVALID fault,
+	// typically in the camera's stitch merge draw, or a GPU hang. With pipelined rendering nothing on
+	// the Tempo side waits either, so the lag grows until the read queues fill. Each render-thread
+	// frame writes a GPU fence, and a frame does not end until the fence from MaxGPUFramesInFlight
+	// frames earlier has signaled. Costs nothing while the GPU keeps up. The lag is measured and
+	// summarized to the log either way (see FTempoGPUFrameThrottle).
+	UPROPERTY(EditAnywhere, Config, Category="Advanced")
+	bool bLimitGPUFramesInFlight = true;
+
+	// The most render-thread frames of GPU work that may be outstanding when a frame ends. Must stay
+	// below r.Vulkan.NumFramesToWaitForResourceDelete (2 by default); the module warns whenever the
+	// two are out of step. 1 is what a viewport present enforces: the game thread, the render thread
+	// and the GPU still overlap by a frame each, so pipelined rendering keeps its parallelism, and
+	// when every frame captures the bound costs nothing. It costs throughput only when cheap frames
+	// sit between two captures, since the GPU idles through them. A project in that regime may raise
+	// the bound above its cheap-frame count, but must raise the console variable with it, and that
+	// variable holds every freed GPU resource for the delay: its VRAM cost is the delay times the
+	// memory freed per frame, which can be large.
+	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=(EditCondition=bLimitGPUFramesInFlight, ClampMin=1, ClampMax=64, UIMin=1, UIMax=64))
+	int32 MaxGPUFramesInFlight = 1;
 };
