@@ -389,7 +389,7 @@ public:
 	}
 
 	// Handles gRPC events on the game thread until ShouldStop returns true, or for at most
-	// TimeoutSeconds. While the queue is idle, OnPoll runs every PollIntervalSeconds.
+	// TimeoutSeconds. OnPoll runs every PollIntervalSeconds, whether the queue is idle or busy.
 	// Returns whether ShouldStop ended it. This is how ATempoWorldSettings serves RPCs between the
 	// steps a client advances between frames, outside TickInternal.
 	bool PumpEvents(TFunctionRef<bool()> ShouldStop, double TimeoutSeconds, double PollIntervalSeconds, TFunctionRef<void()> OnPoll);
@@ -405,8 +405,11 @@ public:
 
 	// Handles write and finish completions until no request has unflushed work, and nothing else: any
 	// other event, such as a new request, is set aside for the next TickInternal or PumpEvents to handle
-	// first, in order. Safe where an RPC handler must not run, such as inside the world tick before its
-	// time has moved. Like a FixedStep server tick, it waits as long as the writes take.
+	// first, in order. So no new request is handled where this runs, such as inside the world tick
+	// before its time has moved. A stream's handler is re-invoked when its last write completes, which
+	// every streaming handler answers by registering interest and responding later (see
+	// ITempoServiceProvider); one that responded at once would run here, and keep this from draining.
+	// Like a FixedStep server tick, it waits as long as the writes take.
 	void FinishWrites();
 
 protected:

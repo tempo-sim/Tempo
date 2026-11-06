@@ -55,6 +55,11 @@ public:
 	// re-pause at the end of its frame would undo a Play that arrived during the frame.
 	void Play();
 
+	// Pause, ending any step in progress (its completion fires as aborted). A pause through the player
+	// controller alone is a no-op while the world is already paused, as it is between the steps a
+	// client advances between frames, so on its own it would never reach the step.
+	void Pause();
+
 	// Fires once per step, in order, with the step's length and its end time. While it fires, world time
 	// (GetTimeSeconds) is that end time and GetDeltaSeconds is that length. In FixedStep, a step a client
 	// advances on its own runs between frames; the rest of a game frame's steps run just before the
@@ -114,6 +119,10 @@ private:
 	void OnWorldTickEnd(UWorld* World, ELevelTick TickType, float DeltaSeconds);
 
 	void FirePendingStepCompletion(ETempoStepResult Result);
+
+	// Ends the Step in progress, if any: its completion fires with Result and its remaining steps are
+	// dropped. For a pause or unpause that takes the world over from the step.
+	void AbortStep(ETempoStepResult Result);
 
 	// UTempoCoreSettings::StepsPerGameFrame, or 1 if Chaos ticks asynchronously.
 	int32 GetStepsPerGameFrame() const;

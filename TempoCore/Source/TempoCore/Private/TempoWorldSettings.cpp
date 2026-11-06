@@ -226,6 +226,8 @@ void ATempoWorldSettings::OnTimeSettingsChanged()
 
 	if (bStepChanged)
 	{
+		// The completion fires, but the remaining steps keep running on the new grid (not AbortStep): a
+		// step running unpaused, in frames, re-pauses only when its count runs out.
 		if (PendingStepCompletion)
 		{
 			FirePendingStepCompletion(ETempoStepResult::AbortedByTimeSettingsChanged);
@@ -308,16 +310,14 @@ int32 ATempoWorldSettings::GetStepsUntilGameFrame() const
 
 void ATempoWorldSettings::Play()
 {
-	if (StepsToSimulate.IsSet())
-	{
-		if (PendingStepCompletion)
-		{
-			FirePendingStepCompletion(ETempoStepResult::AbortedByExternalPause);
-		}
-		StepsToSimulate.Reset();
-	}
-
+	AbortStep(ETempoStepResult::AbortedByExternalPause);
 	SetPaused(false);
+}
+
+void ATempoWorldSettings::Pause()
+{
+	AbortStep(ETempoStepResult::AbortedByExternalPause);
+	SetPaused(true);
 }
 
 void ATempoWorldSettings::OnWorldTickEnd(UWorld* World, ELevelTick TickType, float DeltaSeconds)
@@ -384,6 +384,15 @@ void ATempoWorldSettings::FirePendingStepCompletion(ETempoStepResult Result)
 	}
 }
 
+void ATempoWorldSettings::AbortStep(ETempoStepResult Result)
+{
+	if (PendingStepCompletion)
+	{
+		FirePendingStepCompletion(Result);
+	}
+	StepsToSimulate.Reset();
+}
+
 void ATempoWorldSettings::SetPaused(bool bPaused)
 {
 	if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0))
@@ -418,11 +427,7 @@ void ATempoWorldSettings::OnUnpaused()
 	// for a stepped game frame or a Play, doesn't.
 	if (!bSelfPausing)
 	{
-		if (PendingStepCompletion)
-		{
-			FirePendingStepCompletion(ETempoStepResult::AbortedByExternalPause);
-		}
-		StepsToSimulate.Reset();
+		AbortStep(ETempoStepResult::AbortedByExternalPause);
 	}
 
 	SyncFixedPointTime();
@@ -436,11 +441,7 @@ void ATempoWorldSettings::SetPauserPlayerState(APlayerState* PlayerState)
 	}
 	else if (!bSelfPausing)
 	{
-		if (PendingStepCompletion)
-		{
-			FirePendingStepCompletion(ETempoStepResult::AbortedByExternalPause);
-		}
-		StepsToSimulate.Reset();
+		AbortStep(ETempoStepResult::AbortedByExternalPause);
 	}
 
 	Super::SetPauserPlayerState(PlayerState);
@@ -544,20 +545,21 @@ void ATempoWorldSettings::CheckPhysicsSettings()
 		return;
 	}
 
+	// Async physics runs Chaos on its own thread at its own step size, and can drop steps to keep up,
+	// so no Tempo step corresponds to a set of its steps. GetStepsPerGameFrame then reports one step per
+	// game frame, so the game frame the checks below describe never runs.
+	if (PhysicsSettings->bTickPhysicsAsync)
+	{
+		UE_LOG(LogTempoCore, Error, TEXT("StepsPerGameFrame is %d, but the physics settings tick physics asynchronously, which Tempo's steps can't follow. Using one step per game frame."), StepsPerGameFrame);
+		return;
+	}
+
 	// Without substepping Chaos clamps a frame to MaxPhysicsDeltaTime; with it, to MaxSubsteps substeps
 	// of MaxSubstepDeltaTime, checked below (FChaosScene::SetUpForFrame).
 	if (!PhysicsSettings->bSubstepping && GameFrameSeconds > PhysicsSettings->MaxPhysicsDeltaTime)
 	{
 		UE_LOG(LogTempoCore, Warning, TEXT("A FixedStep game frame (%.4fs) is longer than the physics settings' MaxPhysicsDeltaTime (%.4fs), so Chaos will simulate less time than each game frame advances."),
 			GameFrameSeconds, PhysicsSettings->MaxPhysicsDeltaTime);
-	}
-
-	// Async physics runs Chaos on its own thread at its own step size, and can drop steps to keep up,
-	// so no Tempo step corresponds to a set of its steps.
-	if (PhysicsSettings->bTickPhysicsAsync)
-	{
-		UE_LOG(LogTempoCore, Error, TEXT("StepsPerGameFrame is %d, but the physics settings tick physics asynchronously, which Tempo's steps can't follow. Using one step per game frame."), StepsPerGameFrame);
-		return;
 	}
 
 	// Chaos divides each frame's delta into ceil(delta / MaxSubstepDeltaTime) substeps, at most

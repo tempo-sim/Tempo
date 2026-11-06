@@ -756,12 +756,13 @@ namespace
 // When a newly started capture timer is first due, from now.
 //
 // In FixedStep, at the next multiple of the period in sim time, so that every sensor at a rate
-// captures on the same steps, and in every run. Periods are counted in whole steps, so a period of a
-// whole number of steps lands on its step exactly. That holds only when the timer is set from its own
-// callback: FTimerManager holds a timer set before it has ticked in a frame (while paused, between
-// frames) pending, and starts counting its delay only once its next tick has added that tick's delta.
-// So OnCaptureTimerFired re-arms the timer this way on every firing, and captures follow the grid from
-// the first one, wherever the timer was started. Otherwise, one period from now.
+// captures on the same steps, and in every run. A period of a whole number of steps is counted in
+// those steps, so it lands on its step exactly, whatever the rate's float holds. That holds only when
+// the timer is set from its own callback: FTimerManager holds a timer set before it has ticked in a
+// frame (while paused, between frames) pending, and starts counting its delay only once its next tick
+// has added that tick's delta, so a timer started there first fires a game frame late. So
+// OnCaptureTimerFired re-arms the timer this way on every firing, and from that first firing on,
+// captures follow the grid wherever the timer was started. Otherwise, one period from now.
 //
 // Either way, the float just below that delay. FTimerManager fires a timer only once it is strictly
 // overdue, and its clock and a timer's expiries are sums of the same floats (frame deltas and the
@@ -786,13 +787,28 @@ float GetFirstCaptureDelay(const UWorld* World, float RateHz)
 		const double Now = World->GetTimeSeconds() - static_cast<double>(StepsIntoGameFrame) / StepsPerSecond;
 		const double Rate = FMath::Max<double>(UE_KINDA_SMALL_NUMBER, RateHz);
 
-		const double NextPeriod = FMath::FloorToDouble(static_cast<double>(Steps) * Rate / StepsPerSecond) + 1.0;
-		FirstDelay = NextPeriod / Rate - Now;
-		// Only right after switching to FixedStep, when sim time is still off the step grid, can a
-		// period shorter than a step put that multiple behind it.
-		while (FirstDelay <= 0.0)
+		const double PeriodSteps = StepsPerSecond / Rate;
+		const int64 WholePeriodSteps = FMath::RoundToInt64(PeriodSteps);
+		if (WholePeriodSteps >= 1 && FMath::IsNearlyEqual(PeriodSteps, static_cast<double>(WholePeriodSteps), PeriodSteps * 1.e-6))
 		{
-			FirstDelay += 1.0 / Rate;
+			// In whole steps, exactly. Through the rate's float, the multiple this timer just fired on can
+			// come out a hair short of itself, which a floor would count as still ahead, and the timer
+			// would fire again on the very next frame.
+			const uint64 PeriodStepsCount = static_cast<uint64>(WholePeriodSteps);
+			const uint64 NextSteps = (Steps / PeriodStepsCount + 1) * PeriodStepsCount;
+			FirstDelay = static_cast<double>(NextSteps) / StepsPerSecond - Now;
+		}
+		else
+		{
+			const double NextPeriod = FMath::FloorToDouble(static_cast<double>(Steps) * Rate / StepsPerSecond) + 1.0;
+			FirstDelay = NextPeriod / Rate - Now;
+			// A multiple that falls on a step can come out a hair short of it, as above; a thousandth of a
+			// step is the slack. Right after switching to FixedStep, when sim time is still off the step
+			// grid, a period shorter than a step can also put that multiple behind it.
+			while (FirstDelay <= 1.e-3 / StepsPerSecond)
+			{
+				FirstDelay += 1.0 / Rate;
+			}
 		}
 	}
 

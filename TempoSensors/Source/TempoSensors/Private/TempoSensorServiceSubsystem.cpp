@@ -159,9 +159,10 @@ void UTempoSensorServiceSubsystem::OnWorldTickStart(UWorld* World, ELevelTick Ti
 		// response is written, and this frame's server tick, which would finish them, runs after this
 		// send. A readback sent between frames whose write is still in flight, when the wait for the
 		// client's next Step times out and this frame runs paused, would otherwise leave the next
-		// readback with no request here, and it would be dropped. Only write completions are handled,
-		// so no RPC runs inside the world tick. No timeout: the server tick that follows would wait for
-		// the same writes as long as they take.
+		// readback with no request here, and it would be dropped. Only write completions are handled:
+		// no new request runs inside the world tick, and a stream's re-invoked handler only registers
+		// its next request (see FTempoServer::FinishWrites). No timeout: the server tick that follows
+		// would wait for the same writes as long as they take.
 		if (GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep)
 		{
 			FTempoServer& Server = FTempoServer::Get();

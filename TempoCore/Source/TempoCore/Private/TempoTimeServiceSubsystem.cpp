@@ -209,7 +209,12 @@ void UTempoTimeServiceSubsystem::AdvanceSteps(const AdvanceStepsRequest& Request
 
 void UTempoTimeServiceSubsystem::Pause(const TempoEmpty& Request, const TDelegate<void(const TempoEmpty&, grpc::Status)>& ResponseContinuation) const
 {
-	if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0))
+	if (ATempoWorldSettings* WorldSettings = Cast<ATempoWorldSettings>(GetWorld()->GetWorldSettings());
+		WorldSettings && UGameplayStatics::GetPlayerController(GetWorld(), 0))
+	{
+		WorldSettings->Pause();
+	}
+	else if (APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0))
 	{
 		PlayerController->SetPause(true);
 	}

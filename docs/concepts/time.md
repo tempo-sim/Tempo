@@ -116,7 +116,9 @@ frame runs between frames:
 
 Sensors capture only when the world ticks, so their rates are rounded to game frames. In Fixed Step
 mode a sensor's captures fall on multiples of its period in sim time, so every sensor at a rate
-captures on the same steps, in every run.
+captures on the same steps, in every run. The one exception is the first capture after a sensor's
+timer starts outside a frame, as it does on a rate change or a time-mode switch while paused: that
+one can come a game frame late, and the captures after it are on the grid.
 
 !!! note "Unreal timers on the Fixed Step grid"
 

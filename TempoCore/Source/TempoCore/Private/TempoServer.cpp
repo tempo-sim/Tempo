@@ -435,12 +435,13 @@ bool FTempoServer::PumpEvents(TFunctionRef<bool()> ShouldStop, double TimeoutSec
 	const int64 PollIntervalNanoSeconds = FMath::Max<int64>(1, static_cast<int64>(PollIntervalSeconds * 1.e9));
 	const gpr_timespec PollInterval {PollIntervalNanoSeconds / 1000000000, static_cast<int32>(PollIntervalNanoSeconds % 1000000000), GPR_TIMESPAN};
 	const double DeadlineSeconds = FPlatformTime::Seconds() + TimeoutSeconds;
+	double LastPollSeconds = FPlatformTime::Seconds();
 	while (!ShouldStop())
 	{
 		int32* Tag;
 		bool bOk;
-		// AsyncNext returns as soon as an event arrives, so the interval only bounds how long an idle
-		// queue goes without OnPoll; it adds no latency to a request.
+		bool bPollDue = false;
+		// AsyncNext returns as soon as an event arrives, so the interval adds no latency to a request.
 		switch (CompletionQueue->AsyncNext(reinterpret_cast<void**>(&Tag), &bOk, PollInterval))
 		{
 		case grpc::CompletionQueue::GOT_EVENT:
@@ -454,14 +455,23 @@ bool FTempoServer::PumpEvents(TFunctionRef<bool()> ShouldStop, double TimeoutSec
 			}
 		case grpc::CompletionQueue::TIMEOUT:
 			{
-				OnPoll();
+				bPollDue = true;
 				break;
 			}
 		}
 
+		// On the clock as well as on an idle queue, so a busy one (a client polling, several streams
+		// writing) can't starve the poll.
+		const double NowSeconds = FPlatformTime::Seconds();
+		if (bPollDue || NowSeconds - LastPollSeconds >= PollIntervalSeconds)
+		{
+			OnPoll();
+			LastPollSeconds = FPlatformTime::Seconds();
+		}
+
 		// A deadline, not a quiet period: steady traffic (a client polling, a stream's writes) must
 		// not keep the caller here, which in the editor would freeze it.
-		if (FPlatformTime::Seconds() > DeadlineSeconds)
+		if (NowSeconds > DeadlineSeconds)
 		{
 			return ShouldStop();
 		}
