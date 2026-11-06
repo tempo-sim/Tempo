@@ -18,6 +18,7 @@
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
+#include "NiagaraGpuComputeDispatchInterface.h"
 
 using SensorService = TempoSensors::SensorService;
 using SensorAsyncService = TempoSensors::SensorService::AsyncService;
@@ -101,15 +102,6 @@ void UTempoSensorServiceSubsystem::OnWorldTickEnd(UWorld* World, ELevelTick Tick
 	// networking) have completed, so transforms are fully settled and velocity vectors will be correct.
 	World->SendAllEndOfFrameUpdates();
 
-	ForEachActiveSensor([](ITempoSensorInterface* Sensor)
-	{
-		Sensor->ExecutePendingCapture();
-	});
-
-	// When the main viewport renders, the engine drains SceneCapturesToUpdateMap itself as part of
-	// the main render path, and it does so with a valid MainViewFamily that our components can
-	// sync jitter/Lumen state against. Only drain here when world rendering is disabled — otherwise
-	// we'd preempt the engine and lose that sync.
 	bool bWorldRenderingDisabled = false;
 	if (const APlayerController* PlayerController = UGameplayStatics::GetPlayerController(World, 0))
 	{
@@ -121,6 +113,38 @@ void UTempoSensorServiceSubsystem::OnWorldTickEnd(UWorld* World, ELevelTick Tick
 			}
 		}
 	}
+
+	// Niagara runs GPU particle simulation ticks only in a render that isn't a scene capture. With the
+	// main viewport off nothing renders but our captures, so the ticks queue until Niagara runs them on
+	// its own every fx.Niagara.Batcher.TickFlush.MaxQueuedFrames frames (3 by default), and GPU
+	// particles would hold still in the captures in between. Run them before this frame's captures.
+	// This frame's ticks are already queued: Niagara submits them in OnWorldPostActorTick.
+	if (bWorldRenderingDisabled)
+	{
+		bool bAnyCapturePending = false;
+		ForEachActiveSensor([&bAnyCapturePending](ITempoSensorInterface* Sensor)
+		{
+			bAnyCapturePending |= Sensor->HasPendingCapture();
+		});
+		if (bAnyCapturePending)
+		{
+			if (FNiagaraGpuComputeDispatchInterface* NiagaraDispatch = FNiagaraGpuComputeDispatchInterface::Get(World))
+			{
+				TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsFlushNiagaraGpuTicks);
+				NiagaraDispatch->FlushPendingTicks_GameThread();
+			}
+		}
+	}
+
+	ForEachActiveSensor([](ITempoSensorInterface* Sensor)
+	{
+		Sensor->ExecutePendingCapture();
+	});
+
+	// When the main viewport renders, the engine drains SceneCapturesToUpdateMap itself as part of
+	// the main render path, and it does so with a valid MainViewFamily that our components can
+	// sync jitter/Lumen state against. Only drain here when world rendering is disabled — otherwise
+	// we'd preempt the engine and lose that sync.
 	if (!bWorldRenderingDisabled)
 	{
 		return;
