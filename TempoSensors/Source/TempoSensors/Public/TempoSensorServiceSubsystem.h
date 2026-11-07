@@ -75,6 +75,11 @@ protected:
 	// Sends every measurement whose readback has completed, waiting for the decode tasks.
 	void SendCompletedMeasurements();
 
+	// Decode tasks launched between frames, at most one per sensor, responding from worker threads
+	// while the game thread goes on serving the client. The frame's send and shutdown wait for them.
+	TArray<TPair<TWeakObjectPtr<UActorComponent>, TFuture<void>>> DecodesInFlight;
+	void WaitForDecodesInFlight();
+
 	// Polled between the steps a client advances between frames; see ATempoWorldSettings::OnBetweenFramesPoll.
 	void OnBetweenFramesPoll(UWorld* World);
 
