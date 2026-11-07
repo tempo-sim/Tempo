@@ -83,6 +83,7 @@ void UTempoSensorServiceSubsystem::Deinitialize()
 
 	ATempoWorldSettings::OnBetweenFramesPoll.Remove(BetweenFramesPollHandle);
 
+	WaitForDecodesInFlight();
 	FTempoServer::Get().DeactivateService<SensorService>();
 }
 
@@ -195,14 +196,15 @@ void UTempoSensorServiceSubsystem::OnWorldTickStart(UWorld* World, ELevelTick Ti
 			});
 		}
 
-		// Finish the writes in flight first. A stream asks for its next measurement only once its last
-		// response is written, and this frame's server tick, which would finish them, runs after this
-		// send. A readback sent between frames whose write is still in flight, when the wait for the
+		// Finish the writes in flight first, once the between-frames decode tasks have issued theirs. A
+		// stream asks for its next measurement only once its last response is written, and this frame's
+		// server tick, which would finish them, runs after this send. A readback sent between frames whose write is still in flight, when the wait for the
 		// client's next Step times out and this frame runs paused, would otherwise leave the next
 		// readback with no request here, and it would be dropped. Only write completions are handled:
 		// no new request runs inside the world tick, and a stream's re-invoked handler only registers
 		// its next request (see FTempoServer::FinishWrites). No timeout: the server tick that follows
 		// would wait for the same writes as long as they take.
+		WaitForDecodesInFlight();
 		if (GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep)
 		{
 			FTempoServer& Server = FTempoServer::Get();
@@ -219,9 +221,8 @@ void UTempoSensorServiceSubsystem::OnWorldTickStart(UWorld* World, ELevelTick Ti
 
 namespace
 {
-	// Sends every measurement whose readback has completed. The decode tasks respond to their gRPC
-	// requests from worker threads, so they must finish before the game thread handles gRPC events
-	// again.
+	// Sends every measurement whose readback has completed and waits for the decode tasks, so that
+	// the frame's measurements are all on their way when it proceeds.
 	void SendMeasurementsAndWait(TConstArrayView<ITempoSensorInterface*> Sensors)
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsSendMeasurements);
@@ -248,6 +249,15 @@ void UTempoSensorServiceSubsystem::SendCompletedMeasurements()
 		Sensors.Add(Sensor);
 	});
 	SendMeasurementsAndWait(Sensors);
+}
+
+void UTempoSensorServiceSubsystem::WaitForDecodesInFlight()
+{
+	for (const TPair<TWeakObjectPtr<UActorComponent>, TFuture<void>>& Decode : DecodesInFlight)
+	{
+		Decode.Value.Wait();
+	}
+	DecodesInFlight.Empty();
 }
 
 void UTempoSensorServiceSubsystem::OnBetweenFramesPoll(UWorld* World)
@@ -291,7 +301,24 @@ void UTempoSensorServiceSubsystem::OnBetweenFramesPoll(UWorld* World)
 	// readback can complete with no request yet. Sent then, it would be dropped. Kept, it goes to the
 	// stream's next request, or to the next game frame's send, so nothing is held past a game frame.
 	Sensors.RemoveAll([](const ITempoSensorInterface* Sensor) { return !Sensor->HasPendingMeasurementRequests(); });
-	SendMeasurementsAndWait(Sensors);
+
+	// Launch the decode tasks and go on: they respond from worker threads (the stream's request
+	// manager serializes that against the game thread's write completions), and the client's next
+	// Step is served while they run instead of after them. One per sensor at a time keeps a stream's
+	// responses in read order; a sensor whose previous decode is still running is sent next poll.
+	DecodesInFlight.RemoveAll([](const TPair<TWeakObjectPtr<UActorComponent>, TFuture<void>>& Decode) { return Decode.Value.IsReady(); });
+	for (ITempoSensorInterface* Sensor : Sensors)
+	{
+		UActorComponent* Component = Cast<UActorComponent>(Sensor);
+		if (DecodesInFlight.ContainsByPredicate([Component](const TPair<TWeakObjectPtr<UActorComponent>, TFuture<void>>& Decode) { return Decode.Key == Component; }))
+		{
+			continue;
+		}
+		if (TOptional<TFuture<void>> Future = Sensor->SendMeasurements())
+		{
+			DecodesInFlight.Emplace(Component, MoveTemp(Future.GetValue()));
+		}
+	}
 }
 
 void UTempoSensorServiceSubsystem::EnqueueReadbackPoll(TConstArrayView<ITempoSensorInterface*> Sensors)
