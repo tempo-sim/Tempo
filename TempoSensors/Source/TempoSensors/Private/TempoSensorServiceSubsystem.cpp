@@ -142,10 +142,26 @@ void UTempoSensorServiceSubsystem::OnWorldTickEnd(UWorld* World, ELevelTick Tick
 		}
 	}
 
-	ForEachActiveSensor([](ITempoSensorInterface* Sensor)
+	TArray<ITempoSensorInterface*> Sensors;
+	ForEachActiveSensor([&Sensors](ITempoSensorInterface* Sensor)
 	{
-		Sensor->ExecutePendingCapture();
+		Sensors.Add(Sensor);
 	});
+
+	// Poll the readbacks ahead of this frame's captures and behind each one. A fence that signals while
+	// the render thread works through the captures is then read back between them. Otherwise a client
+	// stepping between frames waits for a between-frames poll, whose command joins the render FIFO
+	// behind every capture of this frame, as long as the whole frame takes to encode.
+	EnqueueReadbackPoll(Sensors);
+	for (ITempoSensorInterface* Sensor : Sensors)
+	{
+		if (!Sensor->HasPendingCapture())
+		{
+			continue;
+		}
+		Sensor->ExecutePendingCapture();
+		EnqueueReadbackPoll(Sensors);
+	}
 
 	// When the main viewport renders, the engine drains SceneCapturesToUpdateMap itself as part of
 	// the main render path, and it does so with a valid MainViewFamily that our components can
@@ -264,41 +280,10 @@ void UTempoSensorServiceSubsystem::OnBetweenFramesPoll(UWorld* World)
 
 	// Readbacks are otherwise polled only at the render thread's end of frame, and a client advancing
 	// steps holds the next frame off for many of them. Poll from a render command instead; it is
-	// non-blocking, exactly like the end-of-frame poll. A sensor is only destroyed after the render
-	// thread has drained the commands queued before its destruction began, so the raw pointers outlive
-	// this command.
-	if (!BetweenFramesReadbackPollInFlight->load())
+	// non-blocking, exactly like the end-of-frame poll.
+	if (ReadbackPollsQueued->load() == 0)
 	{
-		TArray<ITempoSensorInterface*> AwaitingRender;
-		for (ITempoSensorInterface* Sensor : Sensors)
-		{
-			if (Sensor->IsAwaitingRender())
-			{
-				AwaitingRender.Add(Sensor);
-			}
-		}
-		if (!AwaitingRender.IsEmpty())
-		{
-			BetweenFramesReadbackPollInFlight->store(true);
-			ENQUEUE_RENDER_COMMAND(TempoBetweenFramesReadbackPoll)(
-				[AwaitingRender = MoveTemp(AwaitingRender), InFlight = BetweenFramesReadbackPollInFlight](FRHICommandListImmediate& RHICmdList)
-				{
-					TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsBetweenFramesReadbackPoll);
-
-					// A fence only reads as complete once the RHI has processed the GPU's completed work.
-					// An RHI without an interrupt thread (Vulkan without timeline semaphores or with few
-					// task threads) does that only when it submits, and between frames nothing submits.
-					// A dispatch always ends in a submit, even with nothing recorded, which processes
-					// whatever has completed, so the next poll sees it. It never waits on the GPU.
-					RHICmdList.ImmediateFlush(EImmediateFlushType::DispatchToRHIThread);
-
-					for (ITempoSensorInterface* Sensor : AwaitingRender)
-					{
-						Sensor->OnRenderCompleted();
-					}
-					InFlight->store(false);
-				});
-		}
+		EnqueueReadbackPoll(Sensors);
 	}
 
 	// Only sensors with a request waiting. A capture can be taken on a request that an earlier capture's
@@ -307,6 +292,44 @@ void UTempoSensorServiceSubsystem::OnBetweenFramesPoll(UWorld* World)
 	// stream's next request, or to the next game frame's send, so nothing is held past a game frame.
 	Sensors.RemoveAll([](const ITempoSensorInterface* Sensor) { return !Sensor->HasPendingMeasurementRequests(); });
 	SendMeasurementsAndWait(Sensors);
+}
+
+void UTempoSensorServiceSubsystem::EnqueueReadbackPoll(TConstArrayView<ITempoSensorInterface*> Sensors)
+{
+	TArray<ITempoSensorInterface*> AwaitingRender;
+	for (ITempoSensorInterface* Sensor : Sensors)
+	{
+		if (Sensor->IsAwaitingRender())
+		{
+			AwaitingRender.Add(Sensor);
+		}
+	}
+	if (AwaitingRender.IsEmpty())
+	{
+		return;
+	}
+
+	// A sensor is only destroyed after the render thread has drained the commands queued before its
+	// destruction began, so the raw pointers outlive this command.
+	ReadbackPollsQueued->fetch_add(1);
+	ENQUEUE_RENDER_COMMAND(TempoReadbackPoll)(
+		[AwaitingRender = MoveTemp(AwaitingRender), Queued = ReadbackPollsQueued](FRHICommandListImmediate& RHICmdList)
+		{
+			TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsReadbackPoll);
+
+			// A fence only reads as complete once the RHI has processed the GPU's completed work.
+			// An RHI without an interrupt thread (Vulkan without timeline semaphores or with few
+			// task threads) does that only when it submits, and between frames nothing submits.
+			// A dispatch always ends in a submit, even with nothing recorded, which processes
+			// whatever has completed, so the next poll sees it. It never waits on the GPU.
+			RHICmdList.ImmediateFlush(EImmediateFlushType::DispatchToRHIThread);
+
+			for (ITempoSensorInterface* Sensor : AwaitingRender)
+			{
+				Sensor->OnRenderCompleted();
+			}
+			Queued->fetch_sub(1);
+		});
 }
 
 TempoSensors::MeasurementType ToProtoMeasurementType(EMeasurementType ImageType)
