@@ -611,21 +611,19 @@ void ATempoWorldSettings::RunStepsBetweenFrames()
 			// doesn't come within the wait timeout, stop waiting (other RPCs don't extend it), and let
 			// paused frames run until the client steps again.
 			//
-			// Writes in flight are finished first, as a game frame's server tick finishes them. A stream
-			// asks for its next measurement only once its last response is written, and a readback that
-			// completes before then is kept for that request. Left stalled behind a client's queued steps,
-			// the writes would finish only in the next game frame's server tick, after that frame's
-			// measurement send has found no request and dropped the readback. A client that stops reading
-			// holds each step for at most the wait timeout.
+			// A queued step doesn't wait for writes in flight. A stream asks for its next measurement only
+			// once its last response is written, and a readback that completes before then is kept for that
+			// request: a send between frames skips a sensor with no request waiting, and the game frame's
+			// send finishes the writes in flight first (FTempoServer::FinishWrites), so none is dropped.
 			const bool bStepsQueued = HasStepsToRun();
-			if (!bStepsQueued || Server.HasUnflushedWork())
+			if (!bStepsQueued)
 			{
-				if (!bStepsQueued && !bClientStepping)
+				if (!bClientStepping)
 				{
 					break;
 				}
 				if (!Server.PumpEvents(
-					[this, &Server, World]() { return (HasStepsToRun() && !Server.HasUnflushedWork()) || Server.HasHeldRequests() || !World->IsPaused(); },
+					[this, &Server, World]() { return HasStepsToRun() || Server.HasHeldRequests() || !World->IsPaused(); },
 					WaitTimeoutSeconds, PollIntervalSeconds,
 					[World]() { OnBetweenFramesPoll.Broadcast(World); })
 					&& !HasStepsToRun())
