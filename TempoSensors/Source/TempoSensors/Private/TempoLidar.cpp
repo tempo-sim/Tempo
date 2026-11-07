@@ -645,6 +645,16 @@ void UTempoLidar::SyncTiles()
 
 void UTempoLidar::RequestMeasurement(const TempoSensors::LidarScanRequest& Request, const TResponseDelegate<TempoSensors::LidarScanSegment>& ResponseContinuation)
 {
+	// A stream's handler is re-invoked when its write queue drains, which can happen while a decode
+	// task is still responding with the sweep's later segments; that stream then asks here a second
+	// time for the same request. One entry per stream, or the next sweep would go to it twice.
+	for (const FLidarScanRequest& Pending : PendingRequests)
+	{
+		if (Pending.ResponseContinuation.GetHandle() == ResponseContinuation.GetHandle())
+		{
+			return;
+		}
+	}
 	PendingRequests.Add({ Request, ResponseContinuation});
 }
 
