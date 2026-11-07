@@ -860,6 +860,9 @@ namespace
 		// taken once rather than inverted per return.
 		const double CosMaxAngleOfIncidence = FMath::Cos(FMath::DegreesToRadians(Read.MaxAngleOfIncidence));
 		const double SinMaxAngleOfIncidence = FMath::Sin(FMath::DegreesToRadians(Read.MaxAngleOfIncidence));
+		// MaxDistance for the reach test below, with a relative margin far wider than the rounding in
+		// the intersection it stands in for, so a beam it rules out could not have returned.
+		const double MaxDistanceWithMargin = Read.MaxDistance * (1.0 + 1e-4);
 		// A pixel's point is depth * (1, X, -Y) at image plane location (X, Y), so stepping one
 		// column adds StepX to the second component and one row subtracts StepY from the third.
 		const FVector ColumnRayStep(0.0, Read.ImagePlanePixelStep.X, 0.0);
@@ -871,7 +874,7 @@ namespace
 
 		// H-outer, V-inner layout: each ParallelFor iteration owns a contiguous V-length stripe
 		// of every output array, so threads never share cache lines.
-		ParallelFor(Read.HorizontalBeams, [&Read, BeamSamples, CosMaxAngleOfIncidence, SinMaxAngleOfIncidence,
+		ParallelFor(Read.HorizontalBeams, [&Read, BeamSamples, CosMaxAngleOfIncidence, SinMaxAngleOfIncidence, MaxDistanceWithMargin,
 			ColumnRayStep, RowRayStep, ImageWidth, ImageHeight, InverseCaptureRotation, InverseCaptureScale,
 			DistancesData, IntensitiesData, LabelsData, AzimuthsData, ElevationsData, ReflectivitiesData, ColorsData, ColorEncoding,
 			MediaPixels, ReturnMode, bDual, MinDetectableIntensity,
@@ -888,53 +891,67 @@ namespace
 				const FVector RayDirectionUnit(Sample.RayDirectionUnit);
 				const float NearestDistance = NearestDepth / Sample.DepthToDistanceDivisor;
 				const FVector NearestPoint = NearestDirection * NearestDistance;
-				const FVector WorldNormal = Pixel.Normal();
-				const FVector LocalNormal = InverseCaptureScale * InverseCaptureRotation.RotateVector(WorldNormal);
 
-				// The rendered normal carries the material's normal map. That is right for how much
-				// light comes back, but not for where the surface is, so the plane the beam is
-				// intersected with, and the incidence cutoff, take their normal from the geometry:
-				// the neighboring pixels' points, rebuilt from their depths.
-				const FVector NearestRay = NearestDirection / Sample.DepthToDistanceDivisor;
-				const int32 Column = Sample.PixelIndex % ImageWidth;
-				const int32 Row = Sample.PixelIndex / ImageWidth;
-				FVector NeighborPoints[4];
-				const FVector* Neighbors[4] = { nullptr, nullptr, nullptr, nullptr };
-				auto AddNeighbor = [&](int32 Slot, int32 PixelOffset, const FVector& RayOffset)
-				{
-					const float Depth = Read.Image[Sample.PixelIndex + PixelOffset].Depth(Read.MinDepth, Read.MaxDepth, MaxDiscreteDepthValue);
-					NeighborPoints[Slot] = (NearestRay + RayOffset) * Depth;
-					Neighbors[Slot] = &NeighborPoints[Slot];
-				};
-				if (Column > 0) { AddNeighbor(0, -1, -ColumnRayStep); }
-				if (Column < ImageWidth - 1) { AddNeighbor(1, 1, ColumnRayStep); }
-				if (Row > 0) { AddNeighbor(2, -ImageWidth, -RowRayStep); }
-				if (Row < ImageHeight - 1) { AddNeighbor(3, ImageWidth, RowRayStep); }
-				FVector SurfaceNormal;
-				EstimateLidarSurfaceNormal(NearestPoint, Neighbors, LocalNormal, SinMaxAngleOfIncidence, SurfaceNormal);
-				const double CosAngleOfIncidence = FVector::DotProduct(SurfaceNormal, -RayDirectionUnit);
-				// A bump can face away from a beam whose surface faces it; it returns nothing then,
-				// not a negative intensity.
-				const double CosShadingIncidence = FMath::Max(0.0, FVector::DotProduct(LocalNormal.GetSafeNormal(), -RayDirectionUnit));
+				// Whatever the surface's orientation, a plane through NearestPoint that the beam meets
+				// within the incidence cutoff is hit no nearer than
+				// NearestDistance * (1 - |NearestDirection - RayDirectionUnit| / cos(MaxAngleOfIncidence)).
+				// Where that is past MaxDistance (sky, ground out of range) there is no surface echo, so
+				// the surface normal is not estimated at all.
+				const double ReachPastMax = NearestDistance - MaxDistanceWithMargin;
+				const bool bSurfaceOutOfReach = ReachPastMax > 0.0 && CosMaxAngleOfIncidence > 0.0
+					&& FMath::Square(ReachPastMax * CosMaxAngleOfIncidence)
+						> (NearestDirection - RayDirectionUnit).SizeSquared() * FMath::Square(static_cast<double>(NearestDistance));
 
 				// The surface echo, as before participating media: none past the max angle of
 				// incidence or the max distance.
 				FTempoLidarEcho Surface;
-				if (CosAngleOfIncidence >= CosMaxAngleOfIncidence)
+				if (!bSurfaceOutOfReach)
 				{
-					// The intersection depends only on the ray's direction, so the unit vector
-					// serves as the second point on the line.
-					const FPlane SurfacePlane(NearestPoint, SurfaceNormal);
-					const FVector HitPoint = FMath::LinePlaneIntersection(FVector::ZeroVector, RayDirectionUnit, SurfacePlane);
+					const FVector WorldNormal = Pixel.Normal();
+					const FVector LocalNormal = InverseCaptureScale * InverseCaptureRotation.RotateVector(WorldNormal);
 
-					const double Distance = HitPoint.Length();
-					if (Distance <= Read.MaxDistance)
+					// The rendered normal carries the material's normal map. That is right for how much
+					// light comes back, but not for where the surface is, so the plane the beam is
+					// intersected with, and the incidence cutoff, take their normal from the geometry:
+					// the neighboring pixels' points, rebuilt from their depths.
+					const FVector NearestRay = NearestDirection / Sample.DepthToDistanceDivisor;
+					const int32 Column = Sample.PixelIndex % ImageWidth;
+					const int32 Row = Sample.PixelIndex / ImageWidth;
+					FVector NeighborPoints[4];
+					const FVector* Neighbors[4] = { nullptr, nullptr, nullptr, nullptr };
+					auto AddNeighbor = [&](int32 Slot, int32 PixelOffset, const FVector& RayOffset)
 					{
-						Surface.Distance = static_cast<float>(FMath::Max(Read.MinDistance, Distance));
-						Surface.Intensity = static_cast<float>(CosShadingIncidence * Read.IntensitySaturationDistance / FMath::Max(Read.IntensitySaturationDistance, Distance));
-						Surface.ReflectivityByte = Pixel.ReflectivityByte();
-						Surface.Label = static_cast<uint8>(Pixel.Label());
-						Surface.bValid = true;
+						const float Depth = Read.Image[Sample.PixelIndex + PixelOffset].Depth(Read.MinDepth, Read.MaxDepth, MaxDiscreteDepthValue);
+						NeighborPoints[Slot] = (NearestRay + RayOffset) * Depth;
+						Neighbors[Slot] = &NeighborPoints[Slot];
+					};
+					if (Column > 0) { AddNeighbor(0, -1, -ColumnRayStep); }
+					if (Column < ImageWidth - 1) { AddNeighbor(1, 1, ColumnRayStep); }
+					if (Row > 0) { AddNeighbor(2, -ImageWidth, -RowRayStep); }
+					if (Row < ImageHeight - 1) { AddNeighbor(3, ImageWidth, RowRayStep); }
+					FVector SurfaceNormal;
+					EstimateLidarSurfaceNormal(NearestPoint, Neighbors, LocalNormal, SinMaxAngleOfIncidence, SurfaceNormal);
+					const double CosAngleOfIncidence = FVector::DotProduct(SurfaceNormal, -RayDirectionUnit);
+					// A bump can face away from a beam whose surface faces it; it returns nothing then,
+					// not a negative intensity.
+					const double CosShadingIncidence = FMath::Max(0.0, FVector::DotProduct(LocalNormal.GetSafeNormal(), -RayDirectionUnit));
+
+					if (CosAngleOfIncidence >= CosMaxAngleOfIncidence)
+					{
+						// The intersection depends only on the ray's direction, so the unit vector
+						// serves as the second point on the line.
+						const FPlane SurfacePlane(NearestPoint, SurfaceNormal);
+						const FVector HitPoint = FMath::LinePlaneIntersection(FVector::ZeroVector, RayDirectionUnit, SurfacePlane);
+
+						const double Distance = HitPoint.Length();
+						if (Distance <= Read.MaxDistance)
+						{
+							Surface.Distance = static_cast<float>(FMath::Max(Read.MinDistance, Distance));
+							Surface.Intensity = static_cast<float>(CosShadingIncidence * Read.IntensitySaturationDistance / FMath::Max(Read.IntensitySaturationDistance, Distance));
+							Surface.ReflectivityByte = Pixel.ReflectivityByte();
+							Surface.Label = static_cast<uint8>(Pixel.Label());
+							Surface.bValid = true;
+						}
 					}
 				}
 
