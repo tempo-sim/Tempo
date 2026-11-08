@@ -508,8 +508,14 @@ matrix entry in `tempo_build_and_package.yml` (and, for Python, a line in `pytes
 - **FastGeo-cooked geometry can't be labeled.** FastGeoStreaming (UE 5.6+, CitySample) turns static
   actors into non-component primitives at cook time. The labeler can't stencil them, and since they
   don't write custom depth, labels behind them show through. `Setup.sh` runs
-  `Scripts/DisableFastGeo.sh`, which turns FastGeo off in the project's cook (`-keep-fastgeo` skips
-  it).
+  `Scripts/ConfigureProject.sh`, which turns FastGeo off in the project's cook (`-keep-fastgeo` skips
+  it). `FASTGEO_LABELING_NOTES.md` covers what supporting it would take.
+- **Time control needs `ATempoWorldSettings` in the level.** Every time RPC fails without it. A host
+  project's maps keep the engine's `AWorldSettings` unless `WorldSettingsClassName` names Tempo's.
+  `ConfigureProject.sh` sets it when the project uses the default, and the editor or cook swaps the
+  class in (`UWorld::RepairWorldSettings`, editor-only), so a *package* made after that has it. It
+  also turns physics substepping on. Without substepping, a coarse Fixed Step frame is clamped to
+  `MaxPhysicsDeltaTime`.
 - **Anything a settings CDO holds at runtime must be rooted.** A cooked build puts native CDOs in
   the GC's disregard set: their references keep nothing alive, and GC verification fatals on one
   that points at an unrooted object. `UTempoSensorsSettings::SetRuntimeSemanticLabelTable` roots

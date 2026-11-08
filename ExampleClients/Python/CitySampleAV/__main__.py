@@ -34,7 +34,16 @@ def parse_args(argv=None):
                    help="Use config/rigs/<RIG>.json for every vehicle, instead of each vehicle's own.")
     g.add_argument("--seed", type=int, default=None, help="Seed for the random vehicle choice.")
     g.add_argument("--rate-hz", type=float, default=0.0,
-                   help="Capture every sensor at this rate instead of its JSON rate_hz.")
+                   help="Capture every sensor at this rate instead of its JSON rate_hz. In Fixed Step "
+                        "(the default) every sensor runs at --step-hz unless this is given.")
+
+    g = p.add_argument_group("time")
+    g.add_argument("--step-hz", type=int, default=10,
+                   help="Fixed Step rate: the sim advances exactly 1/step-hz seconds per frame, and the "
+                        "sensors capture on every step (default 10).")
+    g.add_argument("--wall-clock", action="store_true",
+                   help="Run in Wall Clock time instead of Fixed Step. Sensors then capture whenever "
+                        "frames allow, not in lockstep.")
     g.add_argument("--viewport", action="store_true",
                    help="Keep rendering the game's own window. Off by default while collecting: the "
                         "sensors render offscreen either way, and the main view costs GPU time.")
@@ -60,7 +69,10 @@ def parse_args(argv=None):
     g.add_argument("--ground-truth-radius-m", type=float, default=80.0,
                    help="Show/record actor boxes within this radius of the ego; 0 disables.")
     g.add_argument("--duration-s", type=float, default=0.0,
-                   help="Stop after this many (wall-clock) seconds; 0 runs until Ctrl+C.")
+                   help="Stop after this many wall-clock seconds; 0 runs until Ctrl+C.")
+    g.add_argument("--sim-duration-s", type=float, default=0.0,
+                   help="Stop after this many seconds of sim time, once streaming has begun: with "
+                        "Fixed Step at 10 Hz, 60 means 600 frames of every sensor.")
     g.add_argument("--app-id", default="tempo_citysample_av", help="Rerun application id.")
     return p.parse_args(argv)
 

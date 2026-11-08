@@ -55,7 +55,7 @@ CitySampleAV.py --vehicle bus10                  # a specific model (ids in conf
 CitySampleAV.py --vehicle truck                  # any vehicle of a category
 CitySampleAV.py --vehicle random --seed 7        # reproducible random choice (the default is random)
 CitySampleAV.py --record out/run1                # visualize and record
-CitySampleAV.py --no-viz --record out/run1 --duration-s 120   # record two minutes, headless client
+CitySampleAV.py --no-viz --record out/run1 --sim-duration-s 120   # 1200 frames per sensor, headless client
 CitySampleAV.py --save-rrd run1.rrd              # keep the Rerun session too (raw images: ~1.5 GB/min)
 CitySampleAV.py --label-type instance            # instance ids + 2D bounding boxes
 CitySampleAV.py --lidar-color intensity          # or distance, reflectivity, instance, color
@@ -141,8 +141,15 @@ actors.jsonl              nearby actors' poses and bounds per sample
 ```
 
 The recorder shares the viewer's streams. If the disk can't keep up, it drops frames rather than
-slowing the sim, and `meta.json` counts the drops. Timing is wall-clock: the cameras and lidar are
-not captured in lockstep, so match frames by `time_s`.
+slowing the sim, and `meta.json` counts the drops.
+
+**Time.** The client runs the sim in **Fixed Step**: 10 steps per second (`--step-hz`), with every
+sensor at the same 10 Hz. So each step advances exactly 0.1 s of sim time and yields one frame from
+every sensor, all captured in the same world state, with identical `time_s`. Match frames across
+sensors by it. The game thread waits for each frame's sensor data, so the sim runs only as fast as
+it can render. With this rig that is slower than real time, which costs only wall time. To collect a
+fixed amount of data, stop on sim time: `--sim-duration-s 60` is 600 frames of each sensor.
+`--wall-clock` runs in real time instead, with sensors capturing as frames allow, not in lockstep.
 
 ## Performance
 
@@ -156,8 +163,18 @@ frame decides. The default rig is:
 The game's own window is **not rendered** while collecting, since only the sensors need the GPU.
 `--viewport` turns it back on. On exit the client prints what each stream delivered.
 
-Measured on an i9-14900KF, RTX 4080 and 64 GB RAM, on Windows with the packaged game, sensors
-requested at 30 Hz (`--rate-hz 30`), and 45–60 s per run. "Game FPS" comes from the game's log:
+Measured on an i9-14900KF, RTX 4080 and 64 GB RAM, on Windows with the packaged game.
+
+**Fixed Step (the default): 10 steps/s, every sensor at 10 Hz.** 60 s of sim time took 96 s of
+wall time, a real-time factor of 0.63. That run delivered:
+- **600 frames from each camera** (color and label), **599 lidar scans**: one per step for every
+  sensor, all on the same 0.1 s grid. That's **6.2 synchronized frames per second of wall time, per
+  sensor**.
+- no frames dropped, and the recording complete;
+- the ego covering 280 m: mean 4.7 m/s with stops at lights, peaking at 8.9 m/s.
+
+**Wall Clock (`--wall-clock`)**, for comparison, with sensors requested at 30 Hz
+(`--rate-hz 30`) and 45–60 s per run. "Game FPS" comes from the game's log:
 
 | Rig | Game FPS | Delivered |
 |---|---|---|
@@ -169,6 +186,8 @@ requested at 30 Hz (`--rate-hz 30`), and 45–60 s per run. "Game FPS" comes fro
 | default, game window rendering | ~10 | ~5.6 frames/s per camera; 2.3 scans/s |
 | default, recording to disk | ~10 | same as without; no frames dropped |
 
+In Wall Clock each sensor captures only when a frame happens to be due, so with all three the lidar
+gets fewer than half as many scans as in Fixed Step, and the sensors aren't captured together.
 The client dropped nothing in any run, and recording cost nothing measurable. The limit is GPU time
 per game frame. The fisheye and the 360° lidar are the expensive sensors, because each renders
 several views every capture. To collect faster:
@@ -196,7 +215,9 @@ CitySample (5.6+) cooks most of its static city through Epic's FastGeoStreaming 
 turns actors into lightweight primitives that are not components. Tempo's labeler sets each
 component's custom-depth stencil, so it cannot label them. Worse, they don't draw into custom depth
 at all, so the label of whatever is behind them shows through: the sky's label where a building
-stands. `Setup.sh` therefore adds an override to the project's `Config/DefaultEngine.ini` that turns
-FastGeo off for the cook, which is how CitySample shipped before 5.6. It costs some streaming
-performance. `Scripts/DisableFastGeo.sh -restore` removes it, or run `Setup.sh -keep-fastgeo` to
-skip it.
+stands. `Setup.sh` (through `Scripts/ConfigureProject.sh`) therefore adds an override to the
+project's `Config/DefaultEngine.ini` that turns FastGeo off for the cook, which is how CitySample
+shipped before 5.6. It costs some streaming performance. The same block gives the levels Tempo's
+world settings, which Fixed Step needs, and turns on physics substepping, so a 0.1 s step simulates
+0.1 s of physics. `Scripts/ConfigureProject.sh -restore` removes it, and `Setup.sh -keep-fastgeo`
+leaves FastGeo on.

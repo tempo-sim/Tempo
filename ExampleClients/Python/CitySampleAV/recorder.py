@@ -49,32 +49,49 @@ class Recorder:
         self._slots = threading.BoundedSemaphore(max_backlog)
         self._lock = threading.Lock()
         self._files = {}
-        self.written = {}
-        self.dropped = {}
+        self._closed = False
+        self.written: Dict[str, int] = {}
+        self.dropped: Dict[str, int] = {}
         self.meta: Dict[str, Any] = {"started_wall_time": time.time()}
 
     # -- plumbing --------------------------------------------------------------------------------
 
-    def _submit(self, key: str, fn, *args) -> None:
-        if not self._slots.acquire(blocking=False):
-            self.dropped[key] = self.dropped.get(key, 0) + 1
+    def _count(self, counter: Dict[str, int], key: str) -> None:
+        # Taps run on several threads at once, and `d[k] = d.get(k) + 1` is not atomic.
+        with self._lock:
+            counter[key] = counter.get(key, 0) + 1
+
+    def _submit(self, key: str, fn, *args, index=None) -> None:
+        """Run fn(*args) on the writer pool, then append `index` -- (relpath, record) -- so an index
+        line only ever names a file that was written. Dropped (and counted) when the backlog is full
+        or the recorder has closed: a stream's last message can still be in a tap when it does."""
+        if self._closed or not self._slots.acquire(blocking=False):
+            self._count(self.dropped, key)
             return
 
         def run():
             try:
                 fn(*args)
-                self.written[key] = self.written.get(key, 0) + 1
+                if index is not None:
+                    self._append(*index)
+                self._count(self.written, key)
             except Exception as exc:
                 print(f"  [record] {key}: {exc}")
             finally:
                 self._slots.release()
 
-        self._pool.submit(run)
+        try:
+            self._pool.submit(run)
+        except RuntimeError:            # the pool shut down between the check and the submit
+            self._slots.release()
+            self._count(self.dropped, key)
 
     def _append(self, relpath: str, record: dict) -> None:
-        """Append one JSON line to a file, from any thread."""
+        """Append one JSON line to a file, from any thread. Ignored once the recorder has closed."""
         line = json.dumps(record) + "\n"
         with self._lock:
+            if self._closed:
+                return
             f = self._files.get(relpath)
             if f is None:
                 path = self.root / relpath
@@ -87,8 +104,9 @@ class Recorder:
         path.mkdir(parents=True, exist_ok=True)
         return path
 
-    def _index(self, sensor: str, header, kind: str) -> None:
-        self._append(f"{sensor}/index.jsonl", {
+    def _index(self, sensor: str, header, kind: str):
+        """The (relpath, record) index entry for one frame, for _submit to append once it's written."""
+        return (f"{sensor}/index.jsonl", {
             "kind": kind, "seq": header.sequence_id, "time_s": header.capture_time_s,
             "sensor_pose": _pose(header.capture_transform)})
 
@@ -118,26 +136,26 @@ class Recorder:
 
     def color_tap(self, sensor: str):
         def tap(image):
-            self._index(sensor, image.header, "color")
             rgb = color_array(image).copy()
             out = self._dir(sensor, "color") / f"{image.header.sequence_id:06d}.png"
-            self._submit(f"{sensor}/color", _write_png, out, rgb)
+            self._submit(f"{sensor}/color", _write_png, out, rgb,
+                         index=self._index(sensor, image.header, "color"))
         return tap
 
     def label_tap(self, sensor: str):
         def tap(image):
-            self._index(sensor, image.header, "label")
             ids = label_array(image).copy()
             out = self._dir(sensor, "label") / f"{image.header.sequence_id:06d}.png"
-            self._submit(f"{sensor}/label", _write_png, out, ids)
+            self._submit(f"{sensor}/label", _write_png, out, ids,
+                         index=self._index(sensor, image.header, "label"))
         return tap
 
     def depth_tap(self, sensor: str):
         def tap(image):
-            self._index(sensor, image.header, "depth")
             depth = depth_array(image).copy()
             out = self._dir(sensor, "depth") / f"{image.header.sequence_id:06d}.npy"
-            self._submit(f"{sensor}/depth", np.save, out, depth)
+            self._submit(f"{sensor}/depth", np.save, out, depth,
+                         index=self._index(sensor, image.header, "depth"))
         return tap
 
     def bbox_tap(self, sensor: str):
@@ -152,7 +170,7 @@ class Recorder:
 
     def lidar_tap(self, sensor: str):
         def tap(scan):   # an AssembledScan (tempo_rerun.loggers.lidar)
-            self._append(f"{sensor}/index.jsonl", {
+            index = (f"{sensor}/index.jsonl", {
                 "kind": "lidar", "seq": scan.sequence_id, "time_s": scan.capture_time_s,
                 "complete": scan.complete, "sensor_pose": _pose(scan.capture_transform)})
             out = self._dir(sensor) / f"{scan.sequence_id:06d}.npz"
@@ -161,7 +179,7 @@ class Recorder:
                           elevation=scan.elevation, complete=np.bool_(scan.complete))
             if scan.reflectivity is not None:
                 arrays["reflectivity"] = scan.reflectivity
-            self._submit(f"{sensor}/lidar", _write_npz, out, arrays)
+            self._submit(f"{sensor}/lidar", _write_npz, out, arrays, index=index)
         return tap
 
     def ego_tap(self):
@@ -189,8 +207,10 @@ class Recorder:
     # -- shutdown --------------------------------------------------------------------------------
 
     def close(self) -> None:
+        # Finish what was submitted first (it appends index lines), then refuse what comes late.
         self._pool.shutdown(wait=True)
         with self._lock:
+            self._closed = True
             for f in self._files.values():
                 f.close()
             self._files.clear()

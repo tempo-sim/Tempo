@@ -139,21 +139,35 @@ back. If you skip this step the build fails in C# before it compiles any C++, wi
     For the full mechanism, see
     [Traffic as a drop-in replacement](../plugins/traffic.md#drop-in-replacement-for-citysamples-traffic).
 
-It also turns off **FastGeo** for CitySample's cook. In 5.6+ CitySample cooks most of its static city
-through Epic's FastGeoStreaming plugin, which turns actors into lightweight primitives that are not
-components. Tempo's labeler works by setting each component's custom-depth stencil, so it cannot
-label them. They also don't draw into custom depth at all, so whatever labeled object stands behind
-one shows through it in the label images and lidar labels. `Setup.sh` appends a marker-delimited
-override to `Config/DefaultEngine.ini`:
+It also adds the project settings Tempo needs and CitySample doesn't have, through
+`Scripts/ConfigureProject.sh`. They go in a marker-delimited block at the end of
+`Config/DefaultEngine.ini`, which overrides CitySample's own values without editing them:
 
 ```ini
+[/Script/Engine.Engine]
+WorldSettingsClassName=/Script/TempoCore.TempoWorldSettings
+[/Script/Engine.PhysicsSettings]
+bSubstepping=True
+MaxSubstepDeltaTime=0.016667
+MaxSubsteps=6
 [ConsoleVariables]
 FastGeo.Enable=False
 ```
 
-The next package then cooks the level as ordinary actors, the way CitySample shipped before 5.6.
-That costs some streaming performance. `Scripts/DisableFastGeo.sh -restore` removes the override,
-and `Setup.sh -keep-fastgeo` skips it, if you don't need labels.
+- **Tempo's world settings.** Pausing, stepping and Fixed Step all live on `ATempoWorldSettings`.
+  CitySample's levels were saved with the engine's own world settings, and the cook replaces them
+  with the configured class, copying their properties across.
+- **Physics substepping.** A Fixed Step frame can be a tenth of a second. Without substepping, Chaos
+  clamps each frame to 1/30 s, and vehicles would cover a third of the distance the timestamps say.
+- **No FastGeo.** In 5.6+ CitySample cooks most of its static city through Epic's FastGeoStreaming
+  plugin, which turns actors into lightweight primitives that are not components. Tempo's labeler
+  works by setting each component's custom-depth stencil, so it cannot label them. They also don't
+  draw into custom depth at all, so whatever labeled object stands behind one shows through it in
+  the label images and lidar labels. Without FastGeo, the level cooks as ordinary actors, as
+  CitySample shipped before 5.6, at some cost in streaming performance. `Setup.sh -keep-fastgeo`
+  skips this one, if you don't need labels.
+
+All three take effect at the next package. `Scripts/ConfigureProject.sh -restore` removes the block.
 
 `Setup.sh` also downloads third-party dependencies.
 
@@ -207,7 +221,7 @@ covers choosing vehicles, the rig and label JSON, and the recording format.
 | `Source/CitySample/Util/CitySampleBlueprintLibrary.cpp` | Patched by you, in step 1 |
 | `Source/CitySample/Vehicles/CitySampleVehicleBase.cpp` | Patched by you, in step 1 |
 | `Plugins/Traffic/`, `Plugins/RuleProcessor/` | Descriptors renamed `*.disabled-by-tempo` |
-| `Config/DefaultEngine.ini` | FastGeo turned off for the cook (a `TEMPO_FASTGEO_BLOCK` at the end) |
+| `Config/DefaultEngine.ini` | Tempo's world settings, physics substepping, FastGeo off (a `TEMPO_PROJECT_CONFIG` block at the end) |
 | `TempoEnv/` | Generated Python virtual environment with the client packages |
 
 ## See also
