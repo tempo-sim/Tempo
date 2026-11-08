@@ -20,6 +20,7 @@
 #   TEMPO_CI_UE_<maj>_<min>_ENGINE      Engine install per supported version, e.g. TEMPO_CI_UE_5_7_ENGINE.
 #   TEMPO_CI_UE_<maj>_<min>_DEVELOPER_DIR  (Mac) The Xcode for that engine, e.g. .../Xcode-26.6.0.app/Contents/Developer.
 #   TEMPO_CI_MIN_FREE_GB                Optional (default 100). Below this the job fails as machine trouble.
+# and its PATH must provide git, python3, and uv (which installs the tests' Python, see python_version).
 #
 # One job per machine at a time: give each machine ONE runner. The fixed build path is not locked.
 #
@@ -107,7 +108,7 @@ on:
         default: ''
       python_version:
         type: string
-        description: Python to set up for the tests (actions/setup-python), as test_packaged.yml does. Empty uses the machine's python3.
+        description: Python for the tests, installed with the machine's uv (as test_packaged.yml sets one up). Empty uses the machine's python3.
         default: '3.11'
     outputs:
       machine_trouble:
@@ -150,6 +151,8 @@ jobs:
     # broken build. Every check here is about the machine; none is about the code.
     - name: Check Machine
       id: machine
+      env:
+        NEED_PYTHON: ${{ inputs.test_commands != '' && inputs.python_version || '' }}
       run: |
         trouble() {
           echo "trouble=true" >> "$GITHUB_OUTPUT"
@@ -169,6 +172,9 @@ jobs:
         mkdir -p "$TEMPO_CI_ROOT" || trouble "Cannot create TEMPO_CI_ROOT $TEMPO_CI_ROOT."
         FREE_GB=$(df -Pk "$TEMPO_CI_ROOT" | awk 'NR==2 {print int($4/1048576)}')
         [ "$FREE_GB" -ge "${TEMPO_CI_MIN_FREE_GB:-100}" ] || trouble "Only ${FREE_GB}GB free under $TEMPO_CI_ROOT (minimum ${TEMPO_CI_MIN_FREE_GB:-100}GB)."
+        if [ -n "$NEED_PYTHON" ]; then
+          command -v uv >/dev/null || trouble "uv is not on the runner's PATH (it provides Python $NEED_PYTHON for the tests)."
+        fi
         CHANGELIST=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["Changelist"])' "$ENGINE/Engine/Build/Build.version")
         STAMP="engine=$ENGINE changelist=$CHANGELIST"
 
@@ -352,11 +358,17 @@ jobs:
         if [ -n "$MAPS" ]; then MAP_ARG="-maps=$MAPS"; else MAP_ARG="-allmaps"; fi
         "$CI_BUILD/$TEMPO_ROOT/Scripts/Package.sh" "$MAP_ARG" -skipiostore
 
+    # uv, not actions/setup-python: setup-python's macOS builds are .pkg installers that need sudo, and
+    # its Linux ones a writable /opt/hostedtoolcache. uv's Pythons are relocatable and install per user.
     - name: Set up Python
       if: ${{ inputs.test_commands != '' && inputs.python_version != '' && steps.package.outcome == 'success' }}
-      uses: actions/setup-python@v7
-      with:
-        python-version: ${{ inputs.python_version }}
+      env:
+        PYTHON_VERSION: ${{ inputs.python_version }}
+      run: |
+        uv python install "$PYTHON_VERSION"
+        PY=$(uv python find "$PYTHON_VERSION")
+        "$PY" -c 'import os, sys; print(os.path.dirname(sys.executable))' >> "$GITHUB_PATH"
+        "$PY" --version
 
     - name: Test Package
       if: ${{ inputs.test_commands != '' && steps.package.outcome == 'success' }}
