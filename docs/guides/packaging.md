@@ -94,6 +94,10 @@ PremadeMacEntitlements=(FilePath="/Game/Build/Mac/Resources/Unrestricted.entitle
 ShippingSpecificMacEntitlements=(FilePath="/Game/Build/Mac/Resources/Unrestricted.entitlements")
 ```
 
+This has to be the project's config: Tempo cannot set it for you. UnrealBuildTool picks the
+entitlements when it signs the app, and reads these settings without any plugin's config, so a
+plugin's `DefaultEngine.ini` would be ignored here.
+
 `Unrestricted.entitlements` is the engine's own empty entitlements file. You don't need to commit
 it: when the file named here is missing from the project, UnrealBuildTool copies the one with the
 same name from the engine's `Build/Mac/Resources` at package time. To check a package:
