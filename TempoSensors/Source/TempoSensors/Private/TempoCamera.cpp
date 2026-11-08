@@ -813,6 +813,7 @@ void UTempoCamera::UpdateInternalMirrors()
 
 bool UTempoCamera::HasPendingCameraRequests() const
 {
+	FScopeLock RequestsLock(&RequestsMutex);
 	return !PendingColorImageRequests.IsEmpty() || !PendingLabelImageRequests.IsEmpty() || !PendingDepthImageRequests.IsEmpty() || !PendingBoundingBoxesRequests.IsEmpty() || !PendingVideoRequests.IsEmpty();
 }
 
@@ -823,23 +824,41 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 	// Snapshot depth-request state before draining, so the toggle decision below sees ongoing
 	// client intent in the steady state (one depth request per frame, drained the same frame)
 	// instead of oscillating off/on when the queue looks empty post-drain.
-	const bool bHadDepthRequests = !PendingDepthImageRequests.IsEmpty();
+	// Reads the render thread already decoded (LaunchDecodeForCompletedRead_RenderThread) are done with.
+	TextureReadQueue.PopLaunchedReads();
 
-	if (TextureReadQueue.NextReadComplete())
+	bool bHadDepthRequests;
 	{
-		TSharedPtr<FTextureRead> TextureRead = TextureReadQueue.DequeueIfReadComplete();
-		const bool bReadHasDepth = TextureRead->GetType() == TEXT("WithDepth");
-		Future = DecodeAndRespond(MoveTemp(TextureRead));
+		FScopeLock RequestsLock(&RequestsMutex);
+		bHadDepthRequests = !PendingDepthImageRequests.IsEmpty() || bDepthRequestedSinceSend;
+		bDepthRequestedSinceSend = false;
+		LastSendTimeSeconds = GetWorld()->GetTimeSeconds();
+	}
 
-		PendingColorImageRequests.Empty();
-		PendingLabelImageRequests.Empty();
-		PendingBoundingBoxesRequests.Empty();
-		// A NoDepth read that completes while bDepthEnabled has since flipped to true (or vice
-		// versa) cannot satisfy depth requests. Key off the read's type rather than the current
-		// bDepthEnabled so stale requests aren't dropped across a toggle boundary.
-		if (bReadHasDepth)
+	if (TextureReadQueue.NextReadComplete() && DecodesInFlight->load() == 0)
+	{
+		if (TSharedPtr<FTextureRead> TextureRead = TextureReadQueue.DequeueIfReadComplete())
 		{
-			PendingDepthImageRequests.Empty();
+			const bool bReadHasDepth = TextureRead->GetType() == TEXT("WithDepth");
+			TArray<FColorImageRequest> ColorRequests;
+			TArray<FLabelImageRequest> LabelRequests;
+			TArray<FDepthImageRequest> DepthRequests;
+			TArray<FBoundingBoxesRequest> BoundingBoxRequests;
+			{
+				FScopeLock RequestsLock(&RequestsMutex);
+				ColorRequests = MoveTemp(PendingColorImageRequests);
+				LabelRequests = MoveTemp(PendingLabelImageRequests);
+				BoundingBoxRequests = MoveTemp(PendingBoundingBoxesRequests);
+				// A NoDepth read that completes while bDepthEnabled has since flipped to true (or vice
+				// versa) cannot satisfy depth requests. Key off the read's type rather than the current
+				// bDepthEnabled so stale requests aren't dropped across a toggle boundary.
+				if (bReadHasDepth)
+				{
+					DepthRequests = MoveTemp(PendingDepthImageRequests);
+				}
+			}
+			Future = DecodeAndRespond(MoveTemp(TextureRead), MoveTemp(ColorRequests), MoveTemp(LabelRequests),
+				MoveTemp(DepthRequests), MoveTemp(BoundingBoxRequests), GetWorld()->GetTimeSeconds());
 		}
 	}
 
@@ -892,7 +911,11 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 	// Toggle depth based on client intent. Use the pre-drain snapshot OR'd with any requests
 	// still pending (either newly arrived during this function, or left over because the last
 	// read couldn't satisfy them).
-	const bool bDepthNeeded = bHadDepthRequests || !PendingDepthImageRequests.IsEmpty();
+	bool bDepthNeeded;
+	{
+		FScopeLock RequestsLock(&RequestsMutex);
+		bDepthNeeded = bHadDepthRequests || !PendingDepthImageRequests.IsEmpty();
+	}
 	if (bDepthNeeded)
 	{
 		FramesWithoutDepth = 0;
@@ -931,21 +954,25 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 
 void UTempoCamera::RequestMeasurement(const TempoSensors::ColorImageRequest& Request, const TResponseDelegate<TempoSensors::ColorImage>& ResponseContinuation)
 {
+	FScopeLock RequestsLock(&RequestsMutex);
 	PendingColorImageRequests.Add({ Request, ResponseContinuation});
 }
 
 void UTempoCamera::RequestMeasurement(const TempoSensors::LabelImageRequest& Request, const TResponseDelegate<TempoSensors::LabelImage>& ResponseContinuation)
 {
+	FScopeLock RequestsLock(&RequestsMutex);
 	PendingLabelImageRequests.Add({ Request, ResponseContinuation});
 }
 
 void UTempoCamera::RequestMeasurement(const TempoSensors::DepthImageRequest& Request, const TResponseDelegate<TempoSensors::DepthImage>& ResponseContinuation)
 {
+	FScopeLock RequestsLock(&RequestsMutex);
 	PendingDepthImageRequests.Add({ Request, ResponseContinuation});
 }
 
 void UTempoCamera::RequestMeasurement(const TempoSensors::BoundingBoxesRequest& Request, const TResponseDelegate<TempoSensors::BoundingBoxes>& ResponseContinuation)
 {
+	FScopeLock RequestsLock(&RequestsMutex);
 	PendingBoundingBoxesRequests.Add({ Request, ResponseContinuation});
 }
 
@@ -1011,6 +1038,7 @@ bool UTempoCamera::SetCalibratedIntrinsics(const FIntPoint& InSizeXY, double Foc
 void UTempoCamera::OnRenderCompleted()
 {
 	Super::OnRenderCompleted();
+	LaunchDecodeForCompletedRead_RenderThread();
 
 	UTextureRenderTarget2D* RT = SharedFinalTextureTarget;
 	if (!RT || RT->SizeX <= 0 || RT->SizeY <= 0)
@@ -1077,17 +1105,19 @@ void UTempoCamera::OnRenderCompleted()
 		});
 }
 
-TFuture<void> UTempoCamera::DecodeAndRespond(TSharedPtr<FTextureRead> TextureRead)
+TFuture<void> UTempoCamera::DecodeAndRespond(TSharedPtr<FTextureRead> TextureRead,
+	TArray<FColorImageRequest> ColorRequests, TArray<FLabelImageRequest> LabelRequests,
+	TArray<FDepthImageRequest> DepthRequests, TArray<FBoundingBoxesRequest> BoundingBoxRequests, double TransmissionTime)
 {
-	const double TransmissionTime = GetWorld()->GetTimeSeconds();
-
+	DecodesInFlight->fetch_add(1);
 	TFuture<void> Future = Async(EAsyncExecution::TaskGraph, [
 		TextureRead = MoveTemp(TextureRead),
-		ColorImageRequests = PendingColorImageRequests,
-		LabelImageRequests = PendingLabelImageRequests,
-		DepthImageRequests = PendingDepthImageRequests,
-		BoundingBoxRequests = PendingBoundingBoxesRequests,
-		TransmissionTimeCpy = TransmissionTime
+		ColorImageRequests = MoveTemp(ColorRequests),
+		LabelImageRequests = MoveTemp(LabelRequests),
+		DepthImageRequests = MoveTemp(DepthRequests),
+		BoundingBoxRequests = MoveTemp(BoundingBoxRequests),
+		TransmissionTimeCpy = TransmissionTime,
+		InFlight = DecodesInFlight
 	]
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraDecodeAndRespond);
@@ -1102,9 +1132,64 @@ TFuture<void> UTempoCamera::DecodeAndRespond(TSharedPtr<FTextureRead> TextureRea
 			static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->RespondToRequests(
 				ColorImageRequests, LabelImageRequests, BoundingBoxRequests, TransmissionTimeCpy);
 		}
+		InFlight->fetch_sub(1);
 	});
 
 	return Future;
+}
+
+void UTempoCamera::LaunchDecodeForCompletedRead_RenderThread()
+{
+	// One decode at a time per camera keeps a stream's responses in capture order; the game thread's
+	// send picks the read up at its next poll if this one is still running.
+	if (DecodesInFlight->load() != 0 || !TextureReadQueue.HeadIsReadAndUnclaimed())
+	{
+		return;
+	}
+
+	// A read is decoded only for the requests waiting for it; with none it is kept for the next
+	// request or the frame's send, exactly as the game thread keeps it.
+	TArray<FColorImageRequest> ColorRequests;
+	TArray<FLabelImageRequest> LabelRequests;
+	TArray<FDepthImageRequest> DepthRequests;
+	TArray<FBoundingBoxesRequest> BoundingBoxRequests;
+	TSharedPtr<FTextureRead> TextureRead;
+	{
+		FScopeLock RequestsLock(&RequestsMutex);
+		if (PendingColorImageRequests.IsEmpty() && PendingLabelImageRequests.IsEmpty() && PendingDepthImageRequests.IsEmpty() && PendingBoundingBoxesRequests.IsEmpty())
+		{
+			return;
+		}
+		TextureRead = TextureReadQueue.ClaimHeadForDecode();
+		if (!TextureRead)
+		{
+			return;
+		}
+		const bool bReadHasDepth = TextureRead->GetType() == TEXT("WithDepth");
+		ColorRequests = MoveTemp(PendingColorImageRequests);
+		LabelRequests = MoveTemp(PendingLabelImageRequests);
+		BoundingBoxRequests = MoveTemp(PendingBoundingBoxesRequests);
+		if (bReadHasDepth)
+		{
+			DepthRequests = MoveTemp(PendingDepthImageRequests);
+			bDepthRequestedSinceSend |= !DepthRequests.IsEmpty();
+		}
+		RenderThreadDecodes.Add(DecodeAndRespond(MoveTemp(TextureRead), MoveTemp(ColorRequests), MoveTemp(LabelRequests),
+			MoveTemp(DepthRequests), MoveTemp(BoundingBoxRequests), LastSendTimeSeconds));
+	}
+}
+
+void UTempoCamera::WaitForDecodes()
+{
+	TArray<TFuture<void>> Decodes;
+	{
+		FScopeLock RequestsLock(&RequestsMutex);
+		Decodes = MoveTemp(RenderThreadDecodes);
+	}
+	for (const TFuture<void>& Decode : Decodes)
+	{
+		Decode.Wait();
+	}
 }
 
 // ------------------------------------------------------------------------------------

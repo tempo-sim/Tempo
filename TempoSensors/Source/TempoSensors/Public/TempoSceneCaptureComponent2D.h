@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <atomic>
+
 #include "CoreMinimal.h"
 #include "TempoConversion.h"
 #include "TempoSensors.h"
@@ -91,6 +93,8 @@ struct FTextureRead
 
 	// The GPU fence behind the staging copy; signals once that copy has completed on the GPU.
 	FGPUFenceRHIRef RenderFence;
+	// Set by whoever launches this read's decode, render thread or game thread, so the other does not.
+	std::atomic<bool> bDecodeLaunched{false};
 
 	// The staging texture assigned to this read for GPU->CPU copy.
 	FTextureRHIRef StagingTexture;
@@ -323,9 +327,54 @@ struct FTextureReadQueue
 			ReadLock.ReleaseReadOnlyLockAndAcquireWriteLock();
 			TSharedPtr<FTextureRead> TextureRead = MoveTemp(PendingTextureReads[0]);
 			PendingTextureReads.RemoveAt(0);
+			// The render thread may have launched this read's decode after the read lock above: then
+			// it is theirs, and the caller has nothing to decode.
+			if (TextureRead->bDecodeLaunched.exchange(true))
+			{
+				return nullptr;
+			}
 			return TextureRead;
 		}
 		return nullptr;
+	}
+
+	// Game thread. Drops the reads at the head of the queue whose decode the render thread launched.
+	void PopLaunchedReads()
+	{
+		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
+		if (PendingTextureReads.IsEmpty() || !PendingTextureReads[0]->bDecodeLaunched.load())
+		{
+			return;
+		}
+		ReadLock.ReleaseReadOnlyLockAndAcquireWriteLock();
+		while (!PendingTextureReads.IsEmpty() && PendingTextureReads[0]->bDecodeLaunched.load())
+		{
+			PendingTextureReads.RemoveAt(0);
+		}
+	}
+
+	// Render thread. The head of the queue if its data is on the CPU and nobody has launched its
+	// decode: marks it launched and returns it. Reads respond in capture order, so only the head.
+	TSharedPtr<FTextureRead> ClaimHeadForDecode()
+	{
+		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
+		if (!PendingTextureReads.IsEmpty() && PendingTextureReads[0]->State == FTextureRead::State::EReadComplete
+			&& !PendingTextureReads[0]->bDecodeLaunched.load())
+		{
+			if (!PendingTextureReads[0]->bDecodeLaunched.exchange(true))
+			{
+				return PendingTextureReads[0];
+			}
+		}
+		return nullptr;
+	}
+
+	// Render thread. Whether the head of the queue is read and still unclaimed, without claiming it.
+	bool HeadIsReadAndUnclaimed() const
+	{
+		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
+		return !PendingTextureReads.IsEmpty() && PendingTextureReads[0]->State == FTextureRead::State::EReadComplete
+			&& !PendingTextureReads[0]->bDecodeLaunched.load();
 	}
 
 	TOptional<int32> SequenceIdOfNextCompleteRead() const
