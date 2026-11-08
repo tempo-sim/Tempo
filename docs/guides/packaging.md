@@ -75,6 +75,37 @@ requires the project packaging settings `UsePakFile` and `GenerateChunks` to be 
     Pass `-skipiostore` in CI. Note that iostore is enabled by `bUseIoStore` in
     `Config/DefaultGame.ini`, not by an `-iostore` flag.
 
+## Packaging for macOS
+
+By default Unreal signs a packaged Mac game with **App Sandbox** entitlements. A project that sets
+none gets the engine's: `Sandbox.Server.entitlements` for most configurations, and
+`Sandbox.NoNet.entitlements` for Shipping. A sandboxed sim is confined to its container:
+
+- it cannot bind a Unix domain socket outside the container, so `-ServerSocket=` fails
+  ([troubleshooting](troubleshooting.md#a-packaged-mac-sim-cant-bind-its-socket));
+- a Shipping build has no network access at all, so it cannot serve gRPC;
+- it cannot read or write files outside the container.
+
+Turn the sandbox off in your project's `Config/DefaultEngine.ini` (TempoSample already does):
+
+```ini
+[/Script/MacTargetPlatform.XcodeProjectSettings]
+PremadeMacEntitlements=(FilePath="/Game/Build/Mac/Resources/Unrestricted.entitlements")
+ShippingSpecificMacEntitlements=(FilePath="/Game/Build/Mac/Resources/Unrestricted.entitlements")
+```
+
+This has to be the project's config: Tempo cannot set it for you. UnrealBuildTool picks the
+entitlements when it signs the app, and reads these settings without any plugin's config, so a
+plugin's `DefaultEngine.ini` would be ignored here.
+
+`Unrestricted.entitlements` is the engine's own empty entitlements file. You don't need to commit
+it: when the file named here is missing from the project, UnrealBuildTool copies the one with the
+same name from the engine's `Build/Mac/Resources` at package time. To check a package:
+
+```bash
+codesign -d --entitlements - Packaged/Mac/MyGame.app   # should list no com.apple.security.app-sandbox
+```
+
 ## Packaging with TempoROS
 
 If you use [TempoROS](../plugins/tempo-ros.md), your `Config/DefaultGame.ini` must specify its
