@@ -3,6 +3,7 @@
 #include "TempoSensors.h"
 
 #include "TempoGPUFrameThrottle.h"
+#include "TempoReadbackWatcher.h"
 #include "TempoSensorsSettings.h"
 
 #include "DynamicRHI.h"
@@ -257,6 +258,7 @@ void FTempoSensorsModule::ShowSuccessNotification(const TArray<FString>& FixedSe
 void FTempoSensorsModule::ShutdownModule()
 {
 	StopGPUFrameThrottle();
+	FTempoReadbackWatcher::Shutdown();
 
 	FCoreDelegates::OnFEngineLoopInitComplete.Remove(EngineInitCompleteHandle);
 }

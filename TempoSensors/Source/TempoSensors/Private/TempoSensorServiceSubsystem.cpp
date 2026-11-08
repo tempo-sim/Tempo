@@ -7,6 +7,7 @@
 
 #include "TempoCamera.h"
 #include "TempoLidar.h"
+#include "TempoReadbackWatcher.h"
 #include "TempoSensors/Camera.pb.h"
 #include "TempoSensors/Lidar.pb.h"
 
@@ -294,8 +295,9 @@ void UTempoSensorServiceSubsystem::OnBetweenFramesPoll(UWorld* World)
 
 	// Readbacks are otherwise polled only at the render thread's end of frame, and a client advancing
 	// steps holds the next frame off for many of them. Poll from a render command instead; it is
-	// non-blocking, exactly like the end-of-frame poll.
-	if (ReadbackPollsQueued->load() == 0)
+	// non-blocking, exactly like the end-of-frame poll. Where the readback watcher runs, it reads a
+	// fence as it signals and no poll is needed between frames.
+	if (!FTempoReadbackWatcher::IsActive() && ReadbackPollsQueued->load() == 0)
 	{
 		EnqueueReadbackPoll(Sensors);
 	}
