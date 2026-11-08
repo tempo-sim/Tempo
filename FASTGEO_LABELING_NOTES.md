@@ -1,7 +1,7 @@
 # FastGeo and TempoSensors labels: what support would take
 
 Notes from bringing up CitySample (UE 5.8) with Tempo. Today `Setup.sh` sidesteps the problem by
-turning FastGeo off for the cook (`Scripts/DisableFastGeo.sh`). This records what it would take to
+turning FastGeo off for the cook (`Scripts/ConfigureProject.sh`). This records what it would take to
 label FastGeo geometry instead, so a project can keep FastGeo's streaming performance. All engine
 references are UE 5.8, `Engine/Plugins/Experimental/FastGeoStreaming` unless noted.
 
@@ -132,7 +132,7 @@ Not recommended except as a stopgap.
    from the configured table. Under 300 lines in an editor module, all public API.
 2. **Add the runtime proxy path later**, and only if instance labels or runtime-reconfigurable
    labels are needed on FastGeo geometry.
-3. **Until then, keep `DisableFastGeo.sh`**, and make the labeler say so. At BeginPlay, if the
+3. **Until then, keep turning FastGeo off in `ConfigureProject.sh`**, and make the labeler say so. At BeginPlay, if the
    `FastGeo.Enable` cvar is on (`IConsoleManager::FindConsoleVariable`, which needs no dependency on
    a plugin that's off by default) and the world holds any `UFastGeoContainer` (find the class by
    path), log an error that labels will be wrong. A project that skipped `Setup.sh`'s override
