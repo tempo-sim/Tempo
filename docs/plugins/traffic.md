@@ -112,6 +112,13 @@ The **data asset classes are still there**, though — `UMassTrafficLightTypesDa
 `UMassTrafficParkedVehicleSpawnDataGenerator` are retained so that CitySample content keeps loading.
 See below.
 
+Lights already baked into a `UMassTrafficLightInstancesDataAsset` still work. The intersection
+spawn data generator keeps Epic's `TrafficLightInstanceData` and `TrafficLightTypesData` properties,
+and when the former is set it registers those lights with the registry
+(`RegisterTrafficLightsFromDataAsset`) before building intersections, alongside any registered at
+runtime. CitySample's level-placed intersection spawners already set it, so their lights come back
+with no content changes.
+
 ## Drop-in replacement for CitySample's Traffic
 
 Unreal allows only one plugin per name, and a CitySample project already ships one called

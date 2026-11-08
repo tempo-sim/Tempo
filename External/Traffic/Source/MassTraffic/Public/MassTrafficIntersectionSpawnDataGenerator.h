@@ -26,7 +26,24 @@ public:
 	
 	UPROPERTY(EditAnywhere)
 	int32 TrafficSignIntersectionEntityConfigIndex = 1;
-	
+
+	/**
+	 * The light types that TrafficLightInstanceData's light type indices refer to. Only used with TrafficLightInstanceData.
+	 * If unset, TrafficLightInstanceData's own TrafficLightTypesData is used.
+	 */
+	UPROPERTY(EditAnywhere, Category="Traffic Lights")
+	TObjectPtr<const UMassTrafficLightTypesDataAsset> TrafficLightTypesData = nullptr;
+
+	/**
+	 * Baked traffic lights (such as CitySample's, populated from its point cloud) to register with the
+	 * UMassTrafficControllerRegistrySubsystem before intersections are built, alongside any traffic controllers
+	 * registered at runtime. Leave unset when all traffic controllers are registered at runtime.
+	 *
+	 * Note: Named as in Epic's original generator, so content authored against it keeps its value.
+	 */
+	UPROPERTY(EditAnywhere, Category="Traffic Lights")
+	TObjectPtr<const UMassTrafficLightInstancesDataAsset> TrafficLightInstanceData = nullptr;
+
 
 	/**
 	 * How far away from the start of the left most intersection lane of an intersection side, to look for the traffic light it controls.
