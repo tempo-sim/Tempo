@@ -91,7 +91,7 @@ jobs:
         python-core: Scripts/TestPythonAPI.sh core
         python-world: Scripts/TestPythonAPI.sh world
         python-movement: Scripts/TestPythonAPI.sh movement
-        python-core-socket: TEMPO_SERVER_SOCKET=/tmp/tempo-ci.sock Scripts/TestPythonAPI.sh core
+        python-core-socket: TEMPO_SERVER_SOCKET=$TEMPO_CI_SOCKET Scripts/TestPythonAPI.sh core
         rust-contract: Scripts/TestRustAPI.sh contract
         rust-integration: Scripts/TestRustAPI.sh integration
         rust-typed: Scripts/TestRustAPI.sh typed

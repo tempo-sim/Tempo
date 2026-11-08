@@ -22,7 +22,10 @@
 #   TEMPO_CI_MIN_FREE_GB                Optional (default 100). Below this the job fails as machine trouble.
 # and its PATH must provide git, python3, and uv (which installs the tests' Python, see python_version).
 #
-# One job per machine at a time: give each machine ONE runner. The fixed build path is not locked.
+# One runner per engine version per machine, labelled tempo-ue-<maj>.<min> (the job adds that label to
+# `runner`): the fixed build path is not locked, so two jobs must never build the same engine on one
+# machine at once, while different engines run in parallel. Each engine's tests get their own port and
+# socket (TEMPO_SERVER_PORT, TEMPO_CI_SOCKET) for the same reason.
 #
 # Security: this job runs the code under test on a machine that outlives the job, and it is given NO
 # secrets. Callers must not pass any (no `secrets: inherit`), and should gate fork PRs behind a protected
@@ -37,7 +40,7 @@ on:
     inputs:
       runner:
         type: string
-        description: JSON array of runner labels to run on, e.g. '["self-hosted","tempo-ci","macOS"]'.
+        description: JSON array of runner labels to run on, e.g. '["self-hosted","tempo-ci","macOS"]'. The job adds tempo-ue-<unreal_version>.
         required: true
       unreal_version:
         type: string
@@ -104,7 +107,7 @@ on:
           Tests to run against the package, one per line as "<name>: <command>", run from the repo under test
           with the env contract of test_packaged.yml (TEMPO_PACKAGED_DIR, TEMPO_TEST_REPORT_DIR, ...). Every
           line runs even if an earlier one fails; the step fails if any did. A line may set TEMPO_SERVER_SOCKET
-          itself, e.g. "python-core-socket: TEMPO_SERVER_SOCKET=/tmp/tempo-ci.sock Scripts/TestPythonAPI.sh core".
+          itself, e.g. "python-core-socket: TEMPO_SERVER_SOCKET=$TEMPO_CI_SOCKET Scripts/TestPythonAPI.sh core".
         default: ''
       python_version:
         type: string
@@ -121,7 +124,9 @@ on:
 jobs:
   build:
     name: Build, Package and Test (${{ inputs.unreal_version }})
-    runs-on: ${{ fromJSON(inputs.runner) }}
+    # Plus the engine's own label: a machine runs one runner per engine version, so jobs for different
+    # engines run side by side and two jobs never share a (fixed, unlocked) build tree.
+    runs-on: ${{ fromJSON(format('["{0}","tempo-ue-{1}"]', join(fromJSON(inputs.runner), '","'), inputs.unreal_version)) }}
     environment: ${{ inputs.environment != '' && inputs.environment || null }}
     timeout-minutes: 300
     # A new push to a PR supersedes the run in progress: the machine runs one job at a time, so a stale
@@ -378,7 +383,11 @@ jobs:
         CHECKOUT_PATH: ${{ inputs.checkout_path }}
       run: |
         export TEMPO_PACKAGED_DIR="$CI_BUILD/$PROJECT_ROOT/Packaged"
-        export TEMPO_SERVER_PORT=10001 TEMPO_SIM_STARTUP_TIMEOUT_S=300 TEMPO_SIM_RENDER=0
+        # Per engine, as the engines' jobs run side by side: 10057 for 5.7, 10058 for 5.8. TEMPO_CI_SOCKET is
+        # for a command that tests the socket transport (a bare name would resolve into a per-user directory
+        # the two jobs share).
+        export TEMPO_SERVER_PORT=$((10000 + ${UNREAL_VERSION//./})) TEMPO_CI_SOCKET="/tmp/tempo-ci-$UNREAL_VERSION.sock"
+        export TEMPO_SIM_STARTUP_TIMEOUT_S=300 TEMPO_SIM_RENDER=0
         REPORTS="$RUNNER_TEMP/test-reports"; rm -rf "$REPORTS"; mkdir -p "$REPORTS"
         cd "$CI_BUILD/$CHECKOUT_PATH"
         echo "| Group | Result | Time |" >> "$GITHUB_STEP_SUMMARY"
