@@ -5,6 +5,7 @@
 #include "TempoActorLabeler.h"
 #include "TempoCameraVideoEncoder.h"
 #include "TempoCoreUtils.h"
+#include "TempoCustomDepthSkipViewExtension.h"
 #include "TempoSensorsConstants.h"
 #include "TempoMotionVectorRewarpViewExtension.h"
 #include "TempoMultiViewCapture.h"
@@ -63,6 +64,30 @@ namespace
 		}
 
 		FTempoMotionVectorRewarpViewExtension* Extension;
+	};
+
+	// Same for the custom depth skip extension: the render inside the scope skips its custom
+	// depth pass.
+	struct FScopedCustomDepthSkip
+	{
+		explicit FScopedCustomDepthSkip(FTempoCustomDepthSkipViewExtension* InExtension)
+			: Extension(InExtension)
+		{
+			if (Extension)
+			{
+				Extension->SetActive(true);
+			}
+		}
+
+		~FScopedCustomDepthSkip()
+		{
+			if (Extension)
+			{
+				Extension->SetActive(false);
+			}
+		}
+
+		FTempoCustomDepthSkipViewExtension* Extension;
 	};
 
 	float GetViewStateLastAverageSceneLuminance(FSceneViewStateInterface* ViewState)
@@ -687,7 +712,9 @@ void TTextureRead<FCameraPixelNoDepth>::RespondToRequests(const TArray<FColorIma
 {
 	// A NoDepth read cannot serve depth requests; pass none so they stay pending for the first
 	// WithDepth read after the camera finishes reconfiguring.
-	RespondToImageRequests(this, ColorRequests, LabelRequests, TArray<FDepthImageRequest>(), BoundingBoxRequests, TransmissionTime);
+	RespondToImageRequests(this, ColorRequests,
+		bLabelsRendered ? LabelRequests : TArray<FLabelImageRequest>(), TArray<FDepthImageRequest>(),
+		bLabelsRendered ? BoundingBoxRequests : TArray<FBoundingBoxesRequest>(), TransmissionTime);
 }
 
 void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FColorImageRequest>& ColorRequests,
@@ -696,7 +723,9 @@ void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FColorI
 	const TArray<FBoundingBoxesRequest>& BoundingBoxRequests,
 	float TransmissionTime) const
 {
-	RespondToImageRequests(this, ColorRequests, LabelRequests, DepthRequests, BoundingBoxRequests, TransmissionTime);
+	RespondToImageRequests(this, ColorRequests,
+		bLabelsRendered ? LabelRequests : TArray<FLabelImageRequest>(), DepthRequests,
+		bLabelsRendered ? BoundingBoxRequests : TArray<FBoundingBoxesRequest>(), TransmissionTime);
 }
 
 // ------------------------------------------------------------------------------------
@@ -756,6 +785,7 @@ void UTempoCamera::OnUnregister()
 	// Unregisters the extension from the engine's list. Render commands still in flight hold their
 	// own reference and keep it alive until they have run.
 	MotionVectorRewarpExtension.Reset();
+	CustomDepthSkipExtension.Reset();
 }
 
 FTempoMotionVectorRewarpViewExtension* UTempoCamera::GetOrCreateMotionVectorRewarpExtension()
@@ -770,6 +800,20 @@ FTempoMotionVectorRewarpViewExtension* UTempoCamera::GetOrCreateMotionVectorRewa
 		MotionVectorRewarpExtension = FSceneViewExtensions::NewExtension<FTempoMotionVectorRewarpViewExtension>(World->Scene);
 	}
 	return MotionVectorRewarpExtension.Get();
+}
+
+FTempoCustomDepthSkipViewExtension* UTempoCamera::GetOrCreateCustomDepthSkipExtension()
+{
+	if (!CustomDepthSkipExtension.IsValid())
+	{
+		const UWorld* World = GetWorld();
+		if (!GEngine || !World || !World->Scene)
+		{
+			return nullptr;
+		}
+		CustomDepthSkipExtension = FSceneViewExtensions::NewExtension<FTempoCustomDepthSkipViewExtension>(World->Scene);
+	}
+	return CustomDepthSkipExtension.Get();
 }
 
 void UTempoCamera::DeactivateAllTiles()
@@ -840,6 +884,9 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 		if (TSharedPtr<FTextureRead> TextureRead = TextureReadQueue.DequeueIfReadComplete())
 		{
 			const bool bReadHasDepth = TextureRead->GetType() == TEXT("WithDepth");
+			const bool bReadHasLabels = bReadHasDepth
+				? static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->bLabelsRendered
+				: static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->bLabelsRendered;
 			TArray<FColorImageRequest> ColorRequests;
 			TArray<FLabelImageRequest> LabelRequests;
 			TArray<FDepthImageRequest> DepthRequests;
@@ -847,8 +894,13 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 			{
 				FScopeLock RequestsLock(&RequestsMutex);
 				ColorRequests = MoveTemp(PendingColorImageRequests);
-				LabelRequests = MoveTemp(PendingLabelImageRequests);
-				BoundingBoxRequests = MoveTemp(PendingBoundingBoxesRequests);
+				// A read captured without its custom depth pass has no labels; those requests wait for the
+				// first read that does (RenderCapture renders it while any is pending).
+				if (bReadHasLabels)
+				{
+					LabelRequests = MoveTemp(PendingLabelImageRequests);
+					BoundingBoxRequests = MoveTemp(PendingBoundingBoxesRequests);
+				}
 				// A NoDepth read that completes while bDepthEnabled has since flipped to true (or vice
 				// versa) cannot satisfy depth requests. Key off the read's type rather than the current
 				// bDepthEnabled so stale requests aren't dropped across a toggle boundary.
@@ -962,6 +1014,7 @@ void UTempoCamera::RequestMeasurement(const TempoSensors::LabelImageRequest& Req
 {
 	FScopeLock RequestsLock(&RequestsMutex);
 	PendingLabelImageRequests.Add({ Request, ResponseContinuation});
+	LastLabelRequestFrame = GFrameCounter;
 }
 
 void UTempoCamera::RequestMeasurement(const TempoSensors::DepthImageRequest& Request, const TResponseDelegate<TempoSensors::DepthImage>& ResponseContinuation)
@@ -974,6 +1027,7 @@ void UTempoCamera::RequestMeasurement(const TempoSensors::BoundingBoxesRequest& 
 {
 	FScopeLock RequestsLock(&RequestsMutex);
 	PendingBoundingBoxesRequests.Add({ Request, ResponseContinuation});
+	LastLabelRequestFrame = GFrameCounter;
 }
 
 void UTempoCamera::RequestMeasurement(const TempoSensors::VideoRequest& Request, const TResponseDelegate<TempoSensors::VideoFrame>& ResponseContinuation)
@@ -1166,9 +1220,15 @@ void UTempoCamera::LaunchDecodeForCompletedRead_RenderThread()
 			return;
 		}
 		const bool bReadHasDepth = TextureRead->GetType() == TEXT("WithDepth");
+		const bool bReadHasLabels = bReadHasDepth
+			? static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->bLabelsRendered
+			: static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->bLabelsRendered;
 		ColorRequests = MoveTemp(PendingColorImageRequests);
-		LabelRequests = MoveTemp(PendingLabelImageRequests);
-		BoundingBoxRequests = MoveTemp(PendingBoundingBoxesRequests);
+		if (bReadHasLabels)
+		{
+			LabelRequests = MoveTemp(PendingLabelImageRequests);
+			BoundingBoxRequests = MoveTemp(PendingBoundingBoxesRequests);
+		}
 		if (bReadHasDepth)
 		{
 			DepthRequests = MoveTemp(PendingDepthImageRequests);
@@ -1589,6 +1649,17 @@ void UTempoCamera::RenderCapture()
 	// A tile that rendered last tick gets a factor of one and needs nothing; the extension is only
 	// attached to the family when some tile needs stretching.
 	FTempoMotionVectorRewarpViewExtension* RewarpExtension = bRewarpMotionVectors ? GetOrCreateMotionVectorRewarpExtension() : nullptr;
+
+	// The label channel is packed from the custom depth pass's stencil. Render that pass only while
+	// something will read the label; the color path never does. The proxy render below skips it
+	// unconditionally: its material replaces scene color without sampling the stencil.
+	bool bLabelsPending;
+	{
+		FScopeLock RequestsLock(&RequestsMutex);
+		bLabelsPending = !PendingLabelImageRequests.IsEmpty() || !PendingBoundingBoxesRequests.IsEmpty();
+	}
+	const bool bLabelsNeeded = bLabelsPending || GFrameCounter - LastLabelRequestFrame <= static_cast<uint64>(LabelOffDebounceFrames);
+	FTempoCustomDepthSkipViewExtension* CustomDepthSkip = GetOrCreateCustomDepthSkipExtension();
 	const double CaptureWorldTime = World->GetTimeSeconds();
 	const double SceneTickDeltaSeconds = World->GetDeltaSeconds();
 	bool bAnyTileNeedsRewarp = false;
@@ -1732,6 +1803,7 @@ void UTempoCamera::RenderCapture()
 		// Single tile, full post-process: render straight to the final RT in LDR. The distortion
 		// PPM packs label/255 into alpha; RGBA8 quantization preserves the byte exactly.
 		FScopedMotionVectorRewarp ScopedRewarp(bAnyTileNeedsRewarp ? RewarpExtension : nullptr);
+		FScopedCustomDepthSkip ScopedCustomDepthSkip(bLabelsNeeded ? nullptr : CustomDepthSkip);
 		TempoMultiViewCapture::FScopedVolumetricFogHistoryRescale ScopedFogHistory(MaxExtrapolationFactor);
 		TempoMultiViewCapture::RenderTiles(Scene, this, SharedFinalTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorLDR, ResolutionFraction);
 	}
@@ -1762,6 +1834,7 @@ void UTempoCamera::RenderCapture()
 
 		{
 			FScopedMotionVectorRewarp ScopedRewarp(bAnyTileNeedsRewarp ? RewarpExtension : nullptr);
+			FScopedCustomDepthSkip ScopedCustomDepthSkip(bLabelsNeeded ? nullptr : CustomDepthSkip);
 			TempoMultiViewCapture::FScopedVolumetricFogHistoryRescale ScopedFogHistory(MaxExtrapolationFactor);
 			TempoMultiViewCapture::RenderTiles(Scene, this, SharedTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorHDR, ResolutionFraction);
 		}
@@ -1807,13 +1880,13 @@ void UTempoCamera::RenderCapture()
 	{
 		NewRead = MakeShared<TTextureRead<FCameraPixelWithDepth>>(
 			SizeXY, SequenceId, GetWorld()->GetTimeSeconds(), GetOwnerName(), GetSensorName(),
-			GetComponentTransform(), MinDepth, MaxDepth, MoveTemp(InstanceToSemanticMap));
+			GetComponentTransform(), MinDepth, MaxDepth, MoveTemp(InstanceToSemanticMap), bLabelsNeeded);
 	}
 	else
 	{
 		NewRead = MakeShared<TTextureRead<FCameraPixelNoDepth>>(
 			SizeXY, SequenceId, GetWorld()->GetTimeSeconds(), GetOwnerName(), GetSensorName(),
-			GetComponentTransform(), MoveTemp(InstanceToSemanticMap));
+			GetComponentTransform(), MoveTemp(InstanceToSemanticMap), bLabelsNeeded);
 	}
 
 	NewRead->StagingTexture = AcquireNextStagingTexture();
@@ -1920,7 +1993,10 @@ void UTempoCamera::RenderCapture()
 			// still builds the ray tracing scene every frame.
 			bUseRayTracingIfEnabled = false;
 
-			CaptureScene();
+			{
+				FScopedCustomDepthSkip ScopedProxyCustomDepthSkip(CustomDepthSkip);
+				CaptureScene();
+			}
 
 			bUseRayTracingIfEnabled = SavedUseRayTracing;
 			ProxyPP.bOverride_DynamicGlobalIlluminationMethod = SavedOverrideGI;
