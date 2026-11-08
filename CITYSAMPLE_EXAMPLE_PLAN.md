@@ -28,7 +28,10 @@ packaged build (§8, with results). Decisions the spikes changed are marked **[r
 - **FastGeo [revised].** CitySample 5.6+ cooks its near-field city with FastGeoStreaming. Those
   primitives aren't components, so Tempo can't label them. They also don't write custom depth, so
   labels from behind show through them. Decision: `Setup.sh` turns FastGeo off for the
-  cook (`Scripts/DisableFastGeo.sh`).
+  cook (`Scripts/ConfigureProject.sh`).
+- **Fixed Step [revised].** Generation runs in Fixed Step at 10 steps/s with every sensor at 10 Hz,
+  so each step yields one frame from each sensor. That needs `ATempoWorldSettings` in the level and
+  physics substepping, neither of which CitySample has; `ConfigureProject.sh` adds both.
 - **Labels [revised].** Table validation loads every mesh it names, so a catalog-generated table
   is out. Instead: class and tag rows plus the meshes loaded at startup go in the table, and meshes
   that stream in later get `SetStaticMeshTypeSemanticId` overrides from regex rules. Semantic is the
@@ -404,14 +407,16 @@ Each is a short script against the packaged sim. The answers decide §2, §5 and
 5. **Labels:** class rows work (pedestrians, HLOD skyline). The near-field city didn't label because
    of FastGeo (see §0). Mesh rows match full soft-object paths.
 6. **`get_lanes`:** not run. It's only needed for the deferred spawn mode.
-7. **Time control:** not run. The sim crashed first, on the GC bug above. Still open, for `--sync`.
+7. **Time control:** CitySample's levels lacked `ATempoWorldSettings`, and physics substepping was
+   off. Fixed by `ConfigureProject.sh` and a re-package. Fixed Step at 10 Hz is now the default: in
+   60 s of sim time, 600 frames per camera and 599 lidar scans, all on one 0.1 s grid, at a
+   real-time factor of 0.63, with traffic driving normally.
 
 ## 9. Phases
 
 Done: 1 (spikes), 2 (`tempo_rerun` extraction), 3 (ego, rig JSON, reflected `apply_*`), 4 (label
-rules, table and runtime mesh sync), 5 (recorder, without `--sync`), 7 (README and guide).
-Deferred: `--ego spawn`, `--sync`. Open: tune `labels.json` against the FastGeo-free build with
-`--coverage`.
+rules, table and runtime mesh sync), 5 (recorder, in Fixed Step), 7 (README and guide).
+Deferred: `--ego spawn`. Open: keep tuning `labels.json` with `--coverage`.
 
 Original list:
 

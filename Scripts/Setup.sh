@@ -121,9 +121,11 @@ fi
 # Run the steps once (adding -force if specified)
 echo -e "\nDisabling project plugins that Tempo replaces\n"
 bash "$SCRIPT_DIR/DisableConflictingPlugins.sh"
-# Tempo's labeler cannot label FastGeo-cooked geometry; see DisableFastGeo.sh.
-if [ "$KEEP_FASTGEO" -ne 1 ]; then
-  bash "$SCRIPT_DIR/DisableFastGeo.sh"
+# World settings, physics substepping and FastGeo; see ConfigureProject.sh.
+if [ "$KEEP_FASTGEO" -eq 1 ]; then
+  bash "$SCRIPT_DIR/ConfigureProject.sh" -keep-fastgeo
+else
+  bash "$SCRIPT_DIR/ConfigureProject.sh"
 fi
 for TARGET_FILE in "$PROJECT_ROOT/Source/"*.Target.cs; do
   [ -f "$TARGET_FILE" ] || continue

@@ -18,6 +18,7 @@ from typing import List, Optional
 import rerun as rr
 
 import tempo_sim.tempo_core as tc
+import tempo_sim.TempoCore.Time_pb2 as Time
 
 from tempo_rerun import _compat
 from tempo_rerun import conventions as conv
@@ -67,6 +68,8 @@ class Session:
         self.args = args
         self.launched = launched           # the client started the sim, and will stop it
         self.viewport_disabled = False
+        self.fixed_step = not args.wall_clock
+        self.sim_time_at_start: Optional[float] = None
         self.streaming_since: Optional[float] = None
         self.revolutions: Counter = Counter()   # lidar name -> assembled revolutions received
         self.rng = random.Random(args.seed)
@@ -128,9 +131,19 @@ class Session:
         await ego_mod.adopt(ego)
         await self.labels.label_ego()
         rig: RigConfig = load_rig(self.args.rig or ego.entry.rig)
-        if self.args.rate_hz > 0:
-            rig = replace(rig, mounts=[replace(m, sensor=replace(m.sensor, rate_hz=self.args.rate_hz))
+        # In Fixed Step a sensor captures on the steps that fall on multiples of its period, so a
+        # sensor at the step rate captures on every step, all of them together. Use that unless a
+        # rate was asked for.
+        rate = self.args.rate_hz or (self.args.step_hz if self.fixed_step else 0)
+        if rate > 0:
+            rig = replace(rig, mounts=[replace(m, sensor=replace(m.sensor, rate_hz=float(rate)))
                                        for m in rig.mounts])
+        if self.fixed_step:
+            for m in rig.mounts:
+                ratio = self.args.step_hz / m.sensor.rate_hz
+                if abs(ratio - round(ratio)) > 1e-6:
+                    print(f"  ! {m.name} at {m.sensor.rate_hz:g} Hz doesn't divide the {self.args.step_hz} Hz "
+                          f"step; it captures on the nearest steps, so its intervals will vary.")
         mounted = await mount_rig(ego.vehicle, rig, with_bboxes=self.remap is not None)
         for s in mounted.infos:
             s.entity = sensor_entity(s.name)
@@ -199,6 +212,34 @@ class Session:
         await asyncio.gather(*self.stream_tasks, return_exceptions=True)
         self.stream_tasks.clear()
 
+    # -- time ------------------------------------------------------------------------------------
+
+    async def start_fixed_step(self) -> None:
+        """Run the sim in Fixed Step: every frame advances exactly 1/step_hz of sim time, however long
+        it took to render, and the game thread waits for each frame's sensor data. So every sensor at
+        the step rate captures on every step, in lockstep, and sim time is exact. The sim runs as fast
+        as it can render -- slower than real time with this rig, which costs nothing but wall time."""
+        try:
+            await tc.set_time_mode(time_mode=Time.TM_FIXED_STEP)
+            await tc.set_sim_steps_per_second(sim_steps_per_second=self.args.step_hz)
+            await tc.play()
+        except Exception as exc:
+            print(f"  ! Fixed Step is unavailable ({exc.__class__.__name__}: {exc}).\n"
+                  f"    Tempo's time control needs ATempoWorldSettings in the level. Run Scripts/Setup.sh\n"
+                  f"    (or Scripts/ConfigureProject.sh), then re-package. Continuing in Wall Clock.")
+            self.fixed_step = False
+            return
+        print(f"  Fixed Step: {self.args.step_hz} steps/s, {1.0 / self.args.step_hz:.3f} s of sim time per "
+              f"frame; sensors capture on every step.")
+
+    async def restore_time(self) -> None:
+        """Put a sim the client didn't launch back in Wall Clock."""
+        if self.fixed_step and not self.launched:
+            try:
+                await tc.set_time_mode(time_mode=Time.TM_WALL_CLOCK)
+            except Exception:
+                pass
+
     # -- background ------------------------------------------------------------------------------
 
     async def _refresh_remap(self, remap: LabelRemap) -> None:
@@ -208,6 +249,11 @@ class Session:
             except Exception as exc:
                 print(f"  [labels] instance map refresh failed: {exc}")
             await asyncio.sleep(1.0)
+
+    async def _stop_at_sim_time(self, end: float) -> None:
+        while (await tc.get_sim_time()).sim_time < end:
+            await asyncio.sleep(0.5)
+        self.stop.set()
 
     async def _report(self, period_s: float = 30.0) -> None:
         while True:
@@ -229,6 +275,8 @@ class Session:
             await tc.set_main_viewport_render_enabled(enabled=False)
             self.viewport_disabled = True
             print("  Main viewport rendering off (--viewport keeps it on).")
+        if self.fixed_step:
+            await self.start_fixed_step()
         await self.labels.install()
         self._spawn(self.labels.run_mesh_sync(), "label_sync", self.background)
         if self.remap is not None:
@@ -243,6 +291,11 @@ class Session:
         try:
             while not self.stop.is_set():
                 await self.adopt_and_mount(exclude=lost_egos)
+                if self.sim_time_at_start is None:
+                    self.sim_time_at_start = (await tc.get_sim_time()).sim_time
+                    if self.args.sim_duration_s > 0:
+                        self._spawn(self._stop_at_sim_time(self.sim_time_at_start + self.args.sim_duration_s),
+                                    "sim_duration", self.background)
                 self.start_streams()
                 watch = ego_mod.EgoWatch(self.ego)
                 watch_task = asyncio.create_task(watch.run())
@@ -264,20 +317,33 @@ class Session:
         await asyncio.gather(*self.background, return_exceptions=True)
         if self.recorder:
             self.recorder.close()
+        sim_elapsed = None
+        if self.sim_time_at_start is not None:
+            try:
+                sim_elapsed = (await tc.get_sim_time()).sim_time - self.sim_time_at_start
+            except Exception:
+                pass
         if self.viewport_disabled and not self.launched:
             try:
                 await tc.set_main_viewport_render_enabled(enabled=True)
             except Exception:
                 pass
-        print(self.throughput_report())
+        await self.restore_time()
+        print(self.throughput_report(sim_elapsed))
         if self.args.coverage:
             print(self.labels.coverage_report())
 
-    def throughput_report(self) -> str:
-        """What each stream delivered per second since streaming began: the collection rate."""
+    def throughput_report(self, sim_elapsed: Optional[float] = None) -> str:
+        """What each stream delivered per wall-clock second since streaming began (the collection
+        rate), and how fast sim time ran against the wall clock."""
         if self.streaming_since is None:
             return "  No streams ran."
         elapsed = max(time.monotonic() - self.streaming_since, 1e-6)
+        mode = f"Fixed Step at {self.args.step_hz} steps/s" if self.fixed_step else "Wall Clock"
+        header = f"  {mode}."
+        if sim_elapsed is not None:
+            header += (f" {sim_elapsed:.1f} s of sim time in {elapsed:.0f} s of wall time "
+                       f"(real-time factor {sim_elapsed / elapsed:.2f}).")
         received, dropped = Counter(), Counter()
         for label, stats in STATS.items():
             parts = label.split(":")
@@ -286,7 +352,7 @@ class Session:
             key = f"{parts[-2]} {parts[-1]}"
             received[key] += stats.received
             dropped[key] += stats.dropped
-        lines = [f"  Throughput over {elapsed:.0f} s (messages received by the client per second):"]
+        lines = [header, f"  Throughput over {elapsed:.0f} s of wall time (messages received per second):"]
         for key in sorted(received):
             name, kind = key.split(" ")
             if kind == "lidar":
