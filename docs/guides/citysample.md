@@ -139,6 +139,22 @@ back. If you skip this step the build fails in C# before it compiles any C++, wi
     For the full mechanism, see
     [Traffic as a drop-in replacement](../plugins/traffic.md#drop-in-replacement-for-citysamples-traffic).
 
+It also turns off **FastGeo** for CitySample's cook. In 5.6+ CitySample cooks most of its static city
+through Epic's FastGeoStreaming plugin, which turns actors into lightweight primitives that are not
+components. Tempo's labeler works by setting each component's custom-depth stencil, so it cannot
+label them. They also don't draw into custom depth at all, so whatever labeled object stands behind
+one shows through it in the label images and lidar labels. `Setup.sh` appends a marker-delimited
+override to `Config/DefaultEngine.ini`:
+
+```ini
+[ConsoleVariables]
+FastGeo.Enable=False
+```
+
+The next package then cooks the level as ordinary actors, the way CitySample shipped before 5.6.
+That costs some streaming performance. `Scripts/DisableFastGeo.sh -restore` removes the override,
+and `Setup.sh -keep-fastgeo` skips it, if you don't need labels.
+
 `Setup.sh` also downloads third-party dependencies.
 
 ## 4. Build and run
@@ -166,12 +182,32 @@ python -c "import tempo_sim.tempo_core as tc; print(tc.get_current_level_name())
 If that prints the level name, you are ready for
 [Hello World](../getting-started/hello-world.md).
 
+## 6. Ride along: the AV sensor example { #av-sensor-example }
+
+`ExampleClients/Python/CitySampleAV` is a turnkey synthetic-sensor example for this project. It
+adopts a car Mass traffic is already driving, mounts a JSON-described lidar, pinhole camera and
+fisheye camera on it through the [reflected API](reflected-api.md), labels the city, and shows it
+all in Rerun, optionally recording a dataset. Package first, under Git Bash on Windows, because the
+reflected API is generated at package time:
+
+```bash
+Plugins/Tempo/Scripts/Package.sh
+pip install Packaged/API/Python/tempo-sim/*.whl Packaged/API/Python/city-sample/*.whl
+pip install -r Plugins/Tempo/ExampleClients/Python/CitySampleAV/requirements.txt
+python Plugins/Tempo/ExampleClients/Python/CitySampleAV.py --launch Packaged/Windows/CitySample.exe
+```
+
+Its [README](https://github.com/tempo-sim/Tempo/tree/main/ExampleClients/Python/CitySampleAV)
+covers choosing vehicles, the rig and label JSON, and the recording format.
+
 ## What changed in your project
 
 | | |
 |---|---|
 | `Source/CitySample/Util/CitySampleBlueprintLibrary.cpp` | Patched by you, in step 1 |
+| `Source/CitySample/Vehicles/CitySampleVehicleBase.cpp` | Patched by you, in step 1 |
 | `Plugins/Traffic/`, `Plugins/RuleProcessor/` | Descriptors renamed `*.disabled-by-tempo` |
+| `Config/DefaultEngine.ini` | FastGeo turned off for the cook (a `TEMPO_FASTGEO_BLOCK` at the end) |
 | `TempoEnv/` | Generated Python virtual environment with the client packages |
 
 ## See also

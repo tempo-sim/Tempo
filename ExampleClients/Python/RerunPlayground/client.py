@@ -22,19 +22,18 @@ import rerun as rr
 import tempo_sim.tempo_sensors as ts
 import tempo_sim.TempoSensors.Sensors_pb2 as Sensors
 
-from . import conventions as conv
-from . import colormap
-from . import _compat
-from .blueprint import build_blueprint
-from .loggers import image as image_logger
-from .loggers import lidar as lidar_logger
-from .loggers import world as world_logger
+from tempo_rerun import conventions as conv
+from tempo_rerun import colormap
+from tempo_rerun import _compat
+from tempo_rerun.blueprint import build_blueprint
+from tempo_rerun.loggers import image as image_logger
+from tempo_rerun.loggers import lidar as lidar_logger
+from tempo_rerun.loggers import world as world_logger
+from tempo_rerun.loggers.lidar import LIDAR_SIGNALS
 
 # All camera image kinds the user can toggle, plus the lidar "points" kind.
 CAMERA_KINDS = ("color", "video", "depth", "label", "bbox")
 ALL_KINDS = CAMERA_KINDS + ("points",)
-
-LIDAR_SIGNALS = ("intensity", "distance", "reflectivity", "label", "color")
 
 _KIND_FOR_MEASUREMENT = {
     "color": Sensors.MT_COLOR_IMAGE,
@@ -108,18 +107,16 @@ class TempoRerunClient:
 
     async def setup(self) -> None:
         cfg = self.cfg
-        blueprint = build_blueprint(self.scene, cfg, self.initial_active())
+        blueprint = self._blueprint(self.initial_active())
 
-        if cfg.save_rrd:
-            rr.init(cfg.app_id, default_blueprint=blueprint)
-            rr.save(cfg.save_rrd)
-            print(f"  Recording to {cfg.save_rrd} (no live viewer; open the .rrd to view).")
-        elif cfg.connect_grpc:
-            rr.init(cfg.app_id, default_blueprint=blueprint)
-            _compat.connect(cfg.connect_grpc)
+        rr.init(cfg.app_id)
+        _compat.start_output(live=cfg.spawn_viewer or bool(cfg.connect_grpc),
+                             connect_address=cfg.connect_grpc, rrd_path=cfg.save_rrd,
+                             blueprint=blueprint)
+        if cfg.connect_grpc:
             print(f"  Connected to viewer at {cfg.connect_grpc}.")
-        else:
-            rr.init(cfg.app_id, spawn=cfg.spawn_viewer, default_blueprint=blueprint)
+        if cfg.save_rrd:
+            print(f"  Recording to {cfg.save_rrd}.")
 
         if cfg.reset_layout:
             _compat.send_blueprint(blueprint)
@@ -144,7 +141,10 @@ class TempoRerunClient:
         Uses send_blueprint (an explicit override), so this resets manual layout
         tweaks — acceptable since the user just changed what's being shown.
         """
-        _compat.send_blueprint(build_blueprint(self.scene, self.cfg, self.active_map()))
+        _compat.send_blueprint(self._blueprint(self.active_map()))
+
+    def _blueprint(self, active):
+        return build_blueprint(self.scene.sensors, active, images_in_3d=self.cfg.images_in_3d)
 
     # -- stream management -------------------------------------------------
 
@@ -156,7 +156,10 @@ class TempoRerunClient:
 
         if self.scene.track_actor:
             self._spawn(world_logger.stream_ego(self.scene.track_actor), "ego")
-            self._spawn(world_logger.stream_ground_truth(self.cfg, self.scene.track_actor), "ground_truth")
+            self._spawn(world_logger.stream_ground_truth(
+                self.scene.track_actor, search_radius_m=self.cfg.search_radius_m,
+                include_static=self.cfg.include_static, exclude=[self.scene.track_actor]),
+                "ground_truth")
 
         print(f"  Started {len(self.tasks)} stream(s).")
 

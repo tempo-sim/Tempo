@@ -1,0 +1,14 @@
+{
+  "_comment": [
+    "A 170 degree fisheye. KannalaBrandt with all k = 0 is the ideal equidistant projection; set k to",
+    "a real lens's calibration to match it. Fisheye lenses render as 1-4 perspective tiles stitched",
+    "together, so they cost more GPU than a pinhole camera; upsampling sharpens the stretched center.",
+    "DoubleSphere (xi, alpha) is the other fisheye model."
+  ],
+  "type": "camera",
+  "rate_hz": 10.0,
+  "resolution": [1024, 1024],
+  "fov_deg": 170.0,
+  "lens": { "model": "KannalaBrandt", "k": [0.0, 0.0, 0.0, 0.0] },
+  "upsampling_factor": 1.5
+}

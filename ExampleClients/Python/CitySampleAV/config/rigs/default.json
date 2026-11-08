@@ -1,0 +1,15 @@
+{
+  "_comment": [
+    "Where each sensor goes. `anchor` is a point derived from the vehicle's own bounding box when it is",
+    "mounted -- origin, roof_center, front_top (front of the box, roof height), front_bumper or",
+    "rear_bumper -- so one rig fits a coupe and a van.",
+    "`offset_m` is added to it, and `rpy_deg` orients the sensor, both in the vehicle's frame:",
+    "x forward, y left, z up, meters, right-handed (Tempo's API frame). `name` is the component name,",
+    "which is also the sensor name clients stream by."
+  ],
+  "sensors": [
+    { "name": "RoofLidar",     "sensor": "lidar_64ch",         "anchor": "roof_center",  "offset_m": [0.0, 0.0, 0.30] },
+    { "name": "FrontCamera",   "sensor": "camera_front_90",    "anchor": "front_top",    "offset_m": [0.0, 0.0, -0.20] },
+    { "name": "FisheyeCamera", "sensor": "camera_fisheye_170", "anchor": "front_bumper", "offset_m": [0.05, 0.0, 0.0] }
+  ]
+}
