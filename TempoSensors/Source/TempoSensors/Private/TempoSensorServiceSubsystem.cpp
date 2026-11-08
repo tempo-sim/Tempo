@@ -2,6 +2,8 @@
 
 #include "TempoSensorServiceSubsystem.h"
 
+#include "Async/Async.h"
+
 #include "TempoSensorInterface.h"
 #include "TempoSensors/Sensors.grpc.pb.h"
 
@@ -221,6 +223,10 @@ void UTempoSensorServiceSubsystem::OnWorldTickStart(UWorld* World, ELevelTick Ti
 
 namespace
 {
+	TAutoConsoleVariable<int32> CVarReadbackRepolls(
+		TEXT("Tempo.ReadbackRepolls"), 100,
+		TEXT("How many times a readback poll re-arms itself, a millisecond apart, while a readback is still pending and no game-thread poll has run."));
+
 	// Sends every measurement whose readback has completed and waits for the decode tasks, so that
 	// the frame's measurements are all on their way when it proceeds.
 	void SendMeasurementsAndWait(TConstArrayView<ITempoSensorInterface*> Sensors)
@@ -336,11 +342,16 @@ void UTempoSensorServiceSubsystem::EnqueueReadbackPoll(TConstArrayView<ITempoSen
 		return;
 	}
 
+	EnqueueReadbackPoll(MoveTemp(AwaitingRender), 0);
+}
+
+void UTempoSensorServiceSubsystem::EnqueueReadbackPoll(TArray<ITempoSensorInterface*> AwaitingRender, int32 RepollsSoFar)
+{
 	// A sensor is only destroyed after the render thread has drained the commands queued before its
 	// destruction began, so the raw pointers outlive this command.
 	ReadbackPollsQueued->fetch_add(1);
 	ENQUEUE_RENDER_COMMAND(TempoReadbackPoll)(
-		[AwaitingRender = MoveTemp(AwaitingRender), Queued = ReadbackPollsQueued](FRHICommandListImmediate& RHICmdList)
+		[this, AwaitingRender = MoveTemp(AwaitingRender), Queued = ReadbackPollsQueued, RepollsSoFar](FRHICommandListImmediate& RHICmdList)
 		{
 			TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsReadbackPoll);
 
@@ -351,11 +362,33 @@ void UTempoSensorServiceSubsystem::EnqueueReadbackPoll(TConstArrayView<ITempoSen
 			// whatever has completed, so the next poll sees it. It never waits on the GPU.
 			RHICmdList.ImmediateFlush(EImmediateFlushType::DispatchToRHIThread);
 
+			TArray<ITempoSensorInterface*> StillAwaiting;
 			for (ITempoSensorInterface* Sensor : AwaitingRender)
 			{
 				Sensor->OnRenderCompleted();
+				if (Sensor->IsAwaitingRender())
+				{
+					StillAwaiting.Add(Sensor);
+				}
 			}
 			Queued->fetch_sub(1);
+
+			// A fence that signals while the game thread ticks the next frame, or waits for writes, is
+			// not polled until that ends: the between-frames poll runs from the game thread only. Keep
+			// polling from here, a millisecond apart, while a readback is still pending, for a bounded
+			// stretch; the frame's own polls take over once its captures are queued.
+			const int32 MaxRepolls = CVarReadbackRepolls.GetValueOnRenderThread();
+			if (!StillAwaiting.IsEmpty() && RepollsSoFar < MaxRepolls && Queued->load() == 0)
+			{
+				Async(EAsyncExecution::ThreadPool, [this, StillAwaiting = MoveTemp(StillAwaiting), Queued, RepollsSoFar]() mutable
+				{
+					FPlatformProcess::SleepNoStats(0.001f);
+					if (Queued->load() == 0)
+					{
+						EnqueueReadbackPoll(MoveTemp(StillAwaiting), RepollsSoFar + 1);
+					}
+				});
+			}
 		});
 }
 

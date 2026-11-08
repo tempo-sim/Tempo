@@ -85,6 +85,8 @@ protected:
 
 	// Queues a render command that reads back every sensor whose render fence has signalled. Non-blocking.
 	void EnqueueReadbackPoll(TConstArrayView<class ITempoSensorInterface*> Sensors);
+	// The poll command itself; re-arms from a pool thread while a readback is pending (Tempo.ReadbackRepolls).
+	void EnqueueReadbackPoll(TArray<class ITempoSensorInterface*> AwaitingRender, int32 RepollsSoFar);
 
 	// Readback polls queued on the render thread and not yet run, so OnBetweenFramesPoll (which runs far
 	// more often than the render thread drains) never queues one behind another.
