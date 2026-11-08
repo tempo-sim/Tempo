@@ -79,7 +79,7 @@ python -m RerunPlayground --depth --labels --bboxes          # also stream these
 python -m RerunPlayground --sensors BP_SensorRig:TempoCamera BP_SensorRig:TempoLidar
 python -m RerunPlayground --no-control                     # viewer only
 python -m RerunPlayground --reset-layout                   # discard saved layout
-python -m RerunPlayground --save-rrd session.rrd           # record instead of live view
+python -m RerunPlayground --save-rrd session.rrd           # also save the session (rerun-sdk >= 0.23 views and saves at once)
 python -m RerunPlayground --connect 127.0.0.1:9876         # use an already-running viewer
 python -m RerunPlayground --config my_setup.yaml           # YAML config (keys mirror flags)
 ```
@@ -90,7 +90,7 @@ Run `python -m RerunPlayground --help` for the full list.
 
 - **Frames** — Tempo streams are right-handed / meters / radians, matching
   rerun, so no conversion is applied. All convention logic (Euler→quaternion,
-  the Z-up world axis) lives in `conventions.py`; that's the one place to adjust
+  the Z-up world axis) lives in `tempo_rerun/conventions.py`; that's the one place to adjust
   if anything looks mirrored.
 - **Lens distortion** — `rr.Pinhole` models an ideal pinhole (no distortion
   coefficients); images are shown as the simulator produces them. The control
@@ -102,7 +102,7 @@ Run `python -m RerunPlayground --help` for the full list.
   wrong (ideal-pinhole only), so by default no Pinhole is logged — meaning no
   frustums and no images can appear in 3D at all; the 3D view shows lidar + ground
   truth, and images stay in their 2D views. When enabled, the camera's local axis
-  convention is assumed forward-left-up (`camera_xyz` in `loggers/image.py`).
+  convention is assumed forward-left-up (`camera_xyz` in `tempo_rerun/loggers/image.py`).
 - **No native widgets in rerun** — controls live in the Gradio panel by design.
   Property reads go through `get_*_properties` and writes through
   `set_property`, which operate on raw UProperties in Unreal-native units
@@ -114,23 +114,31 @@ Run `python -m RerunPlayground --help` for the full list.
 ExampleClients/Python/
   tempo_panel.py       shared Gradio building blocks (AsyncBridge + property editor)
   WorldPlaygroundGUI.py  standalone property-editor GUI (uses tempo_panel; no rerun)
+  tempo_rerun/         shared rerun building blocks (also used by CitySampleAV)
+    sensors.py         SensorInfo: what a logger needs to know about a sensor
+    blueprint.py       active streams -> rerun viewer layout
+    conventions.py     frames, transforms, entity paths
+    colormap.py        viridis + label palettes (no matplotlib)
+    labels.py          instance -> semantic id remapping (Instance label mode)
+    streaming.py       bounded-queue producer/consumer pump, with drop counters
+    _compat.py         rerun version shims (incl. view + save at once)
+    loggers/
+      image.py         color/depth/label/bbox/video -> rerun, plus recording taps
+      lidar.py         scan segments -> revolutions -> Points3D, plus recording taps
+      world.py         ActorState -> Boxes3D ground truth
   RerunPlayground/
     __main__.py        entrypoint (python -m RerunPlayground)
     config.py          CLI + YAML config
     discovery.py       sensor/actor discovery -> SceneModel
-    blueprint.py       SceneModel -> rerun viewer layout
     client.py          viewer init + per-stream task supervisor
-    conventions.py     frames, transforms, entity paths
-    colormap.py        viridis + label palettes (no matplotlib)
-    streaming.py       bounded-queue producer/consumer pump
-    _compat.py         rerun version shims
-    loggers/
-      image.py         color/depth/label/bbox/video -> rerun
-      lidar.py         scan segments -> Points3D
-      world.py         ActorState -> Boxes3D ground truth
     control/
       panel.py         Streams controls + the shared tempo_panel property editor
 ```
 
 The property editor lives in `tempo_panel.py` and is shared with the standalone
 `WorldPlaygroundGUI.py` — a get/set GUI for any running sim that needs no rerun.
+
+Every logger in `tempo_rerun.loggers` takes `visualize=` (log to rerun or not) and `taps=`
+(callables that also receive each message, on the same worker thread). That is how a client feeds
+one stream to both the viewer and a recorder without opening it twice; CitySampleAV's recorder is
+built that way.

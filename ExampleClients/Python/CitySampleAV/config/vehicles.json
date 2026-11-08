@@ -1,0 +1,30 @@
+{
+  "_comment": [
+    "The vehicles CitySample's Mass traffic drives, and which rig each one carries.",
+    "CitySample has two Blueprints per model: BP_<model> is the low-detail, non-physics stand-in Mass",
+    "uses far from the viewer, and BP_<model>_Sandbox is the physics car it swaps in near it. Sensors go",
+    "on the physics car, so `class` is the Sandbox one. `category` picks the rig through",
+    "`rigs_by_category` unless the vehicle names its own `rig`. `weight` biases --vehicle random."
+  ],
+  "vehicles": [
+    { "id": "car02",   "category": "car",   "class": "/Game/Vehicle/vehCar_vehicle02/BP_vehCar_vehicle02_Sandbox.BP_vehCar_vehicle02_Sandbox_C" },
+    { "id": "car03",   "category": "car",   "class": "/Game/Vehicle/vehCar_vehicle03/BP_vehCar_vehicle03_Sandbox.BP_vehCar_vehicle03_Sandbox_C" },
+    { "id": "car05",   "category": "car",   "class": "/Game/Vehicle/vehCar_vehicle05/BP_vehCar_vehicle05_Sandbox.BP_vehCar_vehicle05_Sandbox_C" },
+    { "id": "car06",   "category": "car",   "class": "/Game/Vehicle/vehCar_vehicle06/BP_vehCar_vehicle06_Sandbox.BP_vehCar_vehicle06_Sandbox_C" },
+    { "id": "car07",   "category": "car",   "class": "/Game/Vehicle/vehCar_vehicle07/BP_vehCar_vehicle07_Sandbox.BP_vehCar_vehicle07_Sandbox_C" },
+    { "id": "car12",   "category": "car",   "class": "/Game/Vehicle/vehCar_vehicle12/BP_vehCar_vehicle12_Sandbox.BP_vehCar_vehicle12_Sandbox_C" },
+    { "id": "car13",   "category": "car",   "class": "/Game/Vehicle/vehCar_vehicle13/BP_vehCar_vehicle13_Sandbox.BP_vehCar_vehicle13_Sandbox_C" },
+    { "id": "van01",   "category": "van",   "class": "/Game/Vehicle/vehVan_vehicle01/BP_vehVan_vehicle01_Sandbox.BP_vehVan_vehicle01_Sandbox_C" },
+    { "id": "van09",   "category": "van",   "class": "/Game/Vehicle/vehVan_vehicle09/BP_vehVan_vehicle09_Sandbox.BP_vehVan_vehicle09_Sandbox_C" },
+    { "id": "truck04", "category": "truck", "class": "/Game/Vehicle/vehTruck_vehicle04/BP_vehTruck_vehicle04_Sandbox.BP_vehTruck_vehicle04_Sandbox_C" },
+    { "id": "truck08", "category": "truck", "class": "/Game/Vehicle/vehTruck_vehicle08/BP_vehTruck_vehicle08_Sandbox.BP_vehTruck_vehicle08_Sandbox_C" },
+    { "id": "truck11", "category": "truck", "class": "/Game/Vehicle/vehTruck_vehicle11/BP_vehTruck_vehicle11_Sandbox.BP_vehTruck_vehicle11_Sandbox_C" },
+    { "id": "bus10",   "category": "bus",   "class": "/Game/Vehicle/vehBus_vehicle10/BP_vehBus_vehicle10_Sandbox.BP_vehBus_vehicle10_Sandbox_C", "weight": 0.5 }
+  ],
+  "rigs_by_category": {
+    "car": "default",
+    "van": "default",
+    "truck": "default",
+    "bus": "bus"
+  }
+}

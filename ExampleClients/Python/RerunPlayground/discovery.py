@@ -4,53 +4,16 @@
 streaming tasks can be built automatically.
 """
 
-from dataclasses import dataclass, field
-from typing import List, Optional, Set
+from dataclasses import dataclass
+from typing import List, Optional
 
 import tempo_sim.tempo_sensors as ts
 import tempo_sim.tempo_world as tw
-import tempo_sim.TempoSensors.Sensors_pb2 as Sensors
 
-# Human-readable names for the measurement-type enum, used in labels/logging.
-MEASUREMENT_NAMES = {
-    Sensors.MT_COLOR_IMAGE: "color",
-    Sensors.MT_DEPTH_IMAGE: "depth",
-    Sensors.MT_LABEL_IMAGE: "label",
-    Sensors.MT_LIDAR_SCAN: "lidar",
-    Sensors.MT_BOUNDING_BOXES: "bbox",
-    Sensors.MT_VIDEO: "video",
-}
+from tempo_rerun.sensors import SensorInfo
 
 # Substrings that hint an actor is the moving "ego" we should track for ground truth.
 _EGO_HINTS = ("player", "pawn", "vehicle", "robot", "character", "sensorrig", "ego")
-
-
-@dataclass
-class SensorInfo:
-    owner: str
-    name: str
-    rate_hz: float
-    measurement_types: Set[int] = field(default_factory=set)
-    fov_deg: Optional[float] = None  # horizontal FOV for cameras (for Pinhole), if discoverable
-
-    @property
-    def key(self) -> str:
-        return f"{self.owner}:{self.name}"
-
-    def has(self, measurement_type: int) -> bool:
-        return measurement_type in self.measurement_types
-
-    @property
-    def is_camera(self) -> bool:
-        return bool(
-            self.measurement_types
-            & {Sensors.MT_COLOR_IMAGE, Sensors.MT_DEPTH_IMAGE, Sensors.MT_LABEL_IMAGE,
-               Sensors.MT_BOUNDING_BOXES, Sensors.MT_VIDEO}
-        )
-
-    @property
-    def is_lidar(self) -> bool:
-        return Sensors.MT_LIDAR_SCAN in self.measurement_types
 
 
 @dataclass
@@ -93,12 +56,7 @@ async def discover_scene(cfg) -> SceneModel:
     sensors: List[SensorInfo] = []
     available = await ts.get_available_sensors()
     for descriptor in available.available_sensors:
-        info = SensorInfo(
-            owner=descriptor.owner,
-            name=descriptor.name,
-            rate_hz=descriptor.rate_hz,
-            measurement_types=set(descriptor.measurement_types),
-        )
+        info = SensorInfo.from_descriptor(descriptor)
         if allowlist is not None and info.key not in allowlist:
             continue
         # Only need a Pinhole (FOV) when cameras are shown in 3D; otherwise leaving
@@ -119,9 +77,7 @@ async def discover_scene(cfg) -> SceneModel:
 
     print(f"  Discovered {len(sensors)} sensor(s):")
     for s in sensors:
-        kinds = ",".join(sorted(MEASUREMENT_NAMES.get(m, str(m)) for m in s.measurement_types))
-        fov = f", fov={s.fov_deg:.1f}deg" if s.fov_deg else ""
-        print(f"    - {s.key} @ {s.rate_hz:.0f}Hz [{kinds}]{fov}")
+        print(f"    - {s.describe()}")
     print(f"  Tracking actor for ground truth: {track_actor or '(none)'}")
 
     return SceneModel(sensors=sensors, actors=actors, track_actor=track_actor)

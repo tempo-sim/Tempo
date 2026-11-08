@@ -505,6 +505,15 @@ matrix entry in `tempo_build_and_package.yml` (and, for Python, a line in `pytes
   the shared `tempogrpc` library does not export, so the module using one fails at link time with
   undefined `absl_tempo::...::log_internal` symbols. Use a `repeated` name/value message (as
   `StructValue.fields` does), or add the exports in TempoThirdParty's `exports.def`.
+- **FastGeo-cooked geometry can't be labeled.** FastGeoStreaming (UE 5.6+, CitySample) turns static
+  actors into non-component primitives at cook time. The labeler can't stencil them, and since they
+  don't write custom depth, labels behind them show through. `Setup.sh` runs
+  `Scripts/DisableFastGeo.sh`, which turns FastGeo off in the project's cook (`-keep-fastgeo` skips
+  it).
+- **Anything a settings CDO holds at runtime must be rooted.** A cooked build puts native CDOs in
+  the GC's disregard set: their references keep nothing alive, and GC verification fatals on one
+  that points at an unrooted object. `UTempoSensorsSettings::SetRuntimeSemanticLabelTable` roots
+  for this reason.
 - `MIGRATION_v0.1.0.md` documents the previous → v0.1.0 module consolidation (e.g. TempoCamera+TempoLidar →
   TempoSensors); proto packages were renamed, so old external clients must regenerate.
 - Half-pixel offset: the distortion-map UV loop in `TempoCamera.cpp` must use `U + 0.5`
@@ -524,7 +533,9 @@ matrix entry in `tempo_build_and_package.yml` (and, for Python, a line in `pytes
 - Sensor work → `TempoSensors/Source/TempoSensors/{Public,Private}` (`TempoCamera`,
   `TempoTiledSceneCaptureComponent`, `TempoLensModels`, `TempoSensorInterface`).
 - Build/deps → `Scripts/`, `*.Build.cs`.
-- Client examples → `ExampleClients/`.
+- Client examples → `ExampleClients/`. `ExampleClients/Python/tempo_rerun` holds the shared Rerun
+  plumbing (stream pump, loggers with recording taps, layout); `RerunPlayground` and `CitySampleAV`
+  (the turnkey CitySample AV-sensor example, and the first example on the reflected API) build on it.
 - Project history → `MIGRATION_v0.1.0.md`, `MIGRATION_v0.3.0.md`, and `docs/migration/`.
 - Work in flight → the top-level `*_PLAN.md` docs (`TYPED_WORLD_API_PLAN.md`).
 - Published documentation → `docs/` (start at `docs/index.md`); `docs/guides/documentation.md`

@@ -9,11 +9,15 @@ PROJECT_ROOT=$("$SCRIPT_DIR"/FindProjectRoot.sh)
 cd "$TEMPO_ROOT"
 
 SKIP_HOOKS=0
+KEEP_FASTGEO=0
 EXTRA_ARGS=()
 for ARG in "$@"; do
   case "$ARG" in
     -skip-hooks)
       SKIP_HOOKS=1
+      ;;
+    -keep-fastgeo)
+      KEEP_FASTGEO=1
       ;;
     -force)
       EXTRA_ARGS+=("-force")
@@ -117,6 +121,10 @@ fi
 # Run the steps once (adding -force if specified)
 echo -e "\nDisabling project plugins that Tempo replaces\n"
 bash "$SCRIPT_DIR/DisableConflictingPlugins.sh"
+# Tempo's labeler cannot label FastGeo-cooked geometry; see DisableFastGeo.sh.
+if [ "$KEEP_FASTGEO" -ne 1 ]; then
+  bash "$SCRIPT_DIR/DisableFastGeo.sh"
+fi
 for TARGET_FILE in "$PROJECT_ROOT/Source/"*.Target.cs; do
   [ -f "$TARGET_FILE" ] || continue
   REMOVE_TOOLCHAIN_BLOCK_FROM_TARGET_FILE "$TARGET_FILE"

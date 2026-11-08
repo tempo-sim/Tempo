@@ -274,8 +274,9 @@ async def add_component_async(cls: type[T], actor: Object, name: str = "",
                               parent: Optional[Object] = None,
                               transform: Optional[Transform] = None, socket: str = "") -> T:
     """Add a component of this class to an actor and return a handle to it:
-    tempo_world.add_component, typed. The handle carries the name the sim gave it, which is `name`
-    unless that was taken or empty."""
+    tempo_world.add_component, typed. The handle carries the name the sim gave it: `name`, or one
+    the sim chose when `name` is empty. A `name` the actor already has a component by is refused
+    (ALREADY_EXISTS), not renamed."""
     response = await _world().add_component(
         component_type=cls.__tempo_class__, actor=_actor(actor), name=name,
         parent=_component(parent, "parent")[1] if parent else "", transform=transform,

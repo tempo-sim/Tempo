@@ -16,11 +16,25 @@ import asyncio
 import traceback
 
 
+class StreamStats:
+    """Per-stream counters, readable from any thread (plain int increments under the GIL)."""
+
+    def __init__(self):
+        self.received = 0
+        self.dropped = 0
+
+
+# Every pump registers its counters here by label, so a client can report what each stream lost.
+STATS = {}
+
+
 async def pump(source, handle, queue_size: int = 2, label: str = "") -> None:
     """Drive `source` (an async iterator) through `handle` (a sync callable).
 
-    Runs until the source is exhausted or the task is cancelled.
+    Runs until the source is exhausted or the task is cancelled. Counts what it received and what
+    it dropped in ``STATS[label]``.
     """
+    stats = STATS.setdefault(label, StreamStats())
     queue: asyncio.Queue = asyncio.Queue(maxsize=queue_size)
 
     async def consumer():
@@ -34,9 +48,11 @@ async def pump(source, handle, queue_size: int = 2, label: str = "") -> None:
     consumer_task = asyncio.create_task(consumer())
     try:
         async for item in source:
+            stats.received += 1
             if queue.full():
                 try:
                     queue.get_nowait()
+                    stats.dropped += 1
                 except asyncio.QueueEmpty:
                     pass
             queue.put_nowait(item)

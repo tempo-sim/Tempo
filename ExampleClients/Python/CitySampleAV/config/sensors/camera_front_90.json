@@ -1,0 +1,8 @@
+{
+  "_comment": "A forward pinhole camera, 90 degree horizontal FOV.",
+  "type": "camera",
+  "rate_hz": 10.0,
+  "resolution": [1280, 720],
+  "fov_deg": 90.0,
+  "lens": { "model": "Pinhole" }
+}

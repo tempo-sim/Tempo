@@ -1,0 +1,10 @@
+{
+  "_comment": "A 64-channel spinning lidar: uniform beams over a symmetric 45 degree vertical FOV.",
+  "type": "lidar",
+  "rate_hz": 10.0,
+  "horizontal_beams": 1024,
+  "horizontal_fov_deg": 360.0,
+  "vertical_beams": 64,
+  "vertical_fov_deg": 45.0,
+  "range_m": [0.5, 120.0]
+}
