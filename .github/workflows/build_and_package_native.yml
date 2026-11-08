@@ -109,14 +109,6 @@ on:
         type: string
         description: Python to set up for the tests (actions/setup-python), as test_packaged.yml does. Empty uses the machine's python3.
         default: '3.11'
-      ament_prefix_path_workaround:
-        type: boolean
-        description: >-
-          Export AMENT_PREFIX_PATH (pointing at the project's rclcpp) for Package and the tests. TEMPORARY: a packaged
-          TempoROS build aborts before main without it, because libimage_transport's static initializer
-          queries the ament index. Remove once the fixed rclcpp release (TempoThirdParty image_common.patch)
-          is in TempoROS's manifest - users get no such workaround.
-        default: false
     outputs:
       machine_trouble:
         description: '"true" when the job failed because the machine needs attention (not because of the code). Callers alert on it from a job that runs no PR code.'
@@ -346,27 +338,6 @@ jobs:
         TEMPO_SKIP_PREBUILD: '1'
       run: |
         "$CI_BUILD/$TEMPO_ROOT/Scripts/Test.sh" "${{ inputs.automation_test_filter }}"
-
-    # TEMPORARY (see the input). From here on, everything that launches the PACKAGED sim needs it: the
-    # tests, and Package itself, which asks the packaged build for its classes to generate the reflected
-    # API. It points at the project's rclcpp, which exists from Setup on, rather than into the package.
-    - name: Apply AMENT_PREFIX_PATH Workaround
-      if: ${{ inputs.ament_prefix_path_workaround }}
-      env:
-        PROJECT_ROOT: ${{ inputs.project_root }}
-      run: |
-        case "$RUNNER_OS" in
-          macOS)   SUB=Libraries/Mac ;;
-          Linux)   SUB=Libraries/Linux ;;
-          Windows) SUB=Binaries/Windows ;;
-        esac
-        AMENT=$(find "$CI_BUILD/$PROJECT_ROOT/Plugins" -type d -path "*/ThirdParty/rclcpp/$SUB" -prune 2>/dev/null | head -1)
-        if [ -z "$AMENT" ]; then
-          echo "No rclcpp under $CI_BUILD/$PROJECT_ROOT/Plugins; nothing to work around."
-          exit 0
-        fi
-        echo "AMENT_PREFIX_PATH=$AMENT" >> "$GITHUB_ENV"
-        echo "::warning title=Workaround active::AMENT_PREFIX_PATH preset to $AMENT for the packaged sim (tempo-sim/TempoThirdParty#24)."
 
     - name: Package
       id: package

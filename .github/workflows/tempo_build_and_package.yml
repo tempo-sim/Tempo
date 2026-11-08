@@ -84,8 +84,6 @@ jobs:
       gen_cpp_api: true
       require_reflected_api: true
       automation_test_filter: Tempo.
-      # TEMPORARY - remove with the rclcpp release that fixes libimage_transport's static initializer.
-      ament_prefix_path_workaround: true
       # The same groups the Linux fan-out jobs below run (codegen stays Linux-only: nothing it checks
       # depends on the platform).
       test_commands: |
