@@ -1,8 +1,11 @@
 {
-  "_comment": "A forward pinhole camera, 90 degree horizontal FOV.",
+  "_comment": [
+    "A forward pinhole camera, 90 degree horizontal FOV. 960 x 540 keeps the full rig (with depth)",
+    "at about real time in Fixed Step on an RTX 4080; 1280 x 720 costs about 10% of that."
+  ],
   "type": "camera",
   "rate_hz": 10.0,
-  "resolution": [1280, 720],
+  "resolution": [960, 540],
   "fov_deg": 90.0,
   "lens": { "model": "Pinhole" }
 }

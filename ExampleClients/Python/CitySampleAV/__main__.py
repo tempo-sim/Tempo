@@ -33,6 +33,10 @@ def parse_args(argv=None):
     g.add_argument("--rig", default="",
                    help="Use config/rigs/<RIG>.json for every vehicle, instead of each vehicle's own.")
     g.add_argument("--seed", type=int, default=None, help="Seed for the random vehicle choice.")
+    g.add_argument("--max-stopped-s", type=float, default=30.0,
+                   help="Move the rig to another, moving car once the ego has stood still this many "
+                        "seconds of sim time (CitySample's traffic often waits a minute or more at "
+                        "lights). 0 keeps the same car however long it waits. Default 30.")
     g.add_argument("--rate-hz", type=float, default=0.0,
                    help="Capture every sensor at this rate instead of its JSON rate_hz. In Fixed Step "
                         "(the default) every sensor runs at --step-hz unless this is given.")
@@ -41,6 +45,13 @@ def parse_args(argv=None):
     g.add_argument("--step-hz", type=int, default=10,
                    help="Fixed Step rate: the sim advances exactly 1/step-hz seconds per frame, and the "
                         "sensors capture on every step (default 10).")
+    g.add_argument("--no-pipelined", dest="pipelined", action="store_false",
+                   help="Turn off pipelined rendering. It is on by default: in Fixed Step it lets the "
+                        "game thread run ahead of sensor readback instead of waiting for it each frame. "
+                        "Every measurement still carries the sim time and sequence id of the step it was "
+                        "captured on; data just arrives a frame or two later.")
+    g.add_argument("--scalability", choices=["low", "medium", "high", "epic", "cinematic"], default="",
+                   help="Set the engine's scalability level (rendering quality) before collecting.")
     g.add_argument("--wall-clock", action="store_true",
                    help="Run in Wall Clock time instead of Fixed Step. Sensors then capture whenever "
                         "frames allow, not in lockstep.")
@@ -62,8 +73,10 @@ def parse_args(argv=None):
                    help="Also save the Rerun recording to this .rrd file.")
     g.add_argument("--record", default="", metavar="DIR",
                    help="Record a dataset (images, labels, lidar, poses, calibration) to DIR.")
-    g.add_argument("--depth", action="store_true", help="Stream and show camera depth too.")
-    g.add_argument("--record-depth", action="store_true", help="With --record, also write depth.")
+    g.add_argument("--depth", action="store_true",
+                   help="Show camera depth in the viewer too (it is always recorded with --record).")
+    g.add_argument("--no-record-depth", action="store_true",
+                   help="With --record, don't write camera depth (written by default).")
     g.add_argument("--lidar-color", choices=LIDAR_SIGNALS, default="label",
                    help="What colors the lidar points in the viewer (default: label).")
     g.add_argument("--ground-truth-radius-m", type=float, default=80.0,

@@ -33,14 +33,17 @@ from tempo_sim import world
 import city_sample.reflected  # noqa: F401
 from city_sample.reflected.CitySample import CitySampleVehicleBase
 from city_sample.reflected.Engine import PlayerController, PrimitiveComponent
+from city_sample.reflected.TempoSensors import TempoSceneCaptureComponent2D
 from city_sample.reflected.enums import EViewTargetBlendFunction
 
+import tempo_sim.tempo_sensors as ts
 import tempo_sim.tempo_world as tw
 
 from .config import VehicleCatalog, VehicleEntry
 from .labels import EGO_TAG
 
 PARKED_TAG = "ParkedVehicle"
+STOPPED_SPEED_MPS = 0.5
 
 
 @dataclass
@@ -83,6 +86,16 @@ async def acquire(catalog: VehicleCatalog, choice: str, rng: random.Random,
     while True:
         candidates = await _traffic_vehicles(catalog, allowed, exclude)
         if candidates:
+            # Prefer cars that are moving: one waiting at a light can wait a minute or more.
+            moving = []
+            for handle, entry in candidates:
+                try:
+                    v = (await tw.get_current_actor_state(actor=handle.actor)).velocity.linear
+                except Exception:
+                    continue
+                if math.hypot(v.x, v.y) > 2.0:
+                    moving.append((handle, entry))
+            candidates = moving or candidates
             # A weighted pick among the vehicle types present, then any car of that type.
             present = {e.id: e for _, e in candidates}
             order = VehicleCatalog.weighted_order(list(present.values()), rng)
@@ -125,19 +138,53 @@ async def adopt(ego: Ego) -> None:
                 component.ComponentTags = list(tags.value) + [EGO_TAG]
 
 
-class EgoWatch:
-    """Polls the ego's state; ``lost`` is set when it is destroyed, parked, or jumps (a pooled
-    actor reused for another car)."""
+RELEASED_TAG = "TempoReleasedEgo"
 
-    def __init__(self, ego: Ego, period_s: float = 1.0, max_jump_m: float = 30.0):
+
+async def release(ego: Ego, sensor_names) -> None:
+    """Hand a car the client is leaving back to the city: remove the rig's sensors and the TempoEgo
+    tags, and have the labeler label it as an ordinary car again.
+
+    Removing a tag doesn't re-label anything, and SetActorTagSemanticId re-labels only the actors
+    carrying the tag it names. So the car gets a throwaway tag, that tag's (non-existent) override
+    is cleared, which re-labels the car by its class and meshes, and the throwaway tag goes again."""
+    for component in await world.get_components_async(ego.vehicle, TempoSceneCaptureComponent2D):
+        if component.component in sensor_names:
+            await world.destroy_component_async(component)
+    components = await world.get_components_async(ego.vehicle, PrimitiveComponent)
+    async with world.batch() as batch:
+        actor_tags = batch.get(lambda: ego.vehicle.Tags)
+        component_tags = [batch.get(lambda c=c: c.ComponentTags) for c in components]
+    async with world.batch():
+        ego.vehicle.Tags = [t for t in actor_tags.value if t != EGO_TAG] + [RELEASED_TAG]
+        for component, tags in zip(components, component_tags):
+            if EGO_TAG in tags.value:
+                component.ComponentTags = [t for t in tags.value if t != EGO_TAG]
+    await ts.set_actor_tag_semantic_id(actor_tag=RELEASED_TAG, semantic_id=-1)
+    async with world.batch():
+        ego.vehicle.Tags = [t for t in actor_tags.value if t != EGO_TAG]
+
+
+class EgoWatch:
+    """Polls the ego's state; ``lost`` is set when it is destroyed, parked, jumps (a pooled actor
+    reused for another car), or has stood still for ``max_stopped_s`` of sim time.
+
+    The last is not a failure of Mass but of the data: CitySample's traffic routinely waits a minute
+    or more at lights and in jams, in Wall Clock and Fixed Step alike, and a stationary ego records
+    the same frame over and over."""
+
+    def __init__(self, ego: Ego, period_s: float = 1.0, max_jump_m: float = 30.0,
+                 max_stopped_s: float = 30.0):
         self.ego = ego
         self.period_s = period_s
         self.max_jump_m = max_jump_m
+        self.max_stopped_s = max_stopped_s
         self.lost = asyncio.Event()
         self.reason = ""
 
     async def run(self) -> None:
         last = None
+        moving_at = None   # sim time the ego was last seen moving
         while not self.lost.is_set():
             await asyncio.sleep(self.period_s)
             try:
@@ -157,6 +204,12 @@ class EgoWatch:
                     self._lose(f"jumped {jump:.0f} m (actor reused for another car)")
                     return
             last = (p.x, p.y, p.z, state.timestamp_s)
+            v = state.velocity.linear
+            if moving_at is None or math.hypot(v.x, v.y) > STOPPED_SPEED_MPS:
+                moving_at = state.timestamp_s
+            elif self.max_stopped_s > 0 and state.timestamp_s - moving_at > self.max_stopped_s:
+                self._lose(f"stopped for {state.timestamp_s - moving_at:.0f} s of sim time")
+                return
 
     def _lose(self, reason: str) -> None:
         self.reason = reason

@@ -1,14 +1,16 @@
 {
   "_comment": [
-    "A 170 degree fisheye. KannalaBrandt with all k = 0 is the ideal equidistant projection; set k to",
-    "a real lens's calibration to match it. Fisheye lenses render as 1-4 perspective tiles stitched",
-    "together, so they cost more GPU than a pinhole camera; upsampling sharpens the stretched center.",
-    "DoubleSphere (xi, alpha) is the other fisheye model."
+    "A 170 degree fisheye, wide like an automotive surround-view camera: 960 x 600 gives about 106",
+    "degrees vertically. That shape matters for speed: a fisheye renders one perspective view per 120",
+    "degrees of each axis, so this is 2 views, where a square 170 degree image would be 4 (a full",
+    "scene render each). 960 x 600 keeps the full rig at about real time on an RTX 4080; 1280 x 800",
+    "costs about 10% of that. KannalaBrandt with all k = 0 is the ideal equidistant projection; set k",
+    "to a real lens's calibration to match it. DoubleSphere (xi, alpha) is the other fisheye model."
   ],
   "type": "camera",
   "rate_hz": 10.0,
-  "resolution": [1024, 1024],
+  "resolution": [960, 600],
   "fov_deg": 170.0,
   "lens": { "model": "KannalaBrandt", "k": [0.0, 0.0, 0.0, 0.0] },
-  "upsampling_factor": 1.5
+  "upsampling_factor": 1.0
 }

@@ -135,7 +135,7 @@ actors.jsonl              nearby actors' poses and bounds per sample
 <sensor>/index.jsonl      per frame: sequence id, sim time, sensor pose in the world
 <camera>/color/NNNNNN.png
 <camera>/label/NNNNNN.png 8-bit label ids
-<camera>/depth/NNNNNN.npy float32 meters (--record-depth)
+<camera>/depth/NNNNNN.npy float32 meters (--no-record-depth skips)
 <camera>/bbox/NNNNNN.json instance mode only
 <lidar>/NNNNNN.npz        xyz (sensor frame), distance, intensity, label, ring, azimuth, elevation
 ```
@@ -153,47 +153,64 @@ fixed amount of data, stop on sim time: `--sim-duration-s 60` is 600 frames of e
 
 ## Performance
 
-What the client collects is what the sim renders: sensors capture in the game loop, so the slowest
-frame decides. The default rig is:
-- `RoofLidar`: 1024 × 64 beams, 360° × 45°, 0.5–120 m. Rendered as 3 tiles, so 3 segments per scan.
-- `FrontCamera`: 1280 × 720 pinhole, 90° horizontal FOV.
-- `FisheyeCamera`: 1024 × 1024 KannalaBrandt, 170°, 1.5× upsampling. Rendered as several
-  perspective tiles, then stitched.
+The default rig runs at **about real time** on an i9-14900KF, RTX 4080 and 64 GB RAM. That's Fixed
+Step at 10 steps/s, every sensor at 10 Hz, recording color, label, depth and lidar:
 
-The game's own window is **not rendered** while collecting, since only the sensors need the GPU.
-`--viewport` turns it back on. On exit the client prints what each stream delivered.
+| Sensor | Settings |
+|---|---|
+| `RoofLidar` | 1024 × 64 beams, 360° × 45°, 0.5–120 m, participating media off. Renders 3 views (120° each). |
+| `FrontCamera` | 960 × 540 pinhole, 90° horizontal FOV. Renders 1 view. |
+| `FisheyeCamera` | 960 × 600 KannalaBrandt, 170° horizontal (about 106° vertical). Renders 2 views, stitched. |
 
-Measured on an i9-14900KF, RTX 4080 and 64 GB RAM, on Windows with the packaged game.
+Measured over 90 s of sim time with a moving car (522 m, two handovers), recording everything:
+- a **real-time factor of 0.97 while streaming**, which is 9.5 synchronized frames/s from every
+  sensor, every one on the same 0.1 s grid;
+- nothing dropped;
+- about 7 GB per sim-minute on disk.
 
-**Fixed Step (the default): 10 steps/s, every sensor at 10 Hz.** 60 s of sim time took 96 s of
-wall time, a real-time factor of 0.63. That run delivered:
-- **600 frames from each camera** (color and label), **599 lidar scans**: one per step for every
-  sensor, all on the same 0.1 s grid. That's **6.2 synchronized frames per second of wall time, per
-  sensor**.
-- no frames dropped, and the recording complete;
-- the ego covering 280 m: mean 4.7 m/s with stops at lights, peaking at 8.9 m/s.
+Runs vary by about ±5% with the route.
 
-**Wall Clock (`--wall-clock`)**, for comparison, with sensors requested at 30 Hz
-(`--rate-hz 30`) and 45–60 s per run. "Game FPS" comes from the game's log:
+**What it costs.** Sensors render in the game loop, and the cost is mostly *how many scene views*
+each frame renders, not how many pixels. Measured the same way, with a moving car:
 
-| Rig | Game FPS | Delivered |
-|---|---|---|
-| lidar only | ~21 | 9.5 scans/s |
-| pinhole only | ~28 | 21 color + 21 label frames/s |
-| fisheye only | ~15 | 9 color + 9 label frames/s |
-| **default (all three)** | **~10** | **~6 color + ~5.5 label frames/s per camera; 2.4 lidar scans/s** |
-| default, at the JSON's 10 Hz | ~10 | ~4.5 frames/s per camera; 2.5 scans/s |
-| default, game window rendering | ~10 | ~5.6 frames/s per camera; 2.3 scans/s |
-| default, recording to disk | ~10 | same as without; no frames dropped |
+| Change from the default | Real-time factor |
+|---|---|
+| none | 0.97 |
+| cameras at 1280 × 720 and 1280 × 800 | 0.89 |
+| ... with the fisheye at 1024 × 640 | 0.87 |
+| ... with a square 1024 × 1024 fisheye (4 views, not 2) and 1.5× upsampling | ~0.7 \* |
+| not recording depth (`--no-record-depth`) | about +15–20% \* |
+| writing to disk at all | no measurable cost \* |
+| the Rerun viewer open | about −7%, since it shares the GPU |
+| `--no-pipelined` (the game waits for each frame's readback) | about −10% \* |
+| lidar participating media on | about −5% \* |
+| lidar at 32 beams instead of 64; `screen_percentage` 70; scalability `high`/`medium` | no gain, or a loss \* |
 
-In Wall Clock each sensor captures only when a frame happens to be due, so with all three the lidar
-gets fewer than half as many scans as in Fixed Step, and the sensors aren't captured together.
-The client dropped nothing in any run, and recording cost nothing measurable. The limit is GPU time
-per game frame. The fisheye and the 360° lidar are the expensive sensors, because each renders
-several views every capture. To collect faster:
-- drop or shrink the fisheye (`upsampling_factor` 1.0 alone gains little);
-- use fewer `horizontal_beams`, or a narrower `horizontal_fov_deg`, so the lidar renders fewer tiles;
-- lower the engine scalability (`tempo_core.set_engine_scalability`).
+\* From earlier, shorter runs, several with a stationary ego, which renders more cheaply than a moving
+one. Take these as relative effects, not exact factors.
+
+Hence the choices in the defaults:
+- **A wide fisheye, not a square one.** A fisheye renders one view per 120° of each axis, so a
+  square 170° image costs 4 full scene renders and a 16:10 one costs 2. Wide is also how
+  automotive surround-view cameras are built.
+- **The game's own window is off** while collecting; `--viewport` keeps it.
+- **Pipelined rendering is on.** Each frame still carries the sim time and sequence id of the step
+  it was captured on; data just arrives a frame or two later.
+- **Participating media is off.** CitySample's streets have no smoke or fog for it to model.
+
+On exit the client prints what each stream delivered per second of wall time and the real-time
+factor while streaming. While the rig moves to a new car, nothing renders, so those seconds are
+left out. Each index entry also records `received_wall_time`.
+
+**Wall Clock** (`--wall-clock`) doesn't capture in lockstep. Each sensor captures only when a frame
+happens to be due, so with all three sensors the lidar delivered under half the scans it gets in
+Fixed Step.
+
+**Moving cars.** CitySample's traffic often waits a minute or more at lights and in jams. That
+happens in Wall Clock and Fixed Step alike, and a stationary ego records the same frame over and
+over. So once the ego has stood still for `--max-stopped-s` (default 30) of sim time, the client
+moves the rig to another car that is moving. Each handover leaves a gap of about a second in the
+recording; match frames by `time_s`.
 
 ## How it works
 

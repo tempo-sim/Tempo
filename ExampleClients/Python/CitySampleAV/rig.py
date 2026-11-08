@@ -56,6 +56,9 @@ def apply_camera(camera: TempoCamera, cfg: CameraConfig) -> None:
         PrincipalPoint=FVector2D(X=cfg.lens.principal_point[0], Y=cfg.lens.principal_point[1]),
     )
     camera.UpsamplingFactor = cfg.upsampling_factor
+    camera.bEnableScreenPercentage = cfg.screen_percentage is not None
+    if cfg.screen_percentage is not None:
+        camera.ScreenPercentage = cfg.screen_percentage
     _apply_passthrough(camera, cfg.unreal_properties)
 
 
@@ -75,6 +78,7 @@ def apply_lidar(lidar: TempoLidar, cfg: LidarConfig) -> None:
         lidar.BeamCalibration = []
         lidar.VerticalBeams = cfg.vertical_beams
         lidar.VerticalFOV = cfg.vertical_fov_deg                   # degrees
+    lidar.bSimulateParticipatingMedia = cfg.participating_media
     _apply_passthrough(lidar, cfg.unreal_properties)
 
 

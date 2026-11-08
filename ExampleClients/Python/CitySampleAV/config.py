@@ -100,6 +100,8 @@ class CameraConfig:
     fov_deg: float
     lens: LensConfig
     upsampling_factor: float = 1.0
+    # Render at this percentage of the output resolution per tile and upscale (TSR). None: full.
+    screen_percentage: Optional[float] = None
     unreal_properties: Dict[str, object] = field(default_factory=dict)
 
 
@@ -113,6 +115,8 @@ class LidarConfig:
     vertical_beams: int = 0
     vertical_fov_deg: float = 0.0
     elevations_deg: Tuple[float, ...] = ()     # non-empty: a BeamCalibration, replacing the grid
+    # Attenuate and backscatter in dust, smoke and fog. Costs GPU time; off when the scene has none.
+    participating_media: bool = True
     unreal_properties: Dict[str, object] = field(default_factory=dict)
 
 
@@ -145,9 +149,12 @@ def load_sensor(name: str, config_dir: Path = CONFIG_DIR) -> SensorConfig:
         limit = 240.0 if lens.is_fisheye else 170.0
         if not 0 < fov <= limit:
             raise ConfigError(f"{path}: 'fov_deg' must be in (0, {limit:.0f}] for a {model} lens, got {fov}")
+        screen_percentage = _get(data, "screen_percentage", path, float, None)
+        if screen_percentage is not None and not 10.0 <= screen_percentage <= 100.0:
+            raise ConfigError(f"{path}: 'screen_percentage' must be in [10, 100], got {screen_percentage}")
         return CameraConfig(name=name, rate_hz=rate, resolution=(int(res[0]), int(res[1])), fov_deg=fov,
                             lens=lens, upsampling_factor=_get(data, "upsampling_factor", path, float, 1.0),
-                            unreal_properties=passthrough)
+                            screen_percentage=screen_percentage, unreal_properties=passthrough)
 
     if kind == "lidar":
         elevations = tuple(float(v) for v in _get(data, "elevations_deg", path, list, []))
@@ -165,6 +172,7 @@ def load_sensor(name: str, config_dir: Path = CONFIG_DIR) -> SensorConfig:
                            vertical_beams=vertical_beams,
                            vertical_fov_deg=_get(data, "vertical_fov_deg", path, float, 0.0),
                            elevations_deg=elevations,
+                           participating_media=_get(data, "participating_media", path, bool, True),
                            unreal_properties=passthrough)
 
     raise ConfigError(f"{path}: 'type' must be 'camera' or 'lidar', got {kind!r}")

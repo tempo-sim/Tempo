@@ -1,10 +1,15 @@
 {
-  "_comment": "A 64-channel spinning lidar: uniform beams over a symmetric 45 degree vertical FOV.",
+  "_comment": [
+    "A 64-channel spinning lidar: uniform beams over a symmetric 45 degree vertical FOV. 360 degrees",
+    "renders as 3 views of 120. Participating media (attenuation and backscatter in dust, smoke and fog)",
+    "is off: CitySample's streets have none, and it costs GPU time every scan."
+  ],
   "type": "lidar",
   "rate_hz": 10.0,
   "horizontal_beams": 1024,
   "horizontal_fov_deg": 360.0,
   "vertical_beams": 64,
   "vertical_fov_deg": 45.0,
-  "range_m": [0.5, 120.0]
+  "range_m": [0.5, 120.0],
+  "participating_media": false
 }
