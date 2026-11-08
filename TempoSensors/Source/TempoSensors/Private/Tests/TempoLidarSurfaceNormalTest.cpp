@@ -26,9 +26,9 @@ namespace
 	// Image plane distance between adjacent pixels: about 0.06 degrees, a lidar tile upsampled ~2.5x
 	// over a 0.15 degree beam spacing.
 	constexpr double Step = 1e-3;
-	constexpr double MaxAngleOfIncidenceDeg = 87.5;
-	const double SinMaxAngleOfIncidence = FMath::Sin(FMath::DegreesToRadians(MaxAngleOfIncidenceDeg));
-	const double CosMaxAngleOfIncidence = FMath::Cos(FMath::DegreesToRadians(MaxAngleOfIncidenceDeg));
+	constexpr double TestMaxAngleOfIncidenceDeg = 87.5;
+	const double TestSinMaxAngleOfIncidence = FMath::Sin(FMath::DegreesToRadians(TestMaxAngleOfIncidenceDeg));
+	const double TestCosMaxAngleOfIncidence = FMath::Cos(FMath::DegreesToRadians(TestMaxAngleOfIncidenceDeg));
 
 	struct FTestPlane
 	{
@@ -97,7 +97,7 @@ namespace
 	TOptional<double> DecodedRange(const FVector& Center, const FVector& Normal, const FVector& BeamRay)
 	{
 		const FVector BeamUnit = BeamRay.GetSafeNormal();
-		if (FVector::DotProduct(Normal.GetSafeNormal(), -BeamUnit) < CosMaxAngleOfIncidence)
+		if (FVector::DotProduct(Normal.GetSafeNormal(), -BeamUnit) < TestCosMaxAngleOfIncidence)
 		{
 			return {};
 		}
@@ -151,7 +151,7 @@ bool FTempoLidarSurfacePlaneTest::RunTest(const FString& Parameters)
 		const FNeighborhood Pixels({ Plane });
 
 		FVector Normal;
-		const ETempoLidarSurfaceFit Fit = EstimateLidarSurfaceNormal(Pixels.Center, Pixels.Neighbors, ShadingNormal, SinMaxAngleOfIncidence, Normal);
+		const ETempoLidarSurfaceFit Fit = EstimateLidarSurfaceNormal(Pixels.Center, Pixels.Neighbors, ShadingNormal, TestSinMaxAngleOfIncidence, Normal);
 		TestFit(*this, What, Fit, ETempoLidarSurfaceFit::Plane);
 
 		const double TrueRange = Hit(BeamRay, Plane)->Length();
@@ -187,7 +187,7 @@ bool FTempoLidarSurfaceTileEdgeTest::RunTest(const FString& Parameters)
 	{
 		const FNeighborhood Pixels({ Plane }, static_cast<uint8>(DropMask));
 		FVector Normal;
-		const ETempoLidarSurfaceFit Fit = EstimateLidarSurfaceNormal(Pixels.Center, Pixels.Neighbors, Bumped(Plane.Normal, 15.0), SinMaxAngleOfIncidence, Normal);
+		const ETempoLidarSurfaceFit Fit = EstimateLidarSurfaceNormal(Pixels.Center, Pixels.Neighbors, Bumped(Plane.Normal, 15.0), TestSinMaxAngleOfIncidence, Normal);
 		TestFit(*this, FString::Printf(TEXT("mask %d"), DropMask), Fit, ETempoLidarSurfaceFit::Plane);
 		const TOptional<double> Range = DecodedRange(Pixels.Center, Normal, BeamRay);
 		if (TestTrue(*FString::Printf(TEXT("mask %d: beam returns"), DropMask), Range.IsSet()))
@@ -201,7 +201,7 @@ bool FTempoLidarSurfaceTileEdgeTest::RunTest(const FString& Parameters)
 	const FVector ShadingNormal = Bumped(Plane.Normal, 15.0);
 	FVector Normal;
 	TestFit(*this, TEXT("no neighbors"),
-		EstimateLidarSurfaceNormal(Alone.Center, Alone.Neighbors, ShadingNormal, SinMaxAngleOfIncidence, Normal), ETempoLidarSurfaceFit::None);
+		EstimateLidarSurfaceNormal(Alone.Center, Alone.Neighbors, ShadingNormal, TestSinMaxAngleOfIncidence, Normal), ETempoLidarSurfaceFit::None);
 	TestTrue(TEXT("no neighbors: the shading normal"), Normal.Equals(ShadingNormal.GetSafeNormal(), 1e-12));
 	return true;
 }
@@ -235,7 +235,7 @@ bool FTempoLidarSurfaceSilhouetteTest::RunTest(const FString& Parameters)
 
 		const FString What = FString::Printf(TEXT("wall at %.0f, edge at column %+.1f"), WallDistance, EdgeColumn);
 		FVector Normal;
-		const ETempoLidarSurfaceFit Fit = EstimateLidarSurfaceNormal(Center, Neighbors, Bumped(Box.Normal, 20.0), SinMaxAngleOfIncidence, Normal);
+		const ETempoLidarSurfaceFit Fit = EstimateLidarSurfaceNormal(Center, Neighbors, Bumped(Box.Normal, 20.0), TestSinMaxAngleOfIncidence, Normal);
 		TestFit(*this, What, Fit, ETempoLidarSurfaceFit::Plane);
 		TestTrue(*FString::Printf(TEXT("%s: the box's own normal, not one bridging to the wall"), *What),
 			Normal.Equals(Box.Normal, 1e-9));
@@ -271,7 +271,7 @@ bool FTempoLidarSurfaceThinFeatureTest::RunTest(const FString& Parameters)
 	const FVector ShadingNormal = Pole.Normal.RotateAngleAxis(25.0, FVector(0.0, 1.0, 0.0)).RotateAngleAxis(15.0, FVector(0.0, 0.0, 1.0));
 
 	FVector Normal;
-	const ETempoLidarSurfaceFit Fit = EstimateLidarSurfaceNormal(Center, Neighbors, ShadingNormal, SinMaxAngleOfIncidence, Normal);
+	const ETempoLidarSurfaceFit Fit = EstimateLidarSurfaceNormal(Center, Neighbors, ShadingNormal, TestSinMaxAngleOfIncidence, Normal);
 	TestFit(*this, TEXT("pole"), Fit, ETempoLidarSurfaceFit::Tangent);
 	TestEqual(TEXT("perpendicular to the pole's own tangent"), FVector::DotProduct(Normal, RowTangent), 0.0, 1e-12);
 	TestTrue(TEXT("faces the sensor"), FVector::DotProduct(Normal, Center) < 0.0);
@@ -306,7 +306,7 @@ bool FTempoLidarSurfaceGrazingTest::RunTest(const FString& Parameters)
 		const FTestPlane Ground = TiltedPlane(20000.0, 89.0, RollDeg);
 		const FNeighborhood Pixels({ Ground });
 		FVector Normal;
-		const ETempoLidarSurfaceFit Fit = EstimateLidarSurfaceNormal(Pixels.Center, Pixels.Neighbors, Ground.Normal, SinMaxAngleOfIncidence, Normal);
+		const ETempoLidarSurfaceFit Fit = EstimateLidarSurfaceNormal(Pixels.Center, Pixels.Neighbors, Ground.Normal, TestSinMaxAngleOfIncidence, Normal);
 		const FString What = FString::Printf(TEXT("roll %.0f, fit %d"), RollDeg, static_cast<int32>(Fit));
 		TestFalse(*FString::Printf(TEXT("%s: dropped by the cutoff"), *What), DecodedRange(Pixels.Center, Normal, BeamRay).IsSet());
 	}
@@ -323,7 +323,7 @@ bool FTempoLidarSurfaceGrazingTest::RunTest(const FString& Parameters)
 	}
 	const FVector Center = *Hit(PixelRay(0, 0), Sign);
 	FVector Normal;
-	TestFit(*this, TEXT("isolated"), EstimateLidarSurfaceNormal(Center, Neighbors, Sign.Normal, SinMaxAngleOfIncidence, Normal), ETempoLidarSurfaceFit::None);
+	TestFit(*this, TEXT("isolated"), EstimateLidarSurfaceNormal(Center, Neighbors, Sign.Normal, TestSinMaxAngleOfIncidence, Normal), ETempoLidarSurfaceFit::None);
 	TestTrue(TEXT("isolated: returns"), DecodedRange(Center, Normal, BeamRay).IsSet());
 	return true;
 }
