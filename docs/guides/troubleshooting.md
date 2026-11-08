@@ -239,6 +239,18 @@ the [settings reference](../reference/settings.md#tempo-sensors).
 Pass `-skipiostore`. On a clean run iostore can't find engine content under `Saved/Temp`. Note
 that iostore is enabled by `bUseIoStore` in `Config/DefaultGame.ini`, not by an `-iostore` flag.
 
+### A packaged Mac sim can't bind its socket
+
+```text
+... Error in bind for address '/tmp/sim-a.sock': Operation not permitted
+LogTempoCore: Error: Could not start Tempo gRPC server: could not bind unix:/tmp/sim-a.sock. Another process is most likely already listening there.
+```
+
+Despite the second line, nothing else is listening. `Operation not permitted` means the sim runs
+under App Sandbox, which Unreal enables by default for a packaged Mac game and which does not let it
+create a socket outside its container. Turn the sandbox off in the project's entitlements; see
+[Packaging for macOS](packaging.md#packaging-for-macos).
+
 ### A packaged game with TempoROS won't start on Windows
 
 This required a `PATH` entry in older versions; it no longer does. TempoROS stages the `rclcpp` DLLs
