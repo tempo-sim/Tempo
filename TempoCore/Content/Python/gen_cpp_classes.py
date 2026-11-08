@@ -1068,7 +1068,7 @@ def write_file(path, text):
 
 
 def generate(schema_path, output_dir, docs=False):
-    with open(schema_path) as f:
+    with open(schema_path, encoding="utf-8") as f:
         schema = json.load(f)
 
     expected = "3"

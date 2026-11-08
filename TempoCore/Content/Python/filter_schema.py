@@ -304,9 +304,9 @@ def main(argv):
               file=sys.stderr)
         return 2
 
-    with open(argv[1]) as f:
+    with open(argv[1], encoding="utf-8") as f:
         schema = json.load(f)
-    with open(argv[2]) as f:
+    with open(argv[2], encoding="utf-8") as f:
         reported = json.load(f)
     keep_paths = set(reported["classes"])
 
@@ -421,7 +421,7 @@ def main(argv):
         # at runtime); many would mean the editor walk is missing something it should have.
         print("note: {} class(es) the build has are absent from the schema".format(missing))
 
-    with open(argv[3], "w") as f:
+    with open(argv[3], "w", encoding="utf-8") as f:
         json.dump(filtered, f, indent=1, sort_keys=False)
         f.write("\n")
     return 0
