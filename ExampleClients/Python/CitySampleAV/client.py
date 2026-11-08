@@ -18,6 +18,8 @@ from typing import List, Optional
 import rerun as rr
 
 import tempo_sim.tempo_core as tc
+import tempo_sim.tempo_sensors as ts
+import tempo_sim.TempoCore.TempoCore_pb2 as TempoCorePb
 import tempo_sim.TempoCore.Time_pb2 as Time
 
 from tempo_rerun import _compat
@@ -70,6 +72,8 @@ class Session:
         self.viewport_disabled = False
         self.fixed_step = not args.wall_clock
         self.sim_time_at_start: Optional[float] = None
+        self.streaming_wall = 0.0          # wall seconds spent streaming (handovers excluded)
+        self.streaming_sim = 0.0           # sim seconds that passed while streaming
         self.streaming_since: Optional[float] = None
         self.revolutions: Counter = Counter()   # lidar name -> assembled revolutions received
         self.rng = random.Random(args.seed)
@@ -188,10 +192,11 @@ class Session:
             self._spawn(image_logger.stream_label(
                 s, remap=self.remap, visualize=viz, taps=[rec.label_tap(s.name)] if rec else []),
                 f"{s.name}:label", self.stream_tasks)
-            if self.args.depth or (rec and self.args.record_depth):
+            record_depth = rec is not None and not self.args.no_record_depth
+            if self.args.depth or record_depth:
                 self._spawn(image_logger.stream_depth(
                     s, visualize=viz and self.args.depth,
-                    taps=[rec.depth_tap(s.name)] if rec and self.args.record_depth else []),
+                    taps=[rec.depth_tap(s.name)] if rec and record_depth else []),
                     f"{s.name}:depth", self.stream_tasks)
             if self.remap is not None:
                 self._spawn(image_logger.stream_bbox(
@@ -277,6 +282,13 @@ class Session:
             print("  Main viewport rendering off (--viewport keeps it on).")
         if self.fixed_step:
             await self.start_fixed_step()
+        if self.args.pipelined:
+            await ts.set_pipelined_rendering_enabled(enabled=True)
+            print("  Pipelined rendering on.")
+        if self.args.scalability:
+            level = getattr(TempoCorePb, f"ES_{self.args.scalability.upper()}")
+            await tc.set_engine_scalability(scalability=level)
+            print(f"  Engine scalability: {self.args.scalability}.")
         await self.labels.install()
         self._spawn(self.labels.run_mesh_sync(), "label_sync", self.background)
         if self.remap is not None:
@@ -290,23 +302,47 @@ class Session:
         lost_egos = []
         try:
             while not self.stop.is_set():
-                await self.adopt_and_mount(exclude=lost_egos)
+                # Finding a car can take a while (traffic waits at lights); a stop interrupts it.
+                adopt_task = asyncio.create_task(self.adopt_and_mount(exclude=lost_egos))
+                stop_task = asyncio.create_task(self.stop.wait())
+                await asyncio.wait({adopt_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
+                stop_task.cancel()
+                if not adopt_task.done():
+                    adopt_task.cancel()
+                    await asyncio.gather(adopt_task, return_exceptions=True)
+                    break
+                adopt_task.result()
                 if self.sim_time_at_start is None:
                     self.sim_time_at_start = (await tc.get_sim_time()).sim_time
                     if self.args.sim_duration_s > 0:
                         self._spawn(self._stop_at_sim_time(self.sim_time_at_start + self.args.sim_duration_s),
                                     "sim_duration", self.background)
+                segment_sim = (await tc.get_sim_time()).sim_time
+                segment_wall = time.monotonic()
                 self.start_streams()
-                watch = ego_mod.EgoWatch(self.ego)
+                watch = ego_mod.EgoWatch(self.ego, max_stopped_s=self.args.max_stopped_s)
                 watch_task = asyncio.create_task(watch.run())
                 stop_task = asyncio.create_task(self.stop.wait())
                 await asyncio.wait({watch_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
                 watch_task.cancel()
                 stop_task.cancel()
                 await self.stop_streams()
+                # Count only time spent streaming: while a new car is found and mounted, nothing
+                # renders, so sim time runs cheaply ahead and would flatter the real-time factor.
+                self.streaming_wall += time.monotonic() - segment_wall
+                try:
+                    self.streaming_sim += (await tc.get_sim_time()).sim_time - segment_sim
+                except Exception:
+                    pass
                 if watch.lost.is_set() and not self.stop.is_set():
                     print(f"  Lost the ego ({watch.reason}); adopting another car.")
                     lost_egos.append(self.ego.name)
+                    try:
+                        # A car still in the world (stopped, rather than released by Mass) keeps
+                        # the rig and the ego label otherwise.
+                        await ego_mod.release(self.ego, {s.name for s in self.mounted.sensors})
+                    except Exception:
+                        pass
         finally:
             await self.shutdown()
 
@@ -329,6 +365,11 @@ class Session:
             except Exception:
                 pass
         await self.restore_time()
+        if self.args.pipelined and not self.launched:
+            try:
+                await ts.set_pipelined_rendering_enabled(enabled=False)
+            except Exception:
+                pass
         print(self.throughput_report(sim_elapsed))
         if self.args.coverage:
             print(self.labels.coverage_report())
@@ -336,14 +377,16 @@ class Session:
     def throughput_report(self, sim_elapsed: Optional[float] = None) -> str:
         """What each stream delivered per wall-clock second since streaming began (the collection
         rate), and how fast sim time ran against the wall clock."""
-        if self.streaming_since is None:
+        if self.streaming_since is None or self.streaming_wall <= 0:
             return "  No streams ran."
-        elapsed = max(time.monotonic() - self.streaming_since, 1e-6)
+        # Rates are over the time spent streaming, not handovers between cars.
+        elapsed = self.streaming_wall
         mode = f"Fixed Step at {self.args.step_hz} steps/s" if self.fixed_step else "Wall Clock"
-        header = f"  {mode}."
+        header = (f"  {mode}. While streaming: {self.streaming_sim:.1f} s of sim time in {elapsed:.0f} s of "
+                  f"wall time (real-time factor {self.streaming_sim / elapsed:.2f}).")
         if sim_elapsed is not None:
-            header += (f" {sim_elapsed:.1f} s of sim time in {elapsed:.0f} s of wall time "
-                       f"(real-time factor {sim_elapsed / elapsed:.2f}).")
+            total = time.monotonic() - self.streaming_since
+            header += (f" Overall, handovers included: {sim_elapsed:.1f} s of sim time in {total:.0f} s.")
         received, dropped = Counter(), Counter()
         for label, stats in STATS.items():
             parts = label.split(":")

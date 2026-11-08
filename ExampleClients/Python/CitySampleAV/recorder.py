@@ -11,7 +11,7 @@ Layout (one directory per run):
     <sensor>/index.jsonl           per frame: sequence id, sim time, sensor pose in the world
     <camera>/color/<seq>.png       RGB
     <camera>/label/<seq>.png       8-bit label ids (semantic, or instance with --label-type instance)
-    <camera>/depth/<seq>.npy       float32 meters (with --record-depth)
+    <camera>/depth/<seq>.npy       float32 meters, along the optical axis (--no-record-depth skips)
     <camera>/bbox/<seq>.json       2D boxes (instance mode only)
     <lidar>/<seq>.npz              xyz (sensor frame), distance, intensity, label, ring, azimuth,
                                    elevation; `complete` says whether every segment arrived
@@ -42,7 +42,9 @@ def _pose(transform) -> dict:
 
 
 class Recorder:
-    def __init__(self, root: str, max_backlog: int = 64, workers: int = 4):
+    # 192 frames is a few seconds of every stream at 10 Hz, ~750 MB at worst (depth is 4 MB a frame):
+    # enough to ride out a slow write without dropping, little enough not to matter.
+    def __init__(self, root: str, max_backlog: int = 192, workers: int = 4):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="recorder")
@@ -108,7 +110,7 @@ class Recorder:
         """The (relpath, record) index entry for one frame, for _submit to append once it's written."""
         return (f"{sensor}/index.jsonl", {
             "kind": kind, "seq": header.sequence_id, "time_s": header.capture_time_s,
-            "sensor_pose": _pose(header.capture_transform)})
+            "received_wall_time": time.time(), "sensor_pose": _pose(header.capture_transform)})
 
     # -- setup -----------------------------------------------------------------------------------
 
@@ -172,7 +174,8 @@ class Recorder:
         def tap(scan):   # an AssembledScan (tempo_rerun.loggers.lidar)
             index = (f"{sensor}/index.jsonl", {
                 "kind": "lidar", "seq": scan.sequence_id, "time_s": scan.capture_time_s,
-                "complete": scan.complete, "sensor_pose": _pose(scan.capture_transform)})
+                "received_wall_time": time.time(), "complete": scan.complete,
+                "sensor_pose": _pose(scan.capture_transform)})
             out = self._dir(sensor) / f"{scan.sequence_id:06d}.npz"
             arrays = dict(xyz=scan.xyz, distance=scan.distance, intensity=scan.intensity,
                           label=scan.label, ring=scan.ring, azimuth=scan.azimuth,
@@ -219,7 +222,8 @@ class Recorder:
         total_written = sum(self.written.values())
         total_dropped = sum(self.dropped.values())
         print(f"  Recorded {total_written} file(s) to {self.root}"
-              + (f"; dropped {total_dropped} (disk behind)" if total_dropped else ""))
+              + (f"; dropped {total_dropped} (disk behind, or arrived after the recording stopped)"
+                 if total_dropped else ""))
 
 
 def _write_png(path: Path, array: np.ndarray) -> None:
