@@ -164,6 +164,14 @@ namespace
 
 void FTempoServer::Initialize()
 {
+	// A commandlet (a cook, the reflected API's schema walk) serves no client. A server there would only compete
+	// for the endpoint with whatever else is running - an editor, or another project's sim - and a cook fails on
+	// the error a taken endpoint logs. Left uninitialized, the server is what a failed start leaves: inert.
+	if (IsRunningCommandlet())
+	{
+		return;
+	}
+
 	TArray<UObject*> ServiceProviderObjects;
 	for (TObjectIterator<UObject> ObjectIt(RF_NoFlags); ObjectIt; ++ObjectIt)
 	{
