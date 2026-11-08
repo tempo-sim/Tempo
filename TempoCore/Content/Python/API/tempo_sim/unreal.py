@@ -954,6 +954,14 @@ def _to_value(variant, value):
     """Build a Value carrying `value` in `variant`."""
     message = _value_type()()
 
+    # A message-typed variant is only selected in the oneof once something touches it. An empty
+    # array, set or struct touches nothing, so without this it would travel as a Value with no
+    # variant at all -- "Value has no value set" -- and `actor.Tags = []` could not clear anything.
+    if variant in ("struct_value", "struct_array_value", "native_transform_value") \
+            or variant in _COMPONENT_VARIANTS \
+            or variant.endswith("_array_value") or variant.endswith("_set_value"):
+        getattr(message, variant).SetInParent()
+
     if variant == "struct_value":
         _fill_struct(message.struct_value, value)
         return message
