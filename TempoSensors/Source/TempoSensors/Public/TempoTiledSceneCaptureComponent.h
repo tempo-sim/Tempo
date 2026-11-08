@@ -47,6 +47,9 @@ public:
 	virtual bool HasPendingMeasurementRequests() const override { return HasPendingRequests(); }
 	virtual bool HasPendingCapture() const override { return bNeedsCapture; }
 	virtual void ExecutePendingCapture() override;
+
+	// The views a capture renders (one scene view per active tile); the render thread's work per capture grows with it.
+	int32 GetNumCaptureViews() const { return GetNumActiveTiles(); }
 	// End ITempoSensorInterface
 
 protected:

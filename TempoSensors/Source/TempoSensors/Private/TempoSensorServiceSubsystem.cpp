@@ -15,6 +15,7 @@
 #include "TempoWorldSettings.h"
 #include "TempoServer.h"
 
+#include "Algo/StableSort.h"
 #include "Components/SceneCaptureComponent.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/LocalPlayer.h"
@@ -142,10 +143,37 @@ void UTempoSensorServiceSubsystem::OnWorldTickEnd(UWorld* World, ELevelTick Tick
 		}
 	}
 
-	ForEachActiveSensor([](ITempoSensorInterface* Sensor)
+	TArray<ITempoSensorInterface*> Sensors;
+	ForEachActiveSensor([&Sensors](ITempoSensorInterface* Sensor)
+	{
+		Sensors.Add(Sensor);
+	});
+
+	// The captures render one after another on the GPU, which starts on a capture only once the render thread has
+	// recorded all of it. Record the cameras with the fewest views first: the GPU starts sooner and stays fed while
+	// the larger ones are recorded, so the frame's last camera completes earlier. Other sensors keep their places.
+	{
+		TArray<int32> CameraSlots;
+		TArray<UTempoCamera*> Cameras;
+		for (int32 Index = 0; Index < Sensors.Num(); ++Index)
+		{
+			if (UTempoCamera* Camera = Cast<UTempoCamera>(Sensors[Index]->_getUObject()))
+			{
+				CameraSlots.Add(Index);
+				Cameras.Add(Camera);
+			}
+		}
+		Algo::StableSortBy(Cameras, [](const UTempoCamera* Camera) { return Camera->GetNumCaptureViews(); });
+		for (int32 Slot = 0; Slot < CameraSlots.Num(); ++Slot)
+		{
+			Sensors[CameraSlots[Slot]] = Cameras[Slot];
+		}
+	}
+
+	for (ITempoSensorInterface* Sensor : Sensors)
 	{
 		Sensor->ExecutePendingCapture();
-	});
+	}
 
 	// When the main viewport renders, the engine drains SceneCapturesToUpdateMap itself as part of
 	// the main render path, and it does so with a valid MainViewFamily that our components can
