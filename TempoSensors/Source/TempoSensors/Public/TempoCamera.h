@@ -18,6 +18,7 @@
 #include "TempoCamera.generated.h"
 
 class FTempoMotionVectorRewarpViewExtension;
+class FTempoCustomDepthSkipViewExtension;
 struct FLensModel;
 struct FDistortionRenderConfig;
 
@@ -114,9 +115,10 @@ struct TTextureRead<FCameraPixelWithDepth> : TTextureReadBase<FCameraPixelWithDe
 {
 	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
 	   const FString& SensorNameIn, const FTransform& SensorTransformIn, float MinDepthIn, float MaxDepthIn,
-	   TMap<uint8, uint8>&& InstanceToSemanticMapIn)
+	   TMap<uint8, uint8>&& InstanceToSemanticMapIn, bool bLabelsRenderedIn = true)
 	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
-	   MinDepth(MinDepthIn), MaxDepth(MaxDepthIn), InstanceToSemanticMap(MoveTemp(InstanceToSemanticMapIn))
+	   MinDepth(MinDepthIn), MaxDepth(MaxDepthIn), InstanceToSemanticMap(MoveTemp(InstanceToSemanticMapIn)),
+	   bLabelsRendered(bLabelsRenderedIn)
 	{
 	}
 
@@ -132,15 +134,19 @@ struct TTextureRead<FCameraPixelWithDepth> : TTextureReadBase<FCameraPixelWithDe
 	float MinDepth;
 	float MaxDepth;
 	TMap<uint8, uint8> InstanceToSemanticMap;
+	// Whether the capture rendered its custom depth pass. Without it the label channel is zero,
+	// so label and bounding box requests stay pending for the next read that has it.
+	bool bLabelsRendered;
 };
 
 template <>
 struct TTextureRead<FCameraPixelNoDepth> : TTextureReadBase<FCameraPixelNoDepth>
 {
 	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
-	   const FString& SensorNameIn, const FTransform& SensorTransformIn, TMap<uint8, uint8>&& InstanceToSemanticMapIn)
+	   const FString& SensorNameIn, const FTransform& SensorTransformIn, TMap<uint8, uint8>&& InstanceToSemanticMapIn,
+	   bool bLabelsRenderedIn = true)
 	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
-	   InstanceToSemanticMap(MoveTemp(InstanceToSemanticMapIn))
+	   InstanceToSemanticMap(MoveTemp(InstanceToSemanticMapIn)), bLabelsRendered(bLabelsRenderedIn)
 	{
 	}
 
@@ -155,6 +161,7 @@ struct TTextureRead<FCameraPixelNoDepth> : TTextureReadBase<FCameraPixelNoDepth>
 		float TransmissionTime) const;
 
 	TMap<uint8, uint8> InstanceToSemanticMap;
+	bool bLabelsRendered;
 };
 
 struct TEMPOSENSORS_API FTempoCameraIntrinsics
@@ -480,6 +487,13 @@ protected:
 	uint64 LastFrameWithoutDepth = MAX_uint64;
 	static constexpr int32 DepthOffDebounceFrames = 30;
 
+	// The engine frame of the last label or bounding box request. A capture renders the custom
+	// depth pass the label channel is packed from only while one is pending or arrived within
+	// LabelOffDebounceFrames, the same allowance as depth for a streaming client's gap between a
+	// response and its next request.
+	uint64 LastLabelRequestFrame = 0;
+	static constexpr int32 LabelOffDebounceFrames = 30;
+
 	// The minimum depth this camera can measure (if depth is enabled). Will be set to the global near clip plane.
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Tempo")
 	float MinDepth = 10.0;
@@ -679,6 +693,13 @@ protected:
 
 	// Returns the extension, creating it if the world has a scene; nullptr otherwise.
 	FTempoMotionVectorRewarpViewExtension* GetOrCreateMotionVectorRewarpExtension();
+
+	// Custom depth skip extension, created by the first capture that needs it and released in
+	// OnUnregister. Gathered only into this camera's families, and only while active.
+	TSharedPtr<FTempoCustomDepthSkipViewExtension, ESPMode::ThreadSafe> CustomDepthSkipExtension;
+
+	// Returns the extension, creating it if the world has a scene; nullptr otherwise.
+	FTempoCustomDepthSkipViewExtension* GetOrCreateCustomDepthSkipExtension();
 
 	// Retention list for distortion textures that have been replaced but may still be referenced
 	// by in-flight render commands.
