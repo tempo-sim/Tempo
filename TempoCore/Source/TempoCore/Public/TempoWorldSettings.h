@@ -96,6 +96,10 @@ protected:
 
 	void SetMainViewportRenderEnabled(bool bEnabled) const;
 
+	// Whether this is the persistent level's world settings, the one that speaks for the world. A level
+	// streamed in has world settings of its own, of this class too.
+	bool IsWorldsOwnSettings() const;
+
 	void TempoCoreRenderSettingsChanged() const;
 
 	UPROPERTY(EditAnywhere, Category="Lighting", DisplayName = "Default Exposure Compensation", meta = (UIMin = "-15.0", UIMax = "15.0", EditCondition = "bManualDefaultAutoExposureBias"))

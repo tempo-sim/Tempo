@@ -36,11 +36,61 @@ namespace
 	// These values result in relatively consistent perceived brightness across a huge range of scene intensity.
 	constexpr float ExposureBiasToBrightnessScale = 3.93342962372f;
 	constexpr float ExposureBiasToBrightnessOffset = -34.1331407526f;
+
+	// How many frames the game viewport keeps drawing (clearing to black, with world rendering off) after
+	// main viewport rendering is disabled, before its draw is skipped altogether. Slate loads the window's
+	// back buffer rather than clearing it, so once the viewport stops drawing, nothing writes those pixels
+	// again and the window keeps presenting whatever its swapchain buffers last held -- the last few
+	// frames, cycling. Clearing every buffer first (a swapchain has at most three, plus the frames the
+	// render thread and RHI have in flight) leaves the window black instead.
+	constexpr int32 ViewportClearFramesBeforeSkip = 8;
+	int32 ViewportClearFramesLeft = 0;
+	FDelegateHandle ViewportClearEndFrameHandle;
+
+	void CancelDeferredGameRenderingDisable()
+	{
+		if (ViewportClearEndFrameHandle.IsValid())
+		{
+			FCoreDelegates::OnEndFrame.Remove(ViewportClearEndFrameHandle);
+			ViewportClearEndFrameHandle.Reset();
+		}
+		ViewportClearFramesLeft = 0;
+	}
+
+	void DisableGameRenderingAfterClearFrames()
+	{
+		CancelDeferredGameRenderingDisable();
+		ViewportClearFramesLeft = ViewportClearFramesBeforeSkip;
+		ViewportClearEndFrameHandle = FCoreDelegates::OnEndFrame.AddLambda([]()
+		{
+			if (--ViewportClearFramesLeft <= 0)
+			{
+				CancelDeferredGameRenderingDisable();
+				FViewport::SetGameRenderingEnabled(false);
+			}
+		});
+	}
+}
+
+bool ATempoWorldSettings::IsWorldsOwnSettings() const
+{
+	const UWorld* World = GetWorld();
+	return World && World->GetWorldSettings(/*bCheckStreamingPersistent*/ false, /*bChecked*/ false) == this;
 }
 
 void ATempoWorldSettings::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// Every level has a world settings actor, and with WorldSettingsClassName naming this class, the levels
+	// World Partition streams in have one of these too, and play begins and ends for each as its level
+	// loads and unloads. Only the persistent level's speaks for the world. Another, ending play, turned
+	// main viewport rendering back on (and the next one beginning play turned it straight off again), so a
+	// client that had turned it off saw the window flicker between stale frames as the city streamed.
+	if (!IsWorldsOwnSettings())
+	{
+		return;
+	}
 
 	SettingsChangedHandle = GetMutableDefault<UTempoCoreSettings>()->TempoCoreTimeSettingsChangedEvent.AddUObject(this, &ATempoWorldSettings::OnTimeSettingsChanged);
 	LastTimeMode = GetDefault<UTempoCoreSettings>()->GetTimeMode();
@@ -73,6 +123,12 @@ void ATempoWorldSettings::BeginPlay()
 void ATempoWorldSettings::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	Super::EndPlay(EndPlayReason);
+
+	// A streamed level's world settings set nothing up in BeginPlay, so have nothing to undo.
+	if (!IsWorldsOwnSettings())
+	{
+		return;
+	}
 
 	FCoreDelegates::OnBeginFrame.Remove(BeginFrameHandle);
 	StepsIntoGameFrame = 0;
@@ -798,8 +854,19 @@ void ATempoWorldSettings::SetMainViewportRenderEnabled(bool bEnabled) const
 	}
 
 	// Skips the game thread's viewport draw (per-player view setup, canvas, and present) before it ever
-	// reaches the checks above. Static, but non-game (editor) viewports draw regardless of it.
-	FViewport::SetGameRenderingEnabled(bEnabled);
+	// reaches the checks above. Static, but non-game (editor) viewports draw regardless of it. Disabling
+	// waits a few frames, in which the viewport draws with world rendering off and so clears to black;
+	// skipping its draw straight away leaves the window showing stale frames instead (see
+	// ViewportClearFramesBeforeSkip).
+	if (bEnabled)
+	{
+		CancelDeferredGameRenderingDisable();
+		FViewport::SetGameRenderingEnabled(true);
+	}
+	else if (FViewport::IsGameRenderingEnabled())
+	{
+		DisableGameRenderingAfterClearFrames();
+	}
 }
 
 float ATempoWorldSettings::GetDefaultAutoExposureBias()
