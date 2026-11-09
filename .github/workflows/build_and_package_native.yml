@@ -1,0 +1,437 @@
+# ======
+# Reusable workflow: build, package and test a Tempo Unreal project NATIVELY on a dedicated, persistent
+# self-hosted machine (Mac, Linux or Windows) - no Docker, the engine installed on the machine.
+#
+# It is the counterpart of build_and_package.yml (Epic's Docker image on GitHub-hosted runners), shaped for
+# the opposite constraints: one long-lived machine, plenty of disk, no artifact round trips.
+# - Build cache: each machine keeps, per (repo, engine version), a "golden" tree that only cache_branch
+#   (main) builds update, and every job builds in a FIXED path that starts as a copy-on-write clone of it
+#   (APFS clonefile on Mac, reflinks on XFS/btrfs on Linux; a plain copy elsewhere). The path is fixed
+#   because UBT makefiles and PCHs hold absolute paths. A PR therefore builds incrementally against main's
+#   last build, and nothing a PR builds - or breaks - is seen by the next job.
+# - Engine changes: the engine (and on Mac, the Xcode) a tree was built with is stamped into it. A tree
+#   whose stamp differs from the current toolchain is cleaned first, the counterpart of the Docker
+#   workflow's engine-image digest in its cache key.
+# - Tests run in this job against the package it just built: no upload, no download, no fan-out.
+#
+# Machine contract. Everything machine-specific lives on the machine, not here. The runner's environment
+# must set TEMPO_CI_MACHINE_ENV to a shell file (sourced with bash) defining:
+#   TEMPO_CI_ROOT                       Directory for the build trees (fast local disk; CoW-capable FS).
+#   TEMPO_CI_UE_<maj>_<min>_ENGINE      Engine install per supported version, e.g. TEMPO_CI_UE_5_7_ENGINE.
+#   TEMPO_CI_UE_<maj>_<min>_DEVELOPER_DIR  (Mac) The Xcode for that engine, e.g. .../Xcode-26.6.0.app/Contents/Developer.
+#   TEMPO_CI_MIN_FREE_GB                Optional (default 100). Below this the job fails as machine trouble.
+# and its PATH must provide git, python3, and uv (which installs the tests' Python, see python_version).
+#
+# One runner per engine version per machine, labelled tempo-ue-<maj>.<min> (the job adds that label to
+# `runner`): the fixed build path is not locked, so two jobs must never build the same engine on one
+# machine at once, while different engines run in parallel. Each engine's tests get their own port and
+# socket (TEMPO_SERVER_PORT, TEMPO_CI_SOCKET) for the same reason.
+#
+# Security: this job runs the code under test on a machine that outlives the job, and it is given NO
+# secrets. Callers must not pass any (no `secrets: inherit`), and should gate fork PRs behind a protected
+# environment (the `environment` input), exactly as for build_and_package.yml. Alerting a human about the
+# machine belongs in a separate job of the caller that runs no PR code - see the `machine_trouble` output.
+# ======
+
+name: Build, Package and Test a Tempo Project Natively
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        type: string
+        description: JSON array of runner labels to run on, e.g. '["self-hosted","tempo-ci","macOS"]'. The job adds tempo-ue-<unreal_version>.
+        required: true
+      unreal_version:
+        type: string
+        description: Which Unreal version to build for (5.7 and 5.8 are supported). Resolved to an engine install through the machine contract above.
+        default: '5.8'
+      project_root:
+        type: string
+        description: Path, relative to the build root, of the project (the host project when testing a plugin).
+        default: ${{ github.event.repository.name }}
+      tempo_root:
+        type: string
+        description: Path, relative to the build root, of the Tempo folder.
+        default: ${{ github.event.repository.name }}/Plugins/Tempo
+      host_project:
+        type: string
+        description: A "host" project repo to check out (at main) when the repo under test is a plugin. Empty when the repo under test is the project itself.
+        default: ''
+      checkout_path:
+        type: string
+        description: Path, relative to the build root, at which the repo under test sits (inside the host project for a plugin).
+        default: ${{ github.event.repository.name }}
+      cache_branch:
+        type: string
+        description: Branch whose builds update the machine's golden tree. Only these builds ever write it.
+        default: main
+      clean:
+        type: boolean
+        description: Start from an empty tree instead of the golden one, and clean before building.
+        default: false
+      allow_unsafe_pr_checkout:
+        type: boolean
+        description: >-
+          Check out a pull request's head commit instead of github.sha on pull_request_target runs. That runs
+          the PR's code on this persistent machine; gate fork PRs behind a protected environment (the
+          environment input) if you set it. Same meaning as in build_and_package.yml.
+        default: false
+      environment:
+        type: string
+        description: Deployment environment to gate the job behind (e.g. a manual-approval environment for fork PRs). Empty = no gate.
+        default: ''
+      automation_test_filter:
+        type: string
+        description: If non-empty, run the Unreal automation tests matching this filter after building (e.g. "Tempo.").
+        default: ''
+      maps:
+        type: string
+        description: Which maps to include in the package (syntax "map1+map2+map3"). Empty packages all maps.
+        default: ''
+      gen_rust_api:
+        type: boolean
+        description: Generate the Rust API during the build (TEMPO_GEN_RUST_API=1). Needs cargo on the machine.
+        default: false
+      gen_cpp_api:
+        type: boolean
+        description: Generate the C++ API during the build (TEMPO_GEN_CPP_API=1). Needs cmake on the machine.
+        default: false
+      require_reflected_api:
+        type: boolean
+        description: Fail the Package step if the reflected API cannot be generated (TEMPO_REQUIRE_REFLECTED_API=1).
+        default: true
+      test_commands:
+        type: string
+        description: >-
+          Tests to run against the package, one per line as "<name>: <command>", run from the repo under test
+          with the env contract of test_packaged.yml (TEMPO_PACKAGED_DIR, TEMPO_TEST_REPORT_DIR, ...). Every
+          line runs even if an earlier one fails; the step fails if any did. A line may set TEMPO_SERVER_SOCKET
+          itself, e.g. "python-core-socket: TEMPO_SERVER_SOCKET=$TEMPO_CI_SOCKET Scripts/TestPythonAPI.sh core".
+        default: ''
+      python_version:
+        type: string
+        description: Python for the tests, installed with the machine's uv (as test_packaged.yml sets one up). Empty uses the machine's python3.
+        default: '3.11'
+    outputs:
+      machine_trouble:
+        description: '"true" when the job failed because the machine needs attention (not because of the code). Callers alert on it from a job that runs no PR code.'
+        value: ${{ jobs.build.outputs.machine_trouble }}
+      machine_trouble_reason:
+        description: Why, when machine_trouble is "true".
+        value: ${{ jobs.build.outputs.machine_trouble_reason }}
+
+jobs:
+  build:
+    name: Build, Package and Test (${{ inputs.unreal_version }})
+    # Plus the engine's own label: a machine runs one runner per engine version, so jobs for different
+    # engines run side by side and two jobs never share a (fixed, unlocked) build tree.
+    runs-on: ${{ fromJSON(format('["{0}","tempo-ue-{1}"]', join(fromJSON(inputs.runner), '","'), inputs.unreal_version)) }}
+    environment: ${{ inputs.environment != '' && inputs.environment || null }}
+    timeout-minutes: 300
+    # A new push to a PR supersedes the run in progress: the machine runs one job at a time, so a stale
+    # run would delay the current one. Runs on cache_branch are never cancelled - they update the golden tree.
+    concurrency:
+      group: native-${{ github.repository }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.runner }}-${{ inputs.unreal_version }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request_target' || github.event_name == 'pull_request' }}
+    permissions:
+      contents: read
+    outputs:
+      machine_trouble: ${{ steps.machine.outputs.trouble }}
+      machine_trouble_reason: ${{ steps.machine.outputs.reason }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      UNREAL_VERSION: ${{ inputs.unreal_version }}
+    steps:
+    - name: Validate Inputs
+      run: |
+        case "$UNREAL_VERSION" in
+          "5.7"|"5.8") ;;
+          *) echo "::error::Invalid Unreal version '$UNREAL_VERSION'. Only 5.7 and 5.8 are supported."; exit 1 ;;
+        esac
+
+    # Machine health first, so a broken machine reads as one ("machine needs attention") rather than as a
+    # broken build. Every check here is about the machine; none is about the code.
+    - name: Check Machine
+      id: machine
+      env:
+        NEED_PYTHON: ${{ inputs.test_commands != '' && inputs.python_version || '' }}
+      run: |
+        trouble() {
+          echo "trouble=true" >> "$GITHUB_OUTPUT"
+          echo "reason=$1" >> "$GITHUB_OUTPUT"
+          echo "::error title=Machine needs attention (${RUNNER_NAME})::$1"
+          exit 1
+        }
+        [ -n "$TEMPO_CI_MACHINE_ENV" ] && [ -f "$TEMPO_CI_MACHINE_ENV" ] \
+          || trouble "TEMPO_CI_MACHINE_ENV is unset or missing on this runner (see the machine contract in build_and_package_native.yml)."
+        # shellcheck source=/dev/null
+        . "$TEMPO_CI_MACHINE_ENV"
+        VER_KEY="${UNREAL_VERSION//./_}"
+        ENGINE_VAR="TEMPO_CI_UE_${VER_KEY}_ENGINE"; ENGINE="${!ENGINE_VAR}"
+        [ -n "$TEMPO_CI_ROOT" ] || trouble "TEMPO_CI_ROOT is not set in $TEMPO_CI_MACHINE_ENV."
+        [ -n "$ENGINE" ] || trouble "$ENGINE_VAR is not set in $TEMPO_CI_MACHINE_ENV."
+        [ -f "$ENGINE/Engine/Build/Build.version" ] || trouble "No Unreal $UNREAL_VERSION at $ENGINE (Build.version missing)."
+        mkdir -p "$TEMPO_CI_ROOT" || trouble "Cannot create TEMPO_CI_ROOT $TEMPO_CI_ROOT."
+        FREE_GB=$(df -Pk "$TEMPO_CI_ROOT" | awk 'NR==2 {print int($4/1048576)}')
+        [ "$FREE_GB" -ge "${TEMPO_CI_MIN_FREE_GB:-100}" ] || trouble "Only ${FREE_GB}GB free under $TEMPO_CI_ROOT (minimum ${TEMPO_CI_MIN_FREE_GB:-100}GB)."
+        if [ -n "$NEED_PYTHON" ]; then
+          command -v uv >/dev/null || trouble "uv is not on the runner's PATH (it provides Python $NEED_PYTHON for the tests)."
+        fi
+        CHANGELIST=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["Changelist"])' "$ENGINE/Engine/Build/Build.version")
+        STAMP="engine=$ENGINE changelist=$CHANGELIST"
+
+        if [ "$RUNNER_OS" = "macOS" ]; then
+          DEV_VAR="TEMPO_CI_UE_${VER_KEY}_DEVELOPER_DIR"; DEVELOPER_DIR="${!DEV_VAR}"
+          [ -n "$DEVELOPER_DIR" ] || trouble "$DEV_VAR is not set in $TEMPO_CI_MACHINE_ENV."
+          [ -d "$DEVELOPER_DIR" ] || trouble "Xcode for Unreal $UNREAL_VERSION is missing: $DEVELOPER_DIR."
+          export DEVELOPER_DIR
+          XCODE_VERSION=$(xcodebuild -version | awk 'NR==1 {print $2}') || trouble "xcodebuild fails under $DEVELOPER_DIR (license not accepted, or first launch not run?)."
+          # The engine's supported Xcode range. Out of range, UBT's own check fails later, less clearly.
+          python3 - "$ENGINE/Engine/Config/Apple/Apple_SDK.json" "$XCODE_VERSION" <<'EOF' || trouble "Xcode $XCODE_VERSION at $DEVELOPER_DIR is outside the range Unreal $UNREAL_VERSION supports."
+        import json, sys
+        def v(s): return tuple(int(p) for p in s.split("."))
+        sdk = json.load(open(sys.argv[1])); x = v(sys.argv[2])
+        lo, hi = v(sdk["MinVersion"]), v(sdk["MaxVersion"])
+        print(f"Xcode {sys.argv[2]}, engine supports {sdk['MinVersion']}..{sdk['MaxVersion']}")
+        sys.exit(0 if lo <= x + (0,) * (len(lo) - len(x)) <= hi else 1)
+        EOF
+          # Xcode 26+ ships the Metal toolchain separately; without it the cook fails at shader archiving.
+          xcrun -find metal-pack > /dev/null 2>&1 || trouble "The Metal toolchain is not installed for $DEVELOPER_DIR (xcodebuild -downloadComponent MetalToolchain)."
+          # Name the SDK of THIS Xcode. With DEVELOPER_DIR alone, xcrun's default SDK can be the Command
+          # Line Tools' (newer) one, which an older Xcode's linker cannot read - CMake configures fail.
+          SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
+          echo "SDKROOT=$SDKROOT" >> "$GITHUB_ENV"
+          STAMP="$STAMP xcode=$(xcodebuild -version | tr '\n' ' ')"
+        fi
+
+        # Build root per (repo, engine version). The repo is part of it so two repos' trees never meet.
+        ROOT="$TEMPO_CI_ROOT/${GITHUB_REPOSITORY//\//_}/$UNREAL_VERSION"
+        {
+          echo "UNREAL_ENGINE_PATH=$ENGINE"
+          echo "CI_TREE_ROOT=$ROOT"
+          echo "CI_BUILD=$ROOT/build"
+          echo "CI_GOLDEN=$ROOT/golden"
+          echo "CI_STAMP=$STAMP"
+        } >> "$GITHUB_ENV"
+        echo "trouble=false" >> "$GITHUB_OUTPUT"
+        echo "Machine OK: $STAMP; ${FREE_GB}GB free"
+
+    - name: Prepare Build Tree
+      env:
+        CLEAN: ${{ inputs.clean }}
+      run: |
+        # Copy-on-write where the filesystem allows it: instant, and no extra disk until files change.
+        clone_tree() {
+          case "$RUNNER_OS" in
+            macOS) cp -cR "$1" "$2" ;;
+            Linux) cp -a --reflink=auto "$1" "$2" ;;
+            *)     cp -a "$1" "$2" ;;
+          esac
+        }
+        : "${CI_TREE_ROOT:?}" "${CI_BUILD:?}" "${CI_GOLDEN:?}"   # never rm -rf an empty path
+        mkdir -p "$CI_TREE_ROOT"
+        rm -rf "$CI_BUILD"
+        if [ "$CLEAN" != "true" ] && [ -d "$CI_GOLDEN" ]; then
+          echo "Starting from the golden tree ($(cat "$CI_GOLDEN/.tempo-ci-stamp" 2>/dev/null || echo 'no stamp'))."
+          clone_tree "$CI_GOLDEN" "$CI_BUILD"
+        else
+          echo "Starting from an empty tree."
+          mkdir -p "$CI_BUILD"
+        fi
+
+    - name: Determine Checkout Ref
+      id: checkout_ref
+      run: |
+        if [ "${{ github.event_name }}" = "pull_request_target" ] && [ "${{ inputs.allow_unsafe_pr_checkout }}" != "true" ]; then
+          echo "REF=${{ github.sha }}" >> $GITHUB_OUTPUT
+          if [ -n "${{ github.event.pull_request.head.sha }}" ]; then
+            echo "::warning title=Unsafe PR checkout skipped::allow_unsafe_pr_checkout is false on this pull_request_target run, so the PR head commit was not checked out. Building ${{ github.sha }} (the base branch) instead."
+          fi
+        else
+          echo "REF=${{ github.event.pull_request.head.sha || github.sha }}" >> $GITHUB_OUTPUT
+        fi
+
+    # Not actions/checkout: it can only check out under the workspace, and checking out the host project
+    # with recursive submodules would first move the plugin under test to the host's pinned commit,
+    # rewriting the timestamps of every file that differs and so rebuilding it on every run. Here git
+    # touches only what differs between the cached tree and the commit under test.
+    - name: Check Out
+      env:
+        REF: ${{ steps.checkout_ref.outputs.REF }}
+        REPO: ${{ github.repository }}
+        HOST_PROJECT: ${{ inputs.host_project }}
+        PROJECT_ROOT: ${{ inputs.project_root }}
+        CHECKOUT_PATH: ${{ inputs.checkout_path }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        export GIT_TERMINAL_PROMPT=0   # a failed fetch must fail, never wait at a credential prompt
+        # The token goes on each command line, never into a git config the code under test could read.
+        AUTH=(-c credential.helper=)
+        if [ -n "${GH_TOKEN:-}" ]; then
+          AUTH+=(-c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')")
+        fi
+
+        # sync <dir> <repo> <ref> [<submodule path to leave alone>]
+        sync() {
+          local dir="$1" repo="$2" ref="$3" skip="${4:-}"
+          mkdir -p "$dir"; cd "$dir"
+          [ -e .git ] || git init -q
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "https://github.com/$repo.git"
+          git "${AUTH[@]}" fetch -q --no-tags origin "$ref"
+          git checkout -q --force FETCH_HEAD
+          git clean -ffdq   # untracked, NOT ignored: build outputs survive
+          # A repo without submodules has no .gitmodules, and git config exits 1 for it.
+          { git config -f .gitmodules --get-regexp '\.path$' 2>/dev/null || true; } | awk '{print $2}' | while read -r sub; do
+            [ "$sub" = "$skip" ] && continue
+            git "${AUTH[@]}" submodule update -q --init --recursive --force -- "$sub"
+          done
+          cd - > /dev/null
+        }
+
+        if [ -n "$HOST_PROJECT" ]; then
+          # The repo under test is a submodule of the host project. Sync the host and its OTHER
+          # submodules, then the repo under test at the commit under test, as a plain repo of its own.
+          SUB="${CHECKOUT_PATH#"$PROJECT_ROOT"/}"
+          sync "$CI_BUILD/$PROJECT_ROOT" "$HOST_PROJECT" main "$SUB"
+          # A submodule's .git is a file pointing into the host's .git/modules; keep that link if it is
+          # there, so the host sees the plugin as its submodule at whatever commit we put it at.
+          sync "$CI_BUILD/$CHECKOUT_PATH" "$REPO" "$REF"
+        else
+          sync "$CI_BUILD/$CHECKOUT_PATH" "$REPO" "$REF"
+        fi
+        echo "Repo under test at $(git -C "$CI_BUILD/$CHECKOUT_PATH" log --oneline -1)"
+
+    - name: Reconcile Toolchain Stamp
+      env:
+        CLEAN: ${{ inputs.clean }}
+        TEMPO_ROOT: ${{ inputs.tempo_root }}
+      run: |
+        STAMP_FILE="$CI_BUILD/.tempo-ci-stamp"
+        if [ "$CLEAN" = "true" ]; then
+          echo "Clean requested."
+          "$CI_BUILD/$TEMPO_ROOT/Scripts/Clean.sh"
+        elif [ -f "$STAMP_FILE" ] && [ "$(cat "$STAMP_FILE")" != "$CI_STAMP" ]; then
+          echo "::notice title=Toolchain changed::Cleaning: this tree was built with '$(cat "$STAMP_FILE")', the machine now has '$CI_STAMP'."
+          "$CI_BUILD/$TEMPO_ROOT/Scripts/Clean.sh"
+        fi
+        echo "$CI_STAMP" > "$STAMP_FILE"
+
+    - name: Set Up Project
+      env:
+        TEMPO_ROOT: ${{ inputs.tempo_root }}
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        # Retried: SyncDeps downloads from GitHub, which blips.
+        for attempt in 1 2 3; do
+          "$CI_BUILD/$TEMPO_ROOT/Scripts/Setup.sh" -skip-hooks -force && exit 0
+          echo "Setup attempt $attempt failed; retrying."; sleep $((attempt * 20))
+        done
+        exit 1
+
+    - name: Build
+      env:
+        TEMPO_ROOT: ${{ inputs.tempo_root }}
+        TEMPO_GEN_RUST_API: ${{ inputs.gen_rust_api && '1' || '0' }}
+        TEMPO_GEN_CPP_API: ${{ inputs.gen_cpp_api && '1' || '0' }}
+      run: |
+        "$CI_BUILD/$TEMPO_ROOT/Scripts/Build.sh"
+
+    - name: Run Automation Tests
+      if: ${{ inputs.automation_test_filter != '' }}
+      env:
+        TEMPO_ROOT: ${{ inputs.tempo_root }}
+        TEMPO_SKIP_PREBUILD: '1'
+      run: |
+        "$CI_BUILD/$TEMPO_ROOT/Scripts/Test.sh" "${{ inputs.automation_test_filter }}"
+
+    - name: Package
+      id: package
+      env:
+        TEMPO_ROOT: ${{ inputs.tempo_root }}
+        MAPS: ${{ inputs.maps }}
+        TEMPO_GEN_RUST_API: ${{ inputs.gen_rust_api && '1' || '0' }}
+        TEMPO_GEN_CPP_API: ${{ inputs.gen_cpp_api && '1' || '0' }}
+        TEMPO_REQUIRE_REFLECTED_API: ${{ inputs.require_reflected_api && '1' || '0' }}
+        TEMPO_SKIP_PREBUILD: '1'
+      run: |
+        if [ -n "$MAPS" ]; then MAP_ARG="-maps=$MAPS"; else MAP_ARG="-allmaps"; fi
+        "$CI_BUILD/$TEMPO_ROOT/Scripts/Package.sh" "$MAP_ARG" -skipiostore
+
+    # uv, not actions/setup-python: setup-python's macOS builds are .pkg installers that need sudo, and
+    # its Linux ones a writable /opt/hostedtoolcache. uv's Pythons are relocatable and install per user.
+    - name: Set up Python
+      if: ${{ inputs.test_commands != '' && inputs.python_version != '' && steps.package.outcome == 'success' }}
+      env:
+        PYTHON_VERSION: ${{ inputs.python_version }}
+      run: |
+        uv python install "$PYTHON_VERSION"
+        PY=$(uv python find "$PYTHON_VERSION")
+        "$PY" -c 'import os, sys; print(os.path.dirname(sys.executable))' >> "$GITHUB_PATH"
+        "$PY" --version
+
+    - name: Test Package
+      if: ${{ inputs.test_commands != '' && steps.package.outcome == 'success' }}
+      env:
+        TEST_COMMANDS: ${{ inputs.test_commands }}
+        PROJECT_ROOT: ${{ inputs.project_root }}
+        CHECKOUT_PATH: ${{ inputs.checkout_path }}
+      run: |
+        export TEMPO_PACKAGED_DIR="$CI_BUILD/$PROJECT_ROOT/Packaged"
+        # Per engine, as the engines' jobs run side by side: 10057 for 5.7, 10058 for 5.8. TEMPO_CI_SOCKET is
+        # for a command that tests the socket transport (a bare name would resolve into a per-user directory
+        # the two jobs share).
+        export TEMPO_SERVER_PORT=$((10000 + ${UNREAL_VERSION//./})) TEMPO_CI_SOCKET="/tmp/tempo-ci-$UNREAL_VERSION.sock"
+        export TEMPO_SIM_STARTUP_TIMEOUT_S=300 TEMPO_SIM_RENDER=0
+        REPORTS="$RUNNER_TEMP/test-reports"; rm -rf "$REPORTS"; mkdir -p "$REPORTS"
+        cd "$CI_BUILD/$CHECKOUT_PATH"
+        echo "| Group | Result | Time |" >> "$GITHUB_STEP_SUMMARY"
+        echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
+        FAILED=()
+        while IFS= read -r line; do
+          [ -z "${line// /}" ] && continue
+          NAME="${line%%:*}"; CMD="${line#*:}"
+          START=$(date +%s)
+          echo "::group::$NAME"
+          if TEMPO_TEST_REPORT_DIR="$REPORTS/$NAME" bash -c "$CMD"; then RESULT=pass; else RESULT=FAIL; FAILED+=("$NAME"); fi
+          echo "::endgroup::"
+          echo "| $NAME | $RESULT | $(( $(date +%s) - START ))s |" >> "$GITHUB_STEP_SUMMARY"
+        done <<< "$TEST_COMMANDS"
+        if [ ${#FAILED[@]} -gt 0 ]; then
+          echo "::error::Failed test groups: ${FAILED[*]}"
+          exit 1
+        fi
+
+    - name: Upload Test Reports
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ format('native-test-reports-{0}-{1}', runner.os, inputs.unreal_version) }}
+        path: |
+          ${{ runner.temp }}/test-reports
+          ${{ env.CI_BUILD }}/${{ inputs.project_root }}/Saved/TempoTestReport
+        if-no-files-found: warn
+
+    # Only cache_branch builds that got all the way through packaging update the golden tree, so it
+    # always holds a complete, known-good build of main. Built into a sibling and swapped in, so a
+    # cancelled job never leaves half a golden tree.
+    - name: Update Golden Tree
+      if: ${{ github.event_name != 'pull_request_target' && github.ref == format('refs/heads/{0}', inputs.cache_branch) && steps.package.outcome == 'success' }}
+      run: |
+        case "$RUNNER_OS" in
+          macOS) CLONE=(cp -cR) ;;
+          Linux) CLONE=(cp -a --reflink=auto) ;;
+          *)     CLONE=(cp -a) ;;
+        esac
+        : "${CI_BUILD:?}" "${CI_GOLDEN:?}"   # never rm -rf an empty path
+        rm -rf "$CI_GOLDEN.new" "$CI_GOLDEN.old"
+        "${CLONE[@]}" "$CI_BUILD" "$CI_GOLDEN.new"
+        [ -d "$CI_GOLDEN" ] && mv "$CI_GOLDEN" "$CI_GOLDEN.old"
+        mv "$CI_GOLDEN.new" "$CI_GOLDEN"
+        rm -rf "$CI_GOLDEN.old"
+        echo "Golden tree updated to ${{ github.sha }} ($CI_STAMP)."

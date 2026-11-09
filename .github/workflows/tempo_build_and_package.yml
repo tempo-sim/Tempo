@@ -55,6 +55,50 @@ jobs:
   # NOTE: the "sensors" group is intentionally NOT here — sensor-data APIs need a GPU. To enable it,
   # add "sensors" to the matrix below AND give it a GPU runner + render:true (e.g. via matrix
   # `include`), since this matrix's jobs run on the GPU-less default runner.
+  # Native builds on Tempo's dedicated self-hosted machines (runner group "tempo-ci"): build, package and
+  # every test group in ONE job per (machine, engine version), incrementally from the machine's cached
+  # build of main. See build_and_package_native.yml. No secrets: the job runs PR code on a persistent
+  # machine, and fork PRs wait for approval in fork-pr-environment like every other job here.
+  build_and_test_native:
+    name: Native
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build_and_package_native.yml
+    strategy:
+      fail-fast: false
+      matrix:
+        machine:
+          - { name: macos, runner: '["self-hosted","tempo-ci","macOS"]' }
+        unreal_version: [ "5.7", "5.8" ]
+    with:
+      runner: ${{ matrix.machine.runner }}
+      unreal_version: ${{ matrix.unreal_version }}
+      project_root: TempoSample
+      tempo_root: TempoSample/Plugins/Tempo
+      host_project: tempo-sim/TempoSample
+      checkout_path: TempoSample/Plugins/Tempo
+      cache_branch: main
+      environment: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository && 'fork-pr-environment' || '' }}
+      allow_unsafe_pr_checkout: true
+      gen_rust_api: true
+      gen_cpp_api: true
+      require_reflected_api: true
+      automation_test_filter: Tempo.
+      # The same groups the Linux fan-out jobs below run (codegen stays Linux-only: nothing it checks
+      # depends on the platform).
+      test_commands: |
+        python-contract: Scripts/TestPythonAPI.sh contract
+        python-core: Scripts/TestPythonAPI.sh core
+        python-world: Scripts/TestPythonAPI.sh world
+        python-movement: Scripts/TestPythonAPI.sh movement
+        python-core-socket: TEMPO_SERVER_SOCKET=$TEMPO_CI_SOCKET Scripts/TestPythonAPI.sh core
+        rust-contract: Scripts/TestRustAPI.sh contract
+        rust-integration: Scripts/TestRustAPI.sh integration
+        rust-typed: Scripts/TestRustAPI.sh typed
+        cpp-contract: Scripts/TestCppAPI.sh contract
+        cpp-integration: Scripts/TestCppAPI.sh integration
+        cpp-typed: Scripts/TestCppAPI.sh typed
+
   test_packaged_python_api:
     name: Test Packaged Python API
     needs: build_and_package
