@@ -177,11 +177,10 @@ TArray<FString> ValidateSemanticLabelTable(const UDataTable* SemanticLabelTable)
 	{
 		if (Row.Label < 0 || Row.Label > GTempoCamera_Max_Label)
 		{
-			// The camera packs the label into the exponent field of the tile atlas's fp32 alpha,
-			// biased by +1. Outside this range that field saturates to 0 or 255, making the alpha
-			// subnormal or Inf/NaN, and the GPU destroys it — the pixel decodes to label 0 at
-			// MaxDepth, so the depth goes with the label.
-			Problems.Add(FString::Printf(TEXT("Row '%s' has label ID %d, outside the encodable range 0-%d. Label and depth would both be corrupted wherever this label is visible."),
+			// The camera packs the label with a depth code into the tile atlas's fp32 alpha, which
+			// only has room for labels 0..GTempoCamera_Max_Label (see TempoSensorsConstants.h). The
+			// material clamps a larger one, so its pixels would read as the wrong label.
+			Problems.Add(FString::Printf(TEXT("Row '%s' has label ID %d, outside the encodable range 0-%d. The camera would report the wrong label wherever this label is visible."),
 				*RowName.ToString(), Row.Label, GTempoCamera_Max_Label));
 		}
 
