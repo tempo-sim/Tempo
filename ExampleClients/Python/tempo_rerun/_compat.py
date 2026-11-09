@@ -21,16 +21,30 @@ def _viewer_on_path() -> None:
     environment's scripts directory -- which is on PATH only while the environment is activated. A
     venv's python run directly (`.venv/Scripts/python.exe client.py`) otherwise fails with "Failed to
     find Rerun Viewer executable in PATH" though the viewer is right there.
+
+    Some rerun-sdk wheels (0.26 on Windows, at least) install no launcher in the scripts directory
+    at all, only the viewer itself inside the package, at ``rerun_sdk/rerun_cli/rerun[.exe]``. That
+    directory is added too.
     """
-    scripts = sysconfig.get_path("scripts") or os.path.dirname(sys.executable)
-    path = os.environ.get("PATH", "")
-    if scripts and scripts not in path.split(os.pathsep):
-        os.environ["PATH"] = scripts + os.pathsep + path
+    candidates = [sysconfig.get_path("scripts") or os.path.dirname(sys.executable)]
+    # rerun's package lives at .../rerun_sdk/rerun; the bundled viewer is its sibling rerun_cli.
+    candidates.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(rr.__file__))),
+                                   "rerun_cli"))
+    for directory in reversed(candidates):
+        path = os.environ.get("PATH", "")
+        if os.path.isdir(directory) and directory not in path.split(os.pathsep):
+            os.environ["PATH"] = directory + os.pathsep + path
 
 
-def spawn(**kwargs) -> None:
-    """rr.spawn, finding the viewer installed with this interpreter's rerun-sdk."""
+def spawn(memory_limit: str = "", **kwargs) -> None:
+    """rr.spawn, finding the viewer installed with this interpreter's rerun-sdk.
+
+    `memory_limit` caps what the viewer keeps (e.g. "2GB" or "25%"); past it the viewer drops the
+    oldest data. Empty keeps rerun's default, 75% of system memory.
+    """
     _viewer_on_path()
+    if memory_limit:
+        kwargs["memory_limit"] = memory_limit
     rr.spawn(**kwargs)
 
 
@@ -81,11 +95,12 @@ def connect(address: str) -> None:
         rr.connect(address)  # type: ignore[attr-defined]
 
 
-def start_output(*, live: bool, connect_address: str = "", rrd_path: str = "", blueprint=None) -> None:
+def start_output(*, live: bool, connect_address: str = "", rrd_path: str = "", blueprint=None,
+                 memory_limit: str = "") -> None:
     """Route the (already ``rr.init``-ed) recording to a live viewer, an .rrd file, or both.
 
-    - live, no address: spawn a native viewer and stream to it.
-    - live, with address: stream to the viewer already running there.
+    - live, no address: spawn a native viewer and stream to it, capped at `memory_limit`.
+    - live, with address: stream to the viewer already running there (its own limit applies).
     - rrd_path: also (or only) write the session to that file.
 
     Both at once needs ``rr.set_sinks`` (rerun >= 0.23). On older releases a file
@@ -95,7 +110,7 @@ def start_output(*, live: bool, connect_address: str = "", rrd_path: str = "", b
         if connect_address:
             live_sink = rr.GrpcSink(grpc_url(connect_address))
         else:
-            spawn(connect=False)  # start the viewer; the sink below connects to it
+            spawn(memory_limit, connect=False)  # start the viewer; the sink below connects to it
             live_sink = rr.GrpcSink()
         rr.set_sinks(live_sink, rr.FileSink(rrd_path), default_blueprint=blueprint)
         return
@@ -111,4 +126,4 @@ def start_output(*, live: bool, connect_address: str = "", rrd_path: str = "", b
         if blueprint is not None:
             rr.send_blueprint(blueprint, make_active=False, make_default=True)
     else:
-        spawn(default_blueprint=blueprint)
+        spawn(memory_limit, default_blueprint=blueprint)

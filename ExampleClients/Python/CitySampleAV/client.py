@@ -25,14 +25,14 @@ import tempo_sim.TempoCore.Time_pb2 as Time
 from tempo_rerun import _compat
 from tempo_rerun import conventions as conv
 from tempo_rerun.blueprint import build_blueprint
-from tempo_rerun.labels import LabelRemap
+from tempo_rerun.labels import ActorLabels, LabelRemap
 from tempo_rerun.loggers import image as image_logger
 from tempo_rerun.loggers import lidar as lidar_logger
 from tempo_rerun.loggers import world as world_logger
 from tempo_rerun.streaming import STATS
 
 from . import ego as ego_mod
-from .config import RigConfig, load_rig, load_vehicles, load_labels
+from .config import RigConfig, load_box_classes, load_rig, load_vehicles, load_labels
 from .labels import LabelManager
 from .recorder import Recorder
 from .rig import MountedRig, mount_rig
@@ -78,8 +78,13 @@ class Session:
         self.revolutions: Counter = Counter()   # lidar name -> assembled revolutions received
         self.rng = random.Random(args.seed)
         self.catalog = load_vehicles()
-        self.labels = LabelManager(load_labels(), label_type=args.label_type)
+        classes = load_labels()
+        self.labels = LabelManager(classes, label_type=args.label_type)
+        # Instance mode: the images and lidar carry instance ids, mapped back to classes client-side.
         self.remap: Optional[LabelRemap] = LabelRemap() if args.label_type == "instance" else None
+        # The classes that get boxes, 2D and 3D, and the class of each actor, for the 3D ones.
+        self.box_ids = frozenset(c.id for c in load_box_classes(classes))
+        self.actor_labels = ActorLabels()
         self.recorder: Optional[Recorder] = Recorder(args.record) if args.record else None
         self.visualize = not args.no_viz
         self.stream_tasks: List[asyncio.Task] = []
@@ -111,16 +116,20 @@ class Session:
                     kinds.add("depth")
                 if self.remap is not None:
                     kinds.add("bbox")
+                    if self.args.instance_view:
+                        kinds.add("instance")
                 active[s.key] = kinds
         return active
 
     def _blueprint(self, mounted: MountedRig):
-        return build_blueprint(mounted.infos, self._active(mounted), follow_entity=EGO_ENTITY)
+        # One column per camera, its color (with 2D boxes), label and depth stacked down it.
+        return build_blueprint(mounted.infos, self._active(mounted), follow_entity=EGO_ENTITY,
+                               column_per_camera=True)
 
     def start_viewer(self) -> None:
         rr.init(self.args.app_id)
         _compat.start_output(live=self.visualize, connect_address=self.args.connect,
-                             rrd_path=self.args.save_rrd)
+                             rrd_path=self.args.save_rrd, memory_limit=self.args.viewer_memory_limit)
         rr.log(conv.WORLD, conv.WORLD_VIEW_COORDINATES, static=True)
         rr.log("/", rr.AnnotationContext(self.labels.annotation_infos()), static=True)
 
@@ -158,6 +167,10 @@ class Session:
         if self.logging:
             _compat.send_blueprint(self._blueprint(mounted))
         if self.recorder:
+            self.recorder.meta.update({
+                "label_type": self.args.label_type,
+                "box_class_ids": sorted(self.box_ids),
+                "stuff_class_ids": sorted(c.id for c in self.labels.classes if not c.instanced)})
             self.recorder.write_static(mounted_rig=mounted, vehicle_entry=ego.entry,
                                        label_infos=self.labels.annotation_infos(), cli=dict(vars(self.args)))
 
@@ -183,14 +196,15 @@ class Session:
                     self.revolutions[name] += 1
                 self._spawn(lidar_logger.stream_lidar(
                     s, self.args.lidar_color, remap=self.remap, visualize=viz,
-                    taps=[count] + ([rec.lidar_tap(s.name)] if rec else [])), f"{s.name}:points",
-                    self.stream_tasks)
+                    taps=[count] + ([rec.lidar_tap(s.name, self.remap)] if rec else [])),
+                    f"{s.name}:points", self.stream_tasks)
                 continue
             self._spawn(image_logger.stream_color(
                 s, visualize=viz, taps=[rec.color_tap(s.name)] if rec else []), f"{s.name}:color",
                 self.stream_tasks)
             self._spawn(image_logger.stream_label(
-                s, remap=self.remap, visualize=viz, taps=[rec.label_tap(s.name)] if rec else []),
+                s, remap=self.remap, visualize=viz, log_instance=self.args.instance_view,
+                taps=[rec.label_tap(s.name, self.remap)] if rec else []),
                 f"{s.name}:label", self.stream_tasks)
             record_depth = rec is not None and not self.args.no_record_depth
             if self.args.depth or record_depth:
@@ -200,7 +214,8 @@ class Session:
                     f"{s.name}:depth", self.stream_tasks)
             if self.remap is not None:
                 self._spawn(image_logger.stream_bbox(
-                    s, visualize=viz, taps=[rec.bbox_tap(s.name)] if rec else []), f"{s.name}:bbox",
+                    s, classes=self.box_ids, visualize=viz,
+                    taps=[rec.bbox_tap(s.name, self.box_ids)] if rec else []), f"{s.name}:bbox",
                     self.stream_tasks)
 
         self._spawn(world_logger.stream_ego(
@@ -209,7 +224,14 @@ class Session:
         if self.args.ground_truth_radius_m > 0:
             self._spawn(world_logger.stream_ground_truth(
                 self.ego.name, search_radius_m=self.args.ground_truth_radius_m, exclude=[self.ego.name],
-                visualize=viz, taps=[rec.actors_tap()] if rec else []), "ground_truth", self.stream_tasks)
+                classify=self._box_class, visualize=viz,
+                taps=[rec.actors_tap(self.actor_labels.semantic)] if rec else []),
+                "ground_truth", self.stream_tasks)
+
+    def _box_class(self, actor_name: str) -> Optional[int]:
+        """The class an actor's 3D box is drawn with, or None to not draw it."""
+        sid = self.actor_labels.semantic(actor_name)
+        return sid if sid in self.box_ids else None
 
     async def stop_streams(self) -> None:
         for task in self.stream_tasks:
@@ -247,13 +269,17 @@ class Session:
 
     # -- background ------------------------------------------------------------------------------
 
-    async def _refresh_remap(self, remap: LabelRemap) -> None:
+    async def _refresh_labels(self, period_s: float = 0.5) -> None:
+        """Keep the instance -> class map and the actor -> class map current. A thing labeled since
+        the last refresh reads as unlabeled in the derived semantic image until the next one."""
         while True:
             try:
-                await remap.refresh()
+                if self.remap is not None:
+                    await self.remap.refresh()
+                await self.actor_labels.refresh()
             except Exception as exc:
-                print(f"  [labels] instance map refresh failed: {exc}")
-            await asyncio.sleep(1.0)
+                print(f"  [labels] label map refresh failed: {exc}")
+            await asyncio.sleep(period_s)
 
     async def _stop_at_sim_time(self, end: float) -> None:
         while (await tc.get_sim_time()).sim_time < end:
@@ -291,8 +317,7 @@ class Session:
             print(f"  Engine scalability: {self.args.scalability}.")
         await self.labels.install()
         self._spawn(self.labels.run_mesh_sync(), "label_sync", self.background)
-        if self.remap is not None:
-            self._spawn(self._refresh_remap(self.remap), "instance_map", self.background)
+        self._spawn(self._refresh_labels(), "label_maps", self.background)
         self._spawn(self._report(), "report", self.background)
         if self.logging:
             self.start_viewer()

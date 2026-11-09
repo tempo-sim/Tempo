@@ -94,7 +94,7 @@ Research summary. File references are into this repo unless they start with `Cit
     project). There are per-entry overrides: actor type, actor tag and mesh.
   - None of this is reachable through the reflected API; it uses RPCs only.
   - `LabelType` (semantic vs instance) is global, so cameras and lidar always match.
-  - Instance IDs are 1..253 and reused least-shared first.
+  - Instance IDs are 1..251 and reused least-shared first.
 - **Movement**: there is no possess RPC.
   - Possession is reachable through the reflected API: `AController.Possess`, or
     `Pawn.AIControllerClass` + `SpawnDefaultController`.
@@ -288,7 +288,7 @@ Layers, most specific first:
   `get_semantic_classes()` into Rerun's `AnnotationContext`.
 - **Instance mode by default.** Bounding boxes need it, and the instance→semantic map
   (`get_instance_to_semantic_id_map`) lets the client derive semantic images and semantic lidar classes
-  from instance IDs. So one mode gives both. Caveat for the README: instance IDs are 1..253 and reused,
+  from instance IDs. So one mode gives both. Caveat for the README: instance IDs are 1..251 and reused,
   so they are unique per frame in practice, not globally. `--label-type semantic` is the switch for
   users who don't need boxes.
 - **[spike]**:

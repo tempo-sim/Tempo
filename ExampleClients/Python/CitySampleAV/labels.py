@@ -18,10 +18,14 @@ adopts the car: to the actor, and to each of its components. The component tags 
 the labeler resolves a component before its actor, so the van body's mesh would otherwise label it a
 van whatever the actor's tag said.
 
-Label type: Semantic by default. Instance mode (``--label-type instance``) is what 2D bounding boxes
-need, but its ids are 1..253 shared by every labeled thing in view -- and in a city every mesh-
-labeled building part is a thing -- so ids are reused, and an id can stand for more than one class
-at once. Use it for the boxes of dynamic objects, and treat its semantic recovery as approximate.
+Label type: Instance by default, which is what 2D bounding boxes need. Its ids are 8-bit, 1..251 for
+everything in view, and a city has thousands of separately labeled road and building meshes. So the
+classes marked ``"instanced": false`` in labels.json (road, building, sky, ...) are "stuff": the
+labeler gives every one of their objects the class's own id, reserved for it, and the 2D boxes skip
+them. The "things" (vehicles, pedestrians) get the remaining ids. The semantic image is recovered
+from the instance image with the labeler's instance -> semantic map, exactly for stuff, and for a
+thing as soon as the client's copy of the map has caught up with a newly labeled object (it is
+refreshed twice a second). ``--label-type semantic`` streams semantic ids directly, without boxes.
 """
 
 import asyncio
@@ -47,7 +51,7 @@ class _CompiledClass:
 
 
 class LabelManager:
-    def __init__(self, classes: List[LabelClass], label_type: str = "semantic"):
+    def __init__(self, classes: List[LabelClass], label_type: str = "instance"):
         self.classes = classes
         self.label_type = label_type
         self._compiled = [_CompiledClass(c, [re.compile(p) for p in c.static_mesh_patterns],
@@ -120,6 +124,8 @@ class LabelManager:
         rows = [{"Name": "NoLabel", "Label": 0}]
         for c in self.classes:
             row = {"Name": c.name, "Label": c.id}
+            if not c.instanced:
+                row["bInstanced"] = False
             actor_classes = self._actor_classes(c)
             if actor_classes:
                 row["ActorTypes"] = actor_classes
@@ -133,7 +139,17 @@ class LabelManager:
                 row["SkeletalMeshTypes"] = sorted(skeletal_rows[c.id])
             rows.append(row)
 
-        await ts.load_label_table(json=json.dumps(rows))
+        try:
+            await ts.load_label_table(json=json.dumps(rows))
+        except Exception as exc:
+            if "bInstanced" not in str(exc):
+                raise
+            # A build from before the column: everything is a thing, and ids run out sooner.
+            print("  [labels] this build's labeler has no stuff classes (bInstanced); re-package with a "
+                  "current Tempo for clean instance ids. Loading the table without it.")
+            for row in rows:
+                row.pop("bInstanced", None)
+            await ts.load_label_table(json=json.dumps(rows))
         await ts.set_label_type(label_type=Labels.LT_INSTANCE if self.label_type == "instance"
                                 else Labels.LT_SEMANTIC)
         print(f"  Label table: {len(self.classes)} classes, {len(self._assigned)} of "

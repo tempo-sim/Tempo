@@ -35,6 +35,9 @@ from ..streaming import pump
 # AnnotationContext); "instance" is the raw label id colored by the instance palette.
 LIDAR_SIGNALS = ("intensity", "distance", "reflectivity", "label", "instance", "color")
 
+# The reflectivity the "reflectivity" coloring maps to the top of its scale (see colorize).
+REFLECTIVITY_COLOR_MAX = 0.5
+
 
 @dataclass
 class AssembledScan:
@@ -167,7 +170,10 @@ def colorize(scan: AssembledScan, mode: str, remap=None) -> dict:
         return {"colors": colormap.scalar_to_rgb(scan.distance)}
     if mode == "reflectivity":
         vals = scan.reflectivity if scan.reflectivity is not None else np.full(n, 0.5, np.float32)
-        return {"colors": colormap.scalar_to_rgb(vals)}
+        # A fixed range, not each scan's own, so a surface keeps its color from scan to scan.
+        # Reflectivity is in [0, 1] but most surfaces sit low (a city scan's median is ~0.08, its
+        # 95th percentile ~0.4), so the scale tops out at 0.5 and the brightest few saturate.
+        return {"colors": colormap.scalar_to_rgb(vals, vmin=0.0, vmax=REFLECTIVITY_COLOR_MAX)}
     return {"colors": colormap.scalar_to_rgb(scan.intensity, vmin=0.0, vmax=1.0)}
 
 
