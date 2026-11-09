@@ -54,7 +54,8 @@ message OverlapEventResponse {
 message ActorStateRequest {
   // Name of the actor to query.
   string actor = 1;
-  // Include components flagged as hidden when computing the actor's bounds.
+  // Include mesh components that are not drawn (hidden, hidden in game, or kept out of the main
+  // pass) when computing the actor's bounds.
   bool include_hidden_components = 2;
 }
 
@@ -67,7 +68,7 @@ message ActorStatesNearRequest {
   bool include_static = 3;
   // Include actors flagged as hidden.
   bool include_hidden_actors = 4;
-  // Include components flagged as hidden when computing each actor's bounds.
+  // Include mesh components that are not drawn when computing each actor's bounds.
   bool include_hidden_components = 5;
 }
 
@@ -81,7 +82,7 @@ message ActorStatesNearPositionRequest {
   bool include_static = 3;
   // Include actors flagged as hidden.
   bool include_hidden_actors = 4;
-  // Include components flagged as hidden when computing each actor's bounds.
+  // Include mesh components that are not drawn when computing each actor's bounds.
   bool include_hidden_components = 5;
 }
 
@@ -98,7 +99,9 @@ message ActorState {
   TempoCore.Twist velocity = 5;
   // Axis-aligned bounding box in the actor's local frame, with the actor's scale baked in,
   // in meters. Combine with `transform`'s location and rotation to recover the tight oriented box;
-  // its scale is already applied, so do not apply `transform.scale` again.
+  // its scale is already applied, so do not apply `transform.scale` again. It bounds the actor's
+  // drawn meshes (skeletal meshes by their physics bodies), not its collision volumes or anything
+  // hidden in game or kept out of the main pass. Empty (all zeros) for an actor with no drawn mesh.
   TempoCore.Box local_bounds = 6;
 }
 
