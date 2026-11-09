@@ -265,9 +265,9 @@ def labeled_scene(readback_level):
         return
 
     # Label IDs must stay within what the camera's alpha encoding can represent
-    # (GTempoCamera_Max_Label = 253); 0 means "unlabeled", so start at 1.
+    # (GTempoCamera_Max_Label = 251); 0 means "unlabeled", so start at 1.
     assigned = []
-    for index, mesh in enumerate(meshes[:253]):
+    for index, mesh in enumerate(meshes[:251]):
         ts.set_static_mesh_type_semantic_id(static_mesh_path=mesh.mesh_path, semantic_id=index + 1)
         assigned.append(mesh.mesh_path)
 

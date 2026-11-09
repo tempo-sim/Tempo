@@ -351,18 +351,19 @@ Static and skeletal meshes get separate columns because the two asset types shar
 narrower than `UStreamableRenderAsset`, which textures also derive from. They resolve through one
 path-keyed lookup, so a mesh asset carries at most one label either way.
 
-!!! warning "Label IDs run 0–253, not 0–255"
+!!! warning "Label IDs run 0–251, not 0–255"
 
-    The camera packs the label into the exponent field of its fp32 alpha channel, biased by `+1`,
-    which keeps the alpha a normal, finite float for every `(label, depth)` pair — at the cost of
-    the top two IDs. See `TempoSensorsConstants.h`. An out-of-range ID corrupts both the label
-    *and* the depth of every pixel it covers, so the labeler logs an error for one at startup.
+    The camera packs the label and a 22-bit depth code into its fp32 alpha channel. The engine
+    clamps that alpha to `[0, 1]`, and a GPU flushes subnormals to zero, which leaves exactly
+    252 × 2²² usable bit patterns, so the top four IDs go. See `TempoSensorsConstants.h`. An
+    out-of-range ID is clamped to 251, so its pixels take the wrong label; the labeler logs an
+    error for one at startup.
 
 In `Instance` label mode (`Project Settings → Tempo → Sensors → Label Type`), each labeled actor
-also gets a unique 1–253 instance ID. Two flags control reuse:
+also gets a unique 1–251 instance ID. Two flags control reuse:
 
 - **Globally Unique Instance Labels** — don't reclaim IDs of destroyed actors.
-- **Instantaneously Unique Instance Labels** — don't repeat IDs even after exhausting all 253.
+- **Instantaneously Unique Instance Labels** — don't repeat IDs even after exhausting all 251.
 
 Bounding-box requests use the instance label image to compute axis-aligned 2D boxes per instance,
 attaching the corresponding semantic ID via the labeler's instance→semantic map.
@@ -414,7 +415,7 @@ Whole-table and mode changes, each of which re-labels the world in place:
     trip it: fetch, edit, `load_label_table`.
 
     `load_label_table` checks the table before installing it and rejects the whole request with the
-    list of problems, so a typo'd asset path, a label ID outside 0–253, a missing or non-zero
+    list of problems, so a typo'd asset path, a label ID outside 0–251, a missing or non-zero
     `NoLabel` row, or an actor type / mesh / tag two rows both claim comes back as an error rather
     than as quietly wrong images.
 

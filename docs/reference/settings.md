@@ -66,7 +66,7 @@ Tempo's plugin settings live in **Project Settings → Plugins**, and are stored
 | `SemanticLabelTable` | `DataTable` | — | Maps Actor classes, Actor tags, Static Mesh assets, Skeletal Mesh assets and component tags to semantic labels. In `Instance` mode, every instance of an object appearing in this table is labeled. Can be replaced at runtime with `load_label_table`. |
 | `LabelType` | enum | `Semantic` | `Semantic` or `Instance`. |
 | `bGloballyUniqueInstanceLabels` | `bool` | `false` | Don't reclaim instance IDs of destroyed actors. (Instance mode only.) |
-| `bInstantaneouslyUniqueInstanceLabels` | `bool` | `false` | Don't repeat instance IDs even after exhausting all 253. (Instance mode only.) |
+| `bInstantaneouslyUniqueInstanceLabels` | `bool` | `false` | Don't repeat instance IDs even after exhausting all 251. (Instance mode only.) |
 
 [:octicons-arrow-right-24: Working with labels](../plugins/tempo-sensors.md#working-with-labels)
 

@@ -108,7 +108,7 @@ private:
 	UPROPERTY(EditAnywhere, Config, Category="Labels", meta=(EditCondition="LabelType == ELabelType::Instance"))
 	bool bGloballyUniqueInstanceLabels = false;
 
-	// Whether to reuse instance labels after exhausting our 253 unique labels.
+	// Whether to reuse instance labels after exhausting our 251 unique labels.
 	UPROPERTY(EditAnywhere, Config, Category="Labels", meta=(EditCondition="LabelType == ELabelType::Instance"))
 	bool bInstantaneouslyUniqueInstanceLabels = false;
 

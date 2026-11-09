@@ -141,6 +141,18 @@ bool FTempoLabelTableValidationTest::RunTest(const FString& Parameters)
 			{ "Name": "Vehicle", "Label": 255 }
 		])")).Num() > 0);
 
+	// The boundary: 251 is the last label the camera's alpha packing can hold (TempoSensorsConstants.h).
+	TestEqual(TEXT("The largest encodable label ID is not a problem"),
+		ValidateJson(TEXT("Label 251"), TEXT(R"([
+			{ "Name": "NoLabel", "Label": 0 },
+			{ "Name": "Vehicle", "Label": 251 }
+		])")).Num(), 0);
+	TestTrue(TEXT("One past the largest encodable label ID is a problem"),
+		ValidateJson(TEXT("Label 252"), TEXT(R"([
+			{ "Name": "NoLabel", "Label": 0 },
+			{ "Name": "Vehicle", "Label": 252 }
+		])")).Num() > 0);
+
 	TestTrue(TEXT("A missing NoLabel row is a problem"),
 		ValidateJson(TEXT("No NoLabel row"), TEXT(R"([
 			{ "Name": "Vehicle", "Label": 14 }
