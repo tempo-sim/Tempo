@@ -6,6 +6,7 @@
 #include "MassTrafficLights.h"
 #include "MassTrafficSigns.h"
 #include "Subsystems/WorldSubsystem.h"
+#include "UObject/ObjectKey.h"
 #include "MassTrafficControllerRegistrySubsystem.generated.h"
 
 UCLASS(Blueprintable, BlueprintType)
@@ -23,6 +24,14 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Mass Traffic|Traffic Light Registry Subsystem")
 	void RegisterTrafficSign(const FMassTrafficSignInstanceDesc& TrafficSignInstanceDesc);
+
+	/**
+	 * Registers every traffic light in a baked instances data asset, along with the light types they refer to,
+	 * remapping each light's type index from TypesDataAsset to this registry's. A given data asset is registered
+	 * once between calls to ClearTrafficControllers, so repeated intersection spawns don't duplicate its lights.
+	 * With no TypesDataAsset, the lights are registered without a type.
+	 */
+	void RegisterTrafficLightsFromDataAsset(const UMassTrafficLightInstancesDataAsset& InstancesDataAsset, const UMassTrafficLightTypesDataAsset* TypesDataAsset);
 
 	UFUNCTION(BlueprintCallable, Category = "Mass Traffic|Traffic Light Registry Subsystem")
 	void ClearTrafficControllers();
@@ -45,5 +54,8 @@ protected:
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Mass Traffic|Traffic Light Registry Subsystem")
 	TArray<FMassTrafficSignInstanceDesc> TrafficSignInstanceDescs;
-	
+
+	// Instances data assets registered since the last ClearTrafficControllers.
+	TSet<FObjectKey> RegisteredTrafficLightDataAssets;
+
 };

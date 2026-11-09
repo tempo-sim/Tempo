@@ -2,6 +2,8 @@
 
 #include "MassTrafficControllerRegistrySubsystem.h"
 
+#include "MassTraffic.h"
+
 
 int32 UMassTrafficControllerRegistrySubsystem::RegisterTrafficLightType(const FMassTrafficLightTypeData& InTrafficLightType)
 {
@@ -25,11 +27,45 @@ void UMassTrafficControllerRegistrySubsystem::RegisterTrafficSign(const FMassTra
 	TrafficSignInstanceDescs.Add(TrafficSignInstanceDesc);
 }
 
+void UMassTrafficControllerRegistrySubsystem::RegisterTrafficLightsFromDataAsset(const UMassTrafficLightInstancesDataAsset& InstancesDataAsset, const UMassTrafficLightTypesDataAsset* TypesDataAsset)
+{
+	bool bIsAlreadyRegistered = false;
+	RegisteredTrafficLightDataAssets.Add(FObjectKey(&InstancesDataAsset), &bIsAlreadyRegistered);
+	if (bIsAlreadyRegistered)
+	{
+		return;
+	}
+
+	// The baked type indices refer to TypesDataAsset; the registry may already hold other types, and dedupes equal ones.
+	TArray<int16> RegistryTypeIndices;
+	if (TypesDataAsset != nullptr)
+	{
+		RegistryTypeIndices.Reserve(TypesDataAsset->TrafficLightTypes.Num());
+		for (const FMassTrafficLightTypeData& TrafficLightType : TypesDataAsset->TrafficLightTypes)
+		{
+			RegistryTypeIndices.Add(static_cast<int16>(RegisterTrafficLightType(TrafficLightType)));
+		}
+	}
+
+	TrafficLightInstanceDescs.Reserve(TrafficLightInstanceDescs.Num() + InstancesDataAsset.TrafficLights.Num());
+	for (FMassTrafficLightInstanceDesc TrafficLightInstanceDesc : InstancesDataAsset.TrafficLights)
+	{
+		// An unknown type is left for the intersection spawn data generator to pick a compatible one.
+		TrafficLightInstanceDesc.TrafficLightTypeIndex = RegistryTypeIndices.IsValidIndex(TrafficLightInstanceDesc.TrafficLightTypeIndex)
+			? RegistryTypeIndices[TrafficLightInstanceDesc.TrafficLightTypeIndex]
+			: static_cast<int16>(INDEX_NONE);
+		RegisterTrafficLight(TrafficLightInstanceDesc);
+	}
+
+	UE_LOG(LogMassTraffic, Log, TEXT("Registered %d baked traffic lights from %s."), InstancesDataAsset.TrafficLights.Num(), *InstancesDataAsset.GetName());
+}
+
 void UMassTrafficControllerRegistrySubsystem::ClearTrafficControllers()
 {
 	TrafficLightTypes.Empty();
 	TrafficLightInstanceDescs.Empty();
 	TrafficSignInstanceDescs.Empty();
+	RegisteredTrafficLightDataAssets.Empty();
 }
 
 const TArray<FMassTrafficLightTypeData>& UMassTrafficControllerRegistrySubsystem::GetTrafficLightTypes() const

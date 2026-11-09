@@ -34,13 +34,27 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner,
 		return;
 	}
 	
-	const UMassTrafficControllerRegistrySubsystem* TrafficControllerRegistrySubsystem = UWorld::GetSubsystem<UMassTrafficControllerRegistrySubsystem>(World);
-	
+	UMassTrafficControllerRegistrySubsystem* TrafficControllerRegistrySubsystem = UWorld::GetSubsystem<UMassTrafficControllerRegistrySubsystem>(World);
+
 	if (!ensureMsgf(TrafficControllerRegistrySubsystem != nullptr, TEXT("Must get valid TrafficControllerRegistrySubsystem in UMassTrafficIntersectionSpawnDataGenerator::Generate.")))
 	{
 		return;
 	}
-	
+
+	// Register baked traffic lights, if any, alongside those registered at runtime. Without this, content whose lights
+	// were baked from a point cloud (CitySample's) gets no lights at all, and every intersection is built as an
+	// uncontrolled one.
+	if (TrafficLightInstanceData != nullptr)
+	{
+		const UMassTrafficLightTypesDataAsset* BakedTrafficLightTypes = TrafficLightTypesData != nullptr ? TrafficLightTypesData.Get() : TrafficLightInstanceData->TrafficLightTypesData.Get();
+		if (BakedTrafficLightTypes == nullptr)
+		{
+			UE_LOG(LogMassTraffic, Warning, TEXT("%s has TrafficLightInstanceData %s but no TrafficLightTypesData, on itself or on the instance data. Its traffic lights will control intersections but will not be drawn."),
+				*GetName(), *TrafficLightInstanceData->GetName());
+		}
+		TrafficControllerRegistrySubsystem->RegisterTrafficLightsFromDataAsset(*TrafficLightInstanceData, BakedTrafficLightTypes);
+	}
+
 	UMassTrafficSubsystem* MassTrafficSubsystem = UWorld::GetSubsystem<UMassTrafficSubsystem>(World);
 
 	if (!ensureMsgf(MassTrafficSubsystem != nullptr, TEXT("Must get valid MassTrafficSubsystem in UMassTrafficIntersectionSpawnDataGenerator::Generate.")))
