@@ -117,13 +117,14 @@ async def stream_depth(sensor, *, visualize=True, taps=()):
                _with_taps(log, visualize, taps), label=f"{sensor.key}:depth")
 
 
-async def stream_label(sensor, *, remap=None, visualize=True, taps=()):
+async def stream_label(sensor, *, remap=None, visualize=True, taps=(), log_instance=True):
     """Log the label image.
 
     Without ``remap`` the ids are logged as-is to ``label`` (semantic in Semantic mode, so the
     AnnotationContext names them). With a ``LabelRemap`` -- for a sim in Instance mode -- the
-    semantic image derived from it goes to ``label`` and the raw instance ids to ``instance``,
-    colored by the instance palette so neighbouring instances stay distinguishable.
+    semantic image derived from it goes to ``label`` and, unless ``log_instance`` is False, the raw
+    instance ids to ``instance``, colored by the instance palette so neighbouring instances stay
+    distinguishable.
     """
     entity = sensor.entity_path
 
@@ -134,27 +135,32 @@ async def stream_label(sensor, *, remap=None, visualize=True, taps=()):
             rr.log(f"{entity}/label", rr.SegmentationImage(ids))
             return
         rr.log(f"{entity}/label", rr.SegmentationImage(remap.semantic(ids)))
-        rr.log(f"{entity}/instance", rr.Image(colormap.LABEL_LUT[ids], color_model="RGB"))
+        if log_instance:
+            rr.log(f"{entity}/instance", rr.Image(colormap.LABEL_LUT[ids], color_model="RGB"))
 
     await pump(ts.stream_label_images(owner=sensor.owner, sensor=sensor.name),
                _with_taps(log, visualize, taps), label=f"{sensor.key}:label")
 
 
-async def stream_bbox(sensor, *, visualize=True, taps=()):
+async def stream_bbox(sensor, *, classes=None, visualize=True, taps=()):
+    """Log Tempo's 2D boxes: per instance id, the extent of its visible pixels (so an occluded
+    object's box is its visible part). `classes`, if given, is the semantic ids to draw; taps still
+    receive every box. Needs the sim in Instance mode."""
     entity = sensor.entity_path
 
     def log(boxes):
         set_sim_time(conv.SIM_TIME, boxes.header.capture_time_s)
-        if not boxes.bounding_boxes:
+        kept = [b for b in boxes.bounding_boxes if classes is None or b.semantic_id in classes]
+        if not kept:
             rr.log(f"{entity}/bbox", rr.Clear(recursive=False))
             return
-        mins = [[b.min_x_px, b.min_y_px] for b in boxes.bounding_boxes]
-        maxs = [[b.max_x_px, b.max_y_px] for b in boxes.bounding_boxes]
-        class_ids = [b.semantic_id for b in boxes.bounding_boxes]
+        # Pixel indices are inclusive, so a one-pixel box is one pixel wide.
+        mins = np.asarray([[b.min_x_px, b.min_y_px] for b in kept], dtype=np.float32)
+        maxs = np.asarray([[b.max_x_px + 1, b.max_y_px + 1] for b in kept], dtype=np.float32)
         rr.log(
             f"{entity}/bbox",
-            rr.Boxes2D(mins=mins, sizes=(np.asarray(maxs) - np.asarray(mins)).tolist(),
-                       class_ids=class_ids),
+            rr.Boxes2D(mins=mins, sizes=maxs - mins, class_ids=[b.semantic_id for b in kept],
+                       labels=[str(b.instance_id) for b in kept], show_labels=False),
         )
 
     await pump(ts.stream_bounding_boxes(owner=sensor.owner, sensor=sensor.name),

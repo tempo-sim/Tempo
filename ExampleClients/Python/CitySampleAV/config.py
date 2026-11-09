@@ -298,6 +298,20 @@ class LabelClass:
     actor_classes: List[str] = field(default_factory=list)
     actor_tags: List[str] = field(default_factory=list)
     component_tags: List[str] = field(default_factory=list)
+    # A "thing" (each object its own instance id) or "stuff" (the class's id is every object's
+    # instance id). See labels.json.
+    instanced: bool = True
+
+
+def load_box_classes(classes: List[LabelClass], path: Path = CONFIG_DIR / "labels.json") -> List[LabelClass]:
+    """The classes named in labels.json's `box_classes`: the ones that get bounding boxes."""
+    data = _load(path)
+    by_name = {c.name: c for c in classes}
+    names = _get(data, "box_classes", path, list, [])
+    unknown = [n for n in names if n not in by_name]
+    if unknown:
+        raise ConfigError(f"{path}: 'box_classes' names classes that aren't defined: {unknown}")
+    return [by_name[n] for n in names]
 
 
 def load_labels(path: Path = CONFIG_DIR / "labels.json") -> List[LabelClass]:
@@ -308,8 +322,8 @@ def load_labels(path: Path = CONFIG_DIR / "labels.json") -> List[LabelClass]:
         where = f".classes[{i}]"
         cid = _get(c, "id", path, int, where=where)
         name = _get(c, "name", path, str, where=where)
-        if not 1 <= cid <= 253:
-            raise ConfigError(f"{path}{where}: 'id' must be 1-253 (0 is unlabeled), got {cid}")
+        if not 1 <= cid <= 251:
+            raise ConfigError(f"{path}{where}: 'id' must be 1-251 (0 is unlabeled), got {cid}")
         if cid in ids or name in names or name == "NoLabel":
             raise ConfigError(f"{path}{where}: duplicate or reserved id/name ({cid}, {name!r})")
         ids.add(cid)
@@ -323,6 +337,7 @@ def load_labels(path: Path = CONFIG_DIR / "labels.json") -> List[LabelClass]:
             actor_classes=_get(c, "actor_classes", path, list, [], where),
             actor_tags=_get(c, "actor_tags", path, list, [], where),
             component_tags=_get(c, "component_tags", path, list, [], where),
+            instanced=_get(c, "instanced", path, bool, True, where),
         )
         for pattern in entry.static_mesh_patterns + entry.skeletal_mesh_patterns:
             try:

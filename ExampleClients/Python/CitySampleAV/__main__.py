@@ -28,8 +28,8 @@ def parse_args(argv=None):
 
     g = p.add_argument_group("vehicle and sensors")
     g.add_argument("--vehicle", default="random",
-                   help="A vehicle id from config/vehicles.json (car02, van01, bus10, ...), a category "
-                        "(car, van, truck, bus), or 'random' (default).")
+                   help="A vehicle id from config/vehicles.json (car02, van01, truck04, ...), a category "
+                        "(car, van, truck), or 'random' (default).")
     g.add_argument("--rig", default="",
                    help="Use config/rigs/<RIG>.json for every vehicle, instead of each vehicle's own.")
     g.add_argument("--seed", type=int, default=None, help="Seed for the random vehicle choice.")
@@ -60,8 +60,9 @@ def parse_args(argv=None):
                         "sensors render offscreen either way, and the main view costs GPU time.")
 
     g = p.add_argument_group("labels")
-    g.add_argument("--label-type", choices=["semantic", "instance"], default="semantic",
-                   help="Semantic class ids (default), or instance ids plus 2D bounding boxes.")
+    g.add_argument("--label-type", choices=["instance", "semantic"], default="instance",
+                   help="instance (default): instance ids, 2D boxes, and semantic images derived from "
+                        "them client-side. semantic: semantic ids straight from the sim, no 2D boxes.")
     g.add_argument("--coverage", action="store_true",
                    help="On exit, list the loaded meshes no label rule matched, most common first.")
 
@@ -73,12 +74,17 @@ def parse_args(argv=None):
                    help="Also save the Rerun recording to this .rrd file.")
     g.add_argument("--record", default="", metavar="DIR",
                    help="Record a dataset (images, labels, lidar, poses, calibration) to DIR.")
-    g.add_argument("--depth", action="store_true",
-                   help="Show camera depth in the viewer too (it is always recorded with --record).")
+    g.add_argument("--no-depth-view", dest="depth", action="store_false",
+                   help="Don't show camera depth in the viewer (it is still recorded with --record).")
+    g.add_argument("--instance-view", action="store_true",
+                   help="Also show the raw instance-id image of each camera in the viewer.")
+    g.add_argument("--viewer-memory-limit", default="2GB", metavar="SIZE",
+                   help="How much the spawned Rerun viewer keeps (e.g. 2GB, 25%%); past it, it drops "
+                        "the oldest data. Default 2GB. A viewer reached with --connect keeps its own.")
     g.add_argument("--no-record-depth", action="store_true",
                    help="With --record, don't write camera depth (written by default).")
-    g.add_argument("--lidar-color", choices=LIDAR_SIGNALS, default="label",
-                   help="What colors the lidar points in the viewer (default: label).")
+    g.add_argument("--lidar-color", choices=LIDAR_SIGNALS, default="reflectivity",
+                   help="What colors the lidar points in the viewer (default: reflectivity).")
     g.add_argument("--ground-truth-radius-m", type=float, default=80.0,
                    help="Show/record actor boxes within this radius of the ego; 0 disables.")
     g.add_argument("--duration-s", type=float, default=0.0,

@@ -3,7 +3,7 @@
 """Instance -> semantic label remapping.
 
 Tempo's label type is global: in Semantic mode every camera label pixel and lidar return carries a
-semantic class id; in Instance mode it carries an instance id (1..253, reused), and
+semantic class id; in Instance mode it carries an instance id (1..251, reused), and
 ``get_instance_to_semantic_id_map`` says which class each instance currently belongs to. Instance
 mode is the richer one (2D bounding boxes need it, and semantic classes are recoverable from it),
 so a client that wants both keeps one of these up to date and passes it to the loggers.
@@ -43,3 +43,22 @@ class LabelRemap:
     async def refresh(self) -> None:
         response = await ts.get_instance_to_semantic_id_map()
         self.set_mapping((m.instance_id, m.semantic_id) for m in response.instance_semantic_id_pairs)
+
+
+class ActorLabels:
+    """Actor name -> the semantic class the labeler gave the actor, from ``get_all_actor_labels``.
+
+    The same names the TempoWorld streams report, so a ground-truth box can be classed without a
+    lookup per actor. Like LabelRemap, refresh periodically; the dict is swapped whole.
+    """
+
+    def __init__(self):
+        self._by_name: dict = {}
+
+    def semantic(self, actor_name: str):
+        """The actor's semantic id, or None if the labeler hasn't labeled it (yet)."""
+        return self._by_name.get(actor_name)
+
+    async def refresh(self) -> None:
+        response = await ts.get_all_actor_labels()
+        self._by_name = {a.actor_name: a.semantic_id for a in response.actors}
