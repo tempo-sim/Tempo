@@ -424,6 +424,74 @@ bool FTempoCameraDecodeBoundingBoxesTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// A non-instanced (stuff) class's ID is shared by every object of that class, so its pixels describe
+// no one object and the decode reports no box for it, while the instanced IDs keep theirs.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoCameraDecodeNonInstancedBoxesTest,
+	"Tempo.Sensors.CameraDecode.NonInstancedBoxes", TempoCameraDecodeTestFlags)
+bool FTempoCameraDecodeNonInstancedBoxesTest::RunTest(const FString& Parameters)
+{
+	const FIntPoint Size(32, 130);
+	// Rows 0-9: a thing (7). Rows 10-129: a stuff class (2), the road under it. One column of 9, a
+	// second thing, inside the stuff.
+	const auto LabelFn = [](int32 X, int32 Y) -> uint8
+	{
+		if (Y < 10) { return 7; }
+		if (X == 3) { return 9; }
+		return 2;
+	};
+
+	for (const bool bDepth : { true, false })
+	{
+		const FString What = bDepth ? TEXT("with depth") : TEXT("no depth");
+		TMap<uint8, uint8> SemanticMap = { { 2, 2 }, { 7, 1 }, { 9, 1 } };
+		TSet<uint8> NonInstanced = { 2 };
+
+		const TArray<FColorImageRequest> NoColor;
+		const TArray<FLabelImageRequest> NoLabel;
+		const TArray<FDepthImageRequest> NoDepth;
+		TArray<FBoundingBoxesRequest> BoxRequests;
+		FDecodeResults Results;
+		AddRequest(BoxRequests, Results.Boxes, Results.NumResponses);
+
+		if (bDepth)
+		{
+			TTextureRead<FCameraPixelWithDepth> Read(Size, 1, 0.0, TEXT("Owner"), TEXT("Sensor"), FTransform::Identity,
+				TestMinDepth, TestMaxDepth, MoveTemp(SemanticMap), MoveTemp(NonInstanced));
+			FillPattern(Read.Image, Size.X, Size.Y, TFunctionRef<uint8(int32, int32)>(LabelFn));
+			Read.RespondToRequests(NoColor, NoLabel, NoDepth, BoxRequests, 0.0f);
+		}
+		else
+		{
+			TTextureRead<FCameraPixelNoDepth> Read(Size, 1, 0.0, TEXT("Owner"), TEXT("Sensor"), FTransform::Identity,
+				MoveTemp(SemanticMap), MoveTemp(NonInstanced));
+			FillPattern(Read.Image, Size.X, Size.Y, TFunctionRef<uint8(int32, int32)>(LabelFn));
+			Read.RespondToRequests(NoColor, NoLabel, BoxRequests, 0.0f);
+		}
+
+		if (!TestEqual(*(What + TEXT(": one response")), Results.NumResponses, 1))
+		{
+			return false;
+		}
+		TSet<uint32> Reported;
+		for (const TempoSensors::BoundingBox2D& Box : Results.Boxes->bounding_boxes())
+		{
+			Reported.Add(Box.instance_id());
+			if (Box.instance_id() == 9)
+			{
+				TestEqual(*(What + TEXT(": thing inside stuff keeps its own box (min y)")), static_cast<int32>(Box.min_y_px()), 10);
+				TestEqual(*(What + TEXT(": thing inside stuff keeps its own box (max y)")), static_cast<int32>(Box.max_y_px()), Size.Y - 1);
+				TestEqual(*(What + TEXT(": thing's semantic id")), static_cast<int32>(Box.semantic_id()), 1);
+			}
+		}
+		TestEqual(*(What + TEXT(": box count")), Reported.Num(), 2);
+		TestTrue(*(What + TEXT(": thing 7 has a box")), Reported.Contains(7));
+		TestTrue(*(What + TEXT(": thing 9 has a box")), Reported.Contains(9));
+		TestFalse(*(What + TEXT(": stuff 2 has no box")), Reported.Contains(2));
+	}
+
+	return true;
+}
+
 // Every combination of requested measurement types. The decode branches on which outputs are
 // non-null, so a subset is a genuinely different path from the full set.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoCameraDecodeRequestSubsetsTest,

@@ -360,13 +360,29 @@ path-keyed lookup, so a mesh asset carries at most one label either way.
     error for one at startup.
 
 In `Instance` label mode (`Project Settings → Tempo → Sensors → Label Type`), each labeled actor
-also gets a unique 1–251 instance ID. Two flags control reuse:
+also gets a unique 1–251 instance ID. Its components share it: a component that resolves a label
+of its own takes its actor's ID when the class is the same, so a car's wheels and windows are the
+car. Two flags control reuse:
 
 - **Globally Unique Instance Labels** — don't reclaim IDs of destroyed actors.
 - **Instantaneously Unique Instance Labels** — don't repeat IDs even after exhausting all 251.
 
 Bounding-box requests use the instance label image to compute axis-aligned 2D boxes per instance,
 attaching the corresponding semantic ID via the labeler's instance→semantic map.
+
+251 IDs go fast in a large scene, where every separately labeled road and building mesh is an
+object. A row's `bInstanced` (default `true`) is the panoptic split between *things* and *stuff*.
+Set it to `false` for a stuff class (road, building, sky), and every object it labels takes the
+row's own `Label` as its instance ID. So a stuff class costs one ID however many objects it
+covers.
+
+Every row's `Label` is reserved: no object is ever allocated one, so in the instance image a
+class's own `Label` always means "this class, no particular object". Besides stuff, it marks an
+**instanced static mesh component** of a thing class. One such component draws many objects —
+Mass traffic and crowds draw every far-off car or person of a model with one — and a stencil
+can't tell them apart, so the component gets the class rather than an instance (like COCO's
+*crowd*). Bounding-box responses leave every class ID out, since their pixels describe no single
+object. In `Semantic` mode none of this has any effect.
 
 #### Inspecting and editing labels from a client
 
