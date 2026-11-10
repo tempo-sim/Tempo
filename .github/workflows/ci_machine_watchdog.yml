@@ -2,8 +2,10 @@
 # Watchdog for Tempo's self-hosted CI machines (runner group "tempo-ci"), seen from GitHub's side.
 #
 # Every 15 minutes, on a GitHub-hosted runner, it asks GitHub whether every runner in the group is online,
-# and whether any job for the group has been queued for too long (a runner that is "online" but takes no
-# jobs, a missing engine label, a machine that's wedged). It posts to Slack when the set of problems
+# and whether any job for the group is stuck in the queue: queued while an idle, online runner has every
+# label it asks for (a runner that is "online" but takes no jobs), or queued so long that no backlog
+# explains it (a job no runner's labels match, a machine that's wedged). A queue behind busy runners is
+# not a problem. It posts to Slack when the set of problems
 # changes, again every 12 hours while it persists, and once when it clears.
 #
 # The machines watch themselves too (CI/Machines): a heartbeat to healthchecks.io catches a machine that
@@ -36,7 +38,10 @@ jobs:
       GROUP: tempo-ci
       # Repositories whose jobs run on the group.
       REPOS: tempo-sim/Tempo
-      MAX_QUEUED_MINUTES: 60
+      # Queued this long with an idle runner that could take it: stuck.
+      STUCK_MINUTES: 15
+      # Queued this long at all: stuck, whatever the runners are doing.
+      MAX_QUEUED_MINUTES: 360
       REPEAT_HOURS: 12
     steps:
     - name: Mint Token (GitHub App)
@@ -67,14 +72,30 @@ jobs:
           --jq ".runner_groups[] | select(.name == \"$GROUP\") | .id") || add "could not list runner groups (is the app installed with Self-hosted runners: read?)"
         if [ -n "${group_id:-}" ]; then
           runners=$(gh api "orgs/$ORG/actions/runner-groups/$group_id/runners" --paginate \
-            --jq '.runners[] | [.name, .status, (.busy | tostring)] | @tsv') || add "could not list the runners of $GROUP"
+            --jq '.runners[] | [.name, .status, (.busy | tostring), ([.labels[].name] | join(","))] | @tsv') \
+            || add "could not list the runners of $GROUP"
           [ -n "${runners:-}" ] || add "runner group $GROUP has no runners"
-          while IFS=$'\t' read -r name status _busy; do
-            [ -z "$name" ] || [ "$status" = online ] || add "runner $name is $status"
+          : > idle-runners
+          while IFS=$'\t' read -r name status busy labels; do
+            [ -n "$name" ] || continue
+            [ "$status" = online ] || add "runner $name is $status"
+            [ "$status" = online ] && [ "$busy" = false ] && echo "$labels" >> idle-runners
           done <<< "${runners:-}"
         elif ! [ -s "$problems" ]; then
           add "runner group $GROUP does not exist"
         fi
+
+        # could_run LABELS: an idle, online runner has every one of LABELS (comma-separated).
+        could_run() {
+          local runner label
+          while read -r runner; do
+            for label in ${1//,/ }; do
+              case ",$runner," in *",$label,"*) ;; *) continue 2 ;; esac
+            done
+            return 0
+          done < idle-runners
+          return 1
+        }
 
         now=$(date +%s)
         for repo in $REPOS; do
@@ -82,10 +103,14 @@ jobs:
             gh api "repos/$repo/actions/runs?status=$status&per_page=100" --jq '.workflow_runs[].id' || add "could not list $status runs of $repo"
           done | sort -u | while read -r run; do
             gh api "repos/$repo/actions/runs/$run/jobs?filter=latest&per_page=100" --paginate \
-              --jq ".jobs[] | select(.status == \"queued\") | select(.labels | index(\"$GROUP\")) | [.name, .created_at, .html_url] | @tsv"
-          done | while IFS=$'\t' read -r name created url; do
+              --jq ".jobs[] | select(.status == \"queued\") | select(.labels | index(\"$GROUP\")) | [.name, .created_at, .html_url, (.labels | join(\",\"))] | @tsv"
+          done | while IFS=$'\t' read -r name created url labels; do
             minutes=$(( (now - $(date -d "$created" +%s)) / 60 ))
-            [ "$minutes" -lt "$MAX_QUEUED_MINUTES" ] || add "\"$name\" has been queued for ${minutes} minutes: $url"
+            if [ "$minutes" -ge "$MAX_QUEUED_MINUTES" ]; then
+              add "\"$name\" has been queued for ${minutes} minutes: $url"
+            elif [ "$minutes" -ge "$STUCK_MINUTES" ] && could_run "$labels"; then
+              add "\"$name\" has been queued for ${minutes} minutes while a runner that could take it is idle: $url"
+            fi
           done
         done
 
