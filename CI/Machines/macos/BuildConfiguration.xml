@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Tempo CI machine: UBA's local executor on Mac segfaults in libUbaDetours (several times per build,
+     and fatally with two builds at once). With no remote helpers it buys nothing over the parallel executor. -->
+<Configuration xmlns="https://www.unrealengine.com/BuildConfiguration">
+  <BuildConfiguration>
+    <bAllowUBAExecutor>false</bAllowUBAExecutor>
+  </BuildConfiguration>
+</Configuration>

@@ -48,13 +48,6 @@ jobs:
       upload_artifact: true
     secrets: inherit
 
-  # Fan-out (Python): one parallel job per (Unreal version x group). Each downloads the single
-  # packaged artifact produced above, installs the generated tempo-sim wheel from it, launches the
-  # packaged sim headless, and runs that group's pytest markers. Build once, test in parallel.
-  #
-  # NOTE: the "sensors" group is intentionally NOT here — sensor-data APIs need a GPU. To enable it,
-  # add "sensors" to the matrix below AND give it a GPU runner + render:true (e.g. via matrix
-  # `include`), since this matrix's jobs run on the GPU-less default runner.
   # Native builds on Tempo's dedicated self-hosted machines (runner group "tempo-ci"): build, package and
   # every test group in ONE job per (machine, engine version), incrementally from the machine's cached
   # build of main. See build_and_package_native.yml. No secrets: the job runs PR code on a persistent
@@ -99,6 +92,13 @@ jobs:
         cpp-integration: Scripts/TestCppAPI.sh integration
         cpp-typed: Scripts/TestCppAPI.sh typed
 
+  # Fan-out (Python): one parallel job per (Unreal version x group). Each downloads the single
+  # packaged artifact produced above, installs the generated tempo-sim wheel from it, launches the
+  # packaged sim headless, and runs that group's pytest markers. Build once, test in parallel.
+  #
+  # NOTE: the "sensors" group is intentionally NOT here — sensor-data APIs need a GPU. To enable it,
+  # add "sensors" to the matrix below AND give it a GPU runner + render:true (e.g. via matrix
+  # `include`), since this matrix's jobs run on the GPU-less default runner.
   test_packaged_python_api:
     name: Test Packaged Python API
     needs: build_and_package
