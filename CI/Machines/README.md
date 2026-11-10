@@ -72,6 +72,6 @@ safe while jobs run, and does not restart a runner that is busy.
 
 ## Windows and Linux
 
-Not yet. The workflow is OS-agnostic and the contract is the same; what is macOS-only is the service
+Not yet: `NEW_MACHINE.md` is the guide for adding one. The workflow is OS-agnostic and the contract is the same; what is macOS-only is the service
 manager (launchd here; systemd and a Windows service there), `runner_problems` in `lib.sh`, and the
 `macos/` directory.
