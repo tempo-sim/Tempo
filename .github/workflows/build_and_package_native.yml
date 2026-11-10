@@ -20,6 +20,8 @@
 #   TEMPO_CI_UE_<maj>_<min>_ENGINE      Engine install per supported version, e.g. TEMPO_CI_UE_5_7_ENGINE.
 #   TEMPO_CI_UE_<maj>_<min>_DEVELOPER_DIR  (Mac) The Xcode for that engine, e.g. .../Xcode-26.6.0.app/Contents/Developer.
 #   TEMPO_CI_MIN_FREE_GB                Optional (default 100). Below this the job fails as machine trouble.
+#   TEMPO_CI_ALERT_COMMAND              Optional. Run with the reason when the job finds machine trouble, to
+#                                       alert a human from the machine itself (CI/Machines/notify.sh).
 # and its PATH must provide git, python3, and uv (which installs the tests' Python, see python_version).
 #
 # One runner per engine version per machine, labelled tempo-ue-<maj>.<min> (the job adds that label to
@@ -30,7 +32,8 @@
 # Security: this job runs the code under test on a machine that outlives the job, and it is given NO
 # secrets. Callers must not pass any (no `secrets: inherit`), and should gate fork PRs behind a protected
 # environment (the `environment` input), exactly as for build_and_package.yml. Alerting a human about the
-# machine belongs in a separate job of the caller that runs no PR code - see the `machine_trouble` output.
+# machine is therefore the machine's job (TEMPO_CI_ALERT_COMMAND), not this workflow's. The machine's own
+# setup, monitoring and updates live in CI/Machines.
 # ======
 
 name: Build, Package and Test a Tempo Project Natively
@@ -163,6 +166,9 @@ jobs:
           echo "trouble=true" >> "$GITHUB_OUTPUT"
           echo "reason=$1" >> "$GITHUB_OUTPUT"
           echo "::error title=Machine needs attention (${RUNNER_NAME})::$1"
+          if [ -n "${TEMPO_CI_ALERT_COMMAND:-}" ]; then
+            "$TEMPO_CI_ALERT_COMMAND" "$RUNNER_NAME needs attention: $1 ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)" || true
+          fi
           exit 1
         }
         [ -n "$TEMPO_CI_MACHINE_ENV" ] && [ -f "$TEMPO_CI_MACHINE_ENV" ] \

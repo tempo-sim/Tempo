@@ -1,0 +1,157 @@
+# ======
+# Watchdog for Tempo's self-hosted CI machines (runner group "tempo-ci"), seen from GitHub's side.
+#
+# Every 15 minutes, on a GitHub-hosted runner, it asks GitHub whether every runner in the group is online,
+# and whether any job for the group is stuck in the queue: queued while an idle, online runner has every
+# label it asks for (a runner that is "online" but takes no jobs), or queued so long that no backlog
+# explains it (a job no runner's labels match, a machine that's wedged). A queue behind busy runners is
+# not a problem. It posts to Slack when the set of problems
+# changes, again every 12 hours while it persists, and once when it clears.
+#
+# The machines watch themselves too (CI/Machines): a heartbeat to healthchecks.io catches a machine that
+# is off or offline, which nothing on it can report, and a daily check catches a broken toolchain.
+#
+# Needs: the "self-hosted-runner-health" GitHub App (Organization: Self-hosted runners: read; Repository:
+# Actions: read), its ID in the CI_WATCHDOG_APP_ID variable and its private key in the
+# CI_WATCHDOG_APP_KEY secret; and the CI_SLACK_WEBHOOK secret.
+# ======
+
+name: CI Machine Watchdog
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write # its own state cache: read the last one, prune the old ones
+
+concurrency:
+  group: ci-machine-watchdog
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GROUP: tempo-ci
+      # Repositories whose jobs run on the group.
+      REPOS: tempo-sim/Tempo
+      # Queued this long with an idle runner that could take it: stuck.
+      STUCK_MINUTES: 15
+      # Queued this long at all: stuck, whatever the runners are doing.
+      MAX_QUEUED_MINUTES: 360
+      REPEAT_HOURS: 12
+    steps:
+    - name: Mint Token (GitHub App)
+      id: app_token
+      uses: actions/create-github-app-token@v3
+      with:
+        app-id: ${{ vars.CI_WATCHDOG_APP_ID }}
+        private-key: ${{ secrets.CI_WATCHDOG_APP_KEY }}
+        owner: ${{ github.repository_owner }}
+
+    - name: Restore Last State
+      uses: actions/cache/restore@v6
+      with:
+        path: watchdog-state
+        key: ci-watchdog-state-${{ github.run_id }}
+        restore-keys: ci-watchdog-state-
+
+    - name: Check Runners and Queue
+      env:
+        GH_TOKEN: ${{ steps.app_token.outputs.token }}
+        ORG: ${{ github.repository_owner }}
+      run: |
+        set -uo pipefail
+        problems=$(mktemp)
+        add() { echo "- $1" >> "$problems"; }
+
+        group_id=$(gh api "orgs/$ORG/actions/runner-groups" --paginate \
+          --jq ".runner_groups[] | select(.name == \"$GROUP\") | .id") || add "could not list runner groups (is the app installed with Self-hosted runners: read?)"
+        if [ -n "${group_id:-}" ]; then
+          runners=$(gh api "orgs/$ORG/actions/runner-groups/$group_id/runners" --paginate \
+            --jq '.runners[] | [.name, .status, (.busy | tostring), ([.labels[].name] | join(","))] | @tsv') \
+            || add "could not list the runners of $GROUP"
+          [ -n "${runners:-}" ] || add "runner group $GROUP has no runners"
+          : > idle-runners
+          while IFS=$'\t' read -r name status busy labels; do
+            [ -n "$name" ] || continue
+            [ "$status" = online ] || add "runner $name is $status"
+            [ "$status" = online ] && [ "$busy" = false ] && echo "$labels" >> idle-runners
+          done <<< "${runners:-}"
+        elif ! [ -s "$problems" ]; then
+          add "runner group $GROUP does not exist"
+        fi
+
+        # could_run LABELS: an idle, online runner has every one of LABELS (comma-separated).
+        could_run() {
+          local runner label
+          while read -r runner; do
+            for label in ${1//,/ }; do
+              case ",$runner," in *",$label,"*) ;; *) continue 2 ;; esac
+            done
+            return 0
+          done < idle-runners
+          return 1
+        }
+
+        now=$(date +%s)
+        for repo in $REPOS; do
+          for status in queued in_progress; do
+            gh api "repos/$repo/actions/runs?status=$status&per_page=100" --jq '.workflow_runs[].id' || add "could not list $status runs of $repo"
+          done | sort -u | while read -r run; do
+            gh api "repos/$repo/actions/runs/$run/jobs?filter=latest&per_page=100" --paginate \
+              --jq ".jobs[] | select(.status == \"queued\") | select(.labels | index(\"$GROUP\")) | [.name, .created_at, .html_url, (.labels | join(\",\"))] | @tsv"
+          done | while IFS=$'\t' read -r name created url labels; do
+            minutes=$(( (now - $(date -d "$created" +%s)) / 60 ))
+            if [ "$minutes" -ge "$MAX_QUEUED_MINUTES" ]; then
+              add "\"$name\" has been queued for ${minutes} minutes: $url"
+            elif [ "$minutes" -ge "$STUCK_MINUTES" ] && could_run "$labels"; then
+              add "\"$name\" has been queued for ${minutes} minutes while a runner that could take it is idle: $url"
+            fi
+          done
+        done
+
+        sort "$problems" > current
+        echo "Problems:"; cat current
+
+    - name: Report Changes
+      env:
+        SLACK_WEBHOOK: ${{ secrets.CI_SLACK_WEBHOOK }}
+      run: |
+        set -uo pipefail
+        mkdir -p watchdog-state
+        touch watchdog-state/problems
+        last_sent=$(cat watchdog-state/sent-at 2>/dev/null || echo 0)
+        now=$(date +%s)
+        post() {
+          jq -n --arg text "$1" '{text: $text}' | curl -fsS -m 20 --retry 3 -o /dev/null \
+            -H 'Content-Type: application/json' --data-binary @- "$SLACK_WEBHOOK" && echo "$now" > watchdog-state/sent-at
+        }
+        if [ -s current ]; then
+          if ! cmp -s current watchdog-state/problems || [ $(( now - last_sent )) -ge $(( REPEAT_HOURS * 3600 )) ]; then
+            post "CI watchdog: the $GROUP machines need attention
+        $(cat current)"
+          fi
+        elif [ -s watchdog-state/problems ]; then
+          post "CI watchdog: resolved, every $GROUP runner is online and nothing is stuck in the queue."
+        fi
+        cp current watchdog-state/problems
+
+    - name: Save State
+      if: always()
+      uses: actions/cache/save@v6
+      with:
+        path: watchdog-state
+        key: ci-watchdog-state-${{ github.run_id }}
+
+    - name: Prune Old State
+      if: always()
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+      run: |
+        gh cache list --limit 100 --key ci-watchdog-state- --sort created_at --order desc --json id --jq '.[2:][].id' \
+          | xargs -r -n1 gh cache delete || true
