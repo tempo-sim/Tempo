@@ -443,7 +443,8 @@ sim (not the editor). They cover the client-facing API contract and behavior ove
   launches the packaged binary headless, polls until the gRPC server answers, and tears it down.
   RHI is `-nullrhi` by default; `TEMPO_SIM_RENDER=1` renders off-screen (the `sensors` group, which
   also wants a GPU). The sim's full log is written to `TEMPO_TEST_REPORT_DIR/sim.log` (uploaded as a
-  CI artifact) for post-mortem. `contract` groups never launch a sim. Python's `fixed_step` fixture
+  CI artifact) for post-mortem. On teardown the fixture asks the sim to quit and fails the session if it
+  hangs or exits non-zero. `contract` groups never launch a sim. Python's `fixed_step` fixture
   gives deterministic stepping.
 - **Runner scripts** (`Scripts/TestPythonAPI.sh` / `TestRustAPI.sh`, with `.bat` mirrors) locate the
   `Packaged` build, install the shipped client (`Packaged/API/Python/*.whl` — *all* wheels, so a
@@ -466,10 +467,12 @@ sim (not the editor). They cover the client-facing API contract and behavior ove
   to test its **own** custom API surface (its generated client ships in the same `Packaged/API`
   folders) by passing its own `test_command` and `submodules: recursive`.
 
-**Still absent:** functional/agents/ROS tests, and the GPU-gated `sensors` group in CI. Adding a
-new behavior test = a new marker (Python) or `tests/*.rs` (Rust); a brand-new group also needs a
-matrix entry in `tempo_build_and_package.yml` (and, for Python, a line in `pytest.ini`). Enabling
-`sensors` means a GPU `runner` + `render: true` on that matrix entry.
+**Still absent:** functional/agents/ROS tests, and the GPU-gated `sensors` group anywhere but the
+native job (`python-sensors` in its `test_commands`; the machines there have GPUs), so not on Linux
+or Windows. Adding a new behavior test = a new marker (Python) or `tests/*.rs` (Rust); a brand-new
+group also needs a matrix entry in `tempo_build_and_package.yml` (and, for Python, a line in
+`pytest.ini`). Running `sensors` in a fan-out job means a GPU `runner` + `render: true` on that
+matrix entry.
 
 ---
 

@@ -15,6 +15,8 @@ Configuration comes from the environment (set by Scripts/TestPythonAPI.sh):
                                (Linux/macOS). Set to run several sims on one machine without
                                assigning each a port. Takes precedence over TEMPO_SERVER_PORT.
   TEMPO_SIM_STARTUP_TIMEOUT_S  How long to wait for the server to come up (default 300).
+  TEMPO_SIM_EXIT_TIMEOUT_S     How long the sim has to exit after Quit before the session fails
+                               (default 60).
   TEMPO_SIM_RENDER             "1" to render off-screen (sensors group); else -nullrhi.
   TEMPO_TEST_REPORT_DIR        If set, the sim's full log is written here (sim.log) so CI uploads it.
 """
@@ -61,6 +63,7 @@ SERVER_PORT = int(os.environ.get("TEMPO_SERVER_PORT", "10001"))
 SERVER_SOCKET = os.environ.get("TEMPO_SERVER_SOCKET", "").strip()
 PACKAGED_BINARY = os.environ.get("TEMPO_PACKAGED_BINARY", "")
 STARTUP_TIMEOUT_S = float(os.environ.get("TEMPO_SIM_STARTUP_TIMEOUT_S", "300"))
+EXIT_TIMEOUT_S = float(os.environ.get("TEMPO_SIM_EXIT_TIMEOUT_S", "60"))
 
 
 def _tail(path, n=200):
@@ -142,19 +145,29 @@ def sim_server():
 
     yield proc
 
-    # Graceful shutdown first, then escalate.
+    # Graceful shutdown first, then escalate. A sim that hangs or crashes on the way out fails the
+    # session: nothing else here would notice, and what goes wrong at exit (a thread that is never
+    # joined, a worker still responding as the server goes down) goes wrong nowhere else.
+    if proc.poll() is not None:
+        log.flush()
+        pytest.fail(f"Sim exited during the tests (exit code {proc.returncode}). Log tail:\n{_tail(log.name)}")
     try:
         tc.quit()
     except Exception:
         pass
     try:
-        proc.wait(timeout=20)
+        proc.wait(timeout=EXIT_TIMEOUT_S)
     except subprocess.TimeoutExpired:
         proc.terminate()
         try:
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             proc.kill()
+        log.flush()
+        pytest.fail(f"Sim did not exit within {EXIT_TIMEOUT_S}s of Quit. Log tail:\n{_tail(log.name)}")
+    if proc.returncode != 0:
+        log.flush()
+        pytest.fail(f"Sim exited with code {proc.returncode} after Quit. Log tail:\n{_tail(log.name)}")
 
 
 @pytest.fixture
