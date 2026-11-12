@@ -917,6 +917,8 @@ def test_a_stream_read_across_paused_frames_drops_no_capture(camera_rig, fixed_s
 # depth after its last depth request. Stepping past it puts the camera in its color-only state.
 DEBOUNCE_FRAMES = 30
 
+SETTLE_STEPS = int(os.environ.get("TEMPO_TEST_SETTLE_STEPS", str(DEBOUNCE_FRAMES + 10)))
+
 # Steps the soak test advances. The races it is after are statistical, so more is better; this is
 # what stays tolerable on a developer's machine.
 SOAK_STEPS = int(os.environ.get("TEMPO_TEST_SOAK_STEPS", "300"))
@@ -980,14 +982,16 @@ async def _close(stream, *tasks):
         pass
 
 
-async def _headers_while_stepping(streams, steps):
+async def _headers_while_stepping(streams, steps, settle_steps=0):
     """Read every stream in `streams` ({name: async iterator}) continuously while stepping back to
     back, and return {name: [message, ...]} with only what a delivery check needs kept from each
     message: its header, and a lidar segment's place in its sweep.
 
     The caller opens the streams, and has to do it in the body of a coroutine: the client picks a
     wrapper's blocking or async variant by its caller's frame, so one opened from a helper, a lambda
-    or a comprehension comes back as the blocking generator."""
+    or a comprehension comes back as the blocking generator.
+
+    What arrives during the first `settle_steps` steps is read and left out."""
     received = {name: [] for name in streams}
 
     async def consume(name, stream):
@@ -1001,6 +1005,9 @@ async def _headers_while_stepping(streams, steps):
     consumers = {name: asyncio.ensure_future(consume(name, stream)) for name, stream in streams.items()}
     try:
         await asyncio.sleep(0.1)
+        for _ in range(settle_steps):
+            await tc.step()
+        settled = {name: len(messages) for name, messages in received.items()}
         for _ in range(steps):
             await tc.step()
             failed = [name for name, consumer in consumers.items() if consumer.done()]
@@ -1013,7 +1020,7 @@ async def _headers_while_stepping(streams, steps):
     finally:
         for name, stream in streams.items():
             await _close(stream, consumers[name])
-    return received
+    return {name: messages[settled[name]:] for name, messages in received.items()}
 
 
 def _assert_no_capture_dropped(name, ids, skip=2, at_least=10):
@@ -1165,7 +1172,7 @@ def test_every_stream_read_at_once_while_stepping_drops_no_capture(lidar_rig, fi
             streams[f"{owner}/{sensor} depth"] = ts.stream_depth_images(owner=owner, sensor=sensor).__aiter__()
         for owner, sensor in lidars:
             streams[f"{owner}/{sensor} lidar"] = ts.stream_lidar_scans(owner=owner, sensor=sensor).__aiter__()
-        return await _headers_while_stepping(streams, SOAK_STEPS)
+        return await _headers_while_stepping(streams, SOAK_STEPS, settle_steps=SETTLE_STEPS * steps_per_game_frame)
 
     tc.set_steps_per_game_frame(steps_per_game_frame=steps_per_game_frame)
     _pipelined(True)
@@ -1203,6 +1210,29 @@ async def _step_reading(stream, steps):
     return messages
 
 
+async def _settle_reading(stream, steps):
+    """Step at least `steps` times reading `stream`, without requiring a capture from every step, and
+    return with no read outstanding.
+
+    A camera that stops being asked for depth turns it off some frames later, and the reconfigure
+    skips a capture. Whether that falls in a test depends on what ran before it, so a test that
+    needs a capture per step first steps past it with this."""
+    pending = None
+    for step in range(steps + 10):
+        if pending is None:
+            if step >= steps:
+                return
+            pending = asyncio.ensure_future(stream.__anext__())
+            await asyncio.sleep(0.05)
+        await tc.step()
+        done, _ = await asyncio.wait({pending}, timeout=2.0)
+        if done:
+            pending.result()
+            pending = None
+    pending.cancel()
+    raise AssertionError(f"no capture arrived in the last steps of {steps + 10} while settling")
+
+
 def test_a_label_stream_opened_late_is_served_promptly(camera_rig, labeled_scene, fixed_step):
     """Label and bounding box streams opened on a camera that has only streamed color for a while
     must get labeled frames within a couple of captures, and they must be real: the labels of the
@@ -1219,7 +1249,8 @@ def test_a_label_stream_opened_late_is_served_promptly(camera_rig, labeled_scene
         pending = []
         try:
             # Long enough for the camera to have settled into rendering color alone.
-            before = await _step_reading(color_stream, DEBOUNCE_FRAMES + 10)
+            await _settle_reading(color_stream, DEBOUNCE_FRAMES + 10)
+            before = await _step_reading(color_stream, 5)
 
             label_stream = ts.stream_label_images(owner=owner, sensor=sensor).__aiter__()
             box_stream = ts.stream_bounding_boxes(owner=owner, sensor=sensor).__aiter__()
@@ -1230,7 +1261,7 @@ def test_a_label_stream_opened_late_is_served_promptly(camera_rig, labeled_scene
             steps = 0
             while not all(read.done() for read in pending):
                 assert steps < 3, (
-                    f"label and bounding box streams opened after {len(before)} color-only captures "
+                    f"label and bounding box streams opened after {DEBOUNCE_FRAMES + 15} color-only captures "
                     f"had not both been served {steps} captures later"
                 )
                 color_read = asyncio.ensure_future(color_stream.__anext__())
@@ -1251,7 +1282,7 @@ def test_a_label_stream_opened_late_is_served_promptly(camera_rig, labeled_scene
 
     before, label, boxes, colors = asyncio.run(run())
 
-    _assert_no_capture_dropped("color before the label stream", [c.header.sequence_id for c in before], at_least=DEBOUNCE_FRAMES)
+    _assert_no_capture_dropped("color before the label stream", [c.header.sequence_id for c in before], skip=0, at_least=5)
     assert label.header.sequence_id == boxes.header.sequence_id, (
         f"the first label image and the first bounding boxes are of different captures: "
         f"{label.header.sequence_id} and {boxes.header.sequence_id}"
@@ -1301,7 +1332,7 @@ def test_color_is_the_same_with_and_without_a_label_stream(camera_rig, labeled_s
         label_reader = None
         try:
             # Settle: temporal history, exposure, and the camera into rendering color alone.
-            await _step_reading(color_stream, DEBOUNCE_FRAMES + 10)
+            await _settle_reading(color_stream, DEBOUNCE_FRAMES + 10)
             alone = await _step_reading(color_stream, count)
 
             label_stream = ts.stream_label_images(owner=owner, sensor=sensor).__aiter__()
