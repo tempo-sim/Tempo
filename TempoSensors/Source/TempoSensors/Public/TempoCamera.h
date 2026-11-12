@@ -328,6 +328,7 @@ public:
 
 	// Begin ITempoSensorInterface
 	virtual TOptional<TFuture<void>> SendMeasurements() override;
+	virtual TOptional<TFuture<void>> SendRequestedMeasurements() override;
 	// End ITempoSensorInterface
 
 	bool HasPendingCameraRequests() const;
@@ -514,6 +515,22 @@ protected:
 	TArray<FBoundingBoxesRequest> PendingBoundingBoxesRequests;
 	mutable FCriticalSection RequestsMutex;
 	bool bDepthRequestedSinceSend = false;
+	// The streams the last decode responded to that haven't asked for their next image yet. Between
+	// frames a read is decoded only once this is empty, so that it goes to every stream of the camera
+	// and not just to those whose response happened to be written first. Under RequestsMutex.
+	TSet<FDelegateHandle> StreamsAwaitingRerequest;
+	// Set while the game thread runs the frame's send, from its wait for the decodes in flight until
+	// it has sent: a decode the render thread launched in between would take the requests the frame's
+	// read is about to be sent to. Under RequestsMutex.
+	bool bRenderThreadLaunchPaused = false;
+
+	TOptional<TFuture<void>> SendMeasurementsInternal(bool bFrameSend);
+
+	// Whether any image request is waiting. RequestsMutex held.
+	bool HasPendingImageRequests_Locked() const;
+
+	// Takes the requests TextureRead can answer and launches its decode. RequestsMutex held.
+	TFuture<void> TakeRequestsAndDecode_Locked(TSharedPtr<FTextureRead> TextureRead, double TransmissionTime);
 	// The world time at the game thread's latest send: the transmission time of a decode the render
 	// thread launches before the next one.
 	double LastSendTimeSeconds = 0.0;

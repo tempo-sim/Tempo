@@ -863,54 +863,118 @@ bool UTempoCamera::HasPendingCameraRequests() const
 
 TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 {
+	return SendMeasurementsInternal(/*bFrameSend=*/true);
+}
+
+TOptional<TFuture<void>> UTempoCamera::SendRequestedMeasurements()
+{
+	return SendMeasurementsInternal(/*bFrameSend=*/false);
+}
+
+bool UTempoCamera::HasPendingImageRequests_Locked() const
+{
+	return !PendingColorImageRequests.IsEmpty() || !PendingLabelImageRequests.IsEmpty() || !PendingDepthImageRequests.IsEmpty() || !PendingBoundingBoxesRequests.IsEmpty();
+}
+
+TFuture<void> UTempoCamera::TakeRequestsAndDecode_Locked(TSharedPtr<FTextureRead> TextureRead, double TransmissionTime)
+{
+	const bool bReadHasDepth = TextureRead->GetType() == TEXT("WithDepth");
+	const bool bReadHasLabels = bReadHasDepth
+		? static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->bLabelsRendered
+		: static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->bLabelsRendered;
+
+	TArray<FColorImageRequest> ColorRequests = MoveTemp(PendingColorImageRequests);
+	TArray<FLabelImageRequest> LabelRequests;
+	TArray<FBoundingBoxesRequest> BoundingBoxRequests;
+	// A read captured without its custom depth pass has no labels; those requests wait for the
+	// first read that does (RenderCapture renders it while any is pending).
+	if (bReadHasLabels)
+	{
+		LabelRequests = MoveTemp(PendingLabelImageRequests);
+		BoundingBoxRequests = MoveTemp(PendingBoundingBoxesRequests);
+	}
+	// A NoDepth read that completes while bDepthEnabled has since flipped to true (or vice
+	// versa) cannot satisfy depth requests. Key off the read's type rather than the current
+	// bDepthEnabled so stale requests aren't dropped across a toggle boundary.
+	TArray<FDepthImageRequest> DepthRequests;
+	if (bReadHasDepth)
+	{
+		DepthRequests = MoveTemp(PendingDepthImageRequests);
+		bDepthRequestedSinceSend |= !DepthRequests.IsEmpty();
+	}
+
+	for (const FColorImageRequest& Request : ColorRequests)
+	{
+		StreamsAwaitingRerequest.Add(Request.ResponseContinuation.GetHandle());
+	}
+	for (const FLabelImageRequest& Request : LabelRequests)
+	{
+		StreamsAwaitingRerequest.Add(Request.ResponseContinuation.GetHandle());
+	}
+	for (const FDepthImageRequest& Request : DepthRequests)
+	{
+		StreamsAwaitingRerequest.Add(Request.ResponseContinuation.GetHandle());
+	}
+	for (const FBoundingBoxesRequest& Request : BoundingBoxRequests)
+	{
+		StreamsAwaitingRerequest.Add(Request.ResponseContinuation.GetHandle());
+	}
+
+	if (ColorRequests.IsEmpty() && LabelRequests.IsEmpty() && DepthRequests.IsEmpty() && BoundingBoxRequests.IsEmpty())
+	{
+		UE_LOG(LogTempoSensors, Verbose, TEXT("%s %s: read %d is decoded with no request waiting for it"),
+			*GetOwnerName(), *GetSensorName(), TextureRead->SequenceId);
+	}
+
+	// Not before the capture: the render thread launches with the time of the game thread's last
+	// send, which can be the send at the start of the frame the read was captured in.
+	TransmissionTime = FMath::Max(TransmissionTime, TextureRead->CaptureTime);
+	return DecodeAndRespond(MoveTemp(TextureRead), MoveTemp(ColorRequests), MoveTemp(LabelRequests),
+		MoveTemp(DepthRequests), MoveTemp(BoundingBoxRequests), TransmissionTime);
+}
+
+TOptional<TFuture<void>> UTempoCamera::SendMeasurementsInternal(bool bFrameSend)
+{
 	TOptional<TFuture<void>> Future;
 
 	// Snapshot depth-request state before draining, so the toggle decision below sees ongoing
 	// client intent in the steady state (one depth request per frame, drained the same frame)
 	// instead of oscillating off/on when the queue looks empty post-drain.
-	// Reads the render thread already decoded (LaunchDecodeForCompletedRead_RenderThread) are done with.
-	TextureReadQueue.PopLaunchedReads();
-
 	bool bHadDepthRequests;
 	{
+		// One critical section with the render thread's launch (LaunchDecodeForCompletedRead_RenderThread):
+		// which read is next, whether a decode is in flight and which requests are waiting are decided
+		// together, or the two threads could each take one of them from under the other.
 		FScopeLock RequestsLock(&RequestsMutex);
+
+		// Reads the render thread already decoded are done with.
+		TextureReadQueue.PopLaunchedReads();
+
 		bHadDepthRequests = !PendingDepthImageRequests.IsEmpty() || bDepthRequestedSinceSend;
 		bDepthRequestedSinceSend = false;
 		LastSendTimeSeconds = GetWorld()->GetTimeSeconds();
-	}
 
-	if (TextureReadQueue.NextReadComplete() && DecodesInFlight->load() == 0)
-	{
-		if (TSharedPtr<FTextureRead> TextureRead = TextureReadQueue.DequeueIfReadComplete())
+		if (bFrameSend)
 		{
-			const bool bReadHasDepth = TextureRead->GetType() == TEXT("WithDepth");
-			const bool bReadHasLabels = bReadHasDepth
-				? static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->bLabelsRendered
-				: static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->bLabelsRendered;
-			TArray<FColorImageRequest> ColorRequests;
-			TArray<FLabelImageRequest> LabelRequests;
-			TArray<FDepthImageRequest> DepthRequests;
-			TArray<FBoundingBoxesRequest> BoundingBoxRequests;
+			// The frame has waited for the decodes and finished their writes, so every stream that
+			// is still there has asked again.
+			StreamsAwaitingRerequest.Reset();
+		}
+
+		// The frame's send takes the read whatever is waiting for it, so that nothing is held past a
+		// game frame. Between frames the read is kept until all of the camera's streams can have it.
+		const bool bMaySend = bFrameSend || (HasPendingImageRequests_Locked() && StreamsAwaitingRerequest.IsEmpty());
+		if (bMaySend && TextureReadQueue.NextReadComplete() && DecodesInFlight->load() == 0)
+		{
+			if (TSharedPtr<FTextureRead> TextureRead = TextureReadQueue.DequeueIfReadComplete())
 			{
-				FScopeLock RequestsLock(&RequestsMutex);
-				ColorRequests = MoveTemp(PendingColorImageRequests);
-				// A read captured without its custom depth pass has no labels; those requests wait for the
-				// first read that does (RenderCapture renders it while any is pending).
-				if (bReadHasLabels)
-				{
-					LabelRequests = MoveTemp(PendingLabelImageRequests);
-					BoundingBoxRequests = MoveTemp(PendingBoundingBoxesRequests);
-				}
-				// A NoDepth read that completes while bDepthEnabled has since flipped to true (or vice
-				// versa) cannot satisfy depth requests. Key off the read's type rather than the current
-				// bDepthEnabled so stale requests aren't dropped across a toggle boundary.
-				if (bReadHasDepth)
-				{
-					DepthRequests = MoveTemp(PendingDepthImageRequests);
-				}
+				Future = TakeRequestsAndDecode_Locked(MoveTemp(TextureRead), GetWorld()->GetTimeSeconds());
 			}
-			Future = DecodeAndRespond(MoveTemp(TextureRead), MoveTemp(ColorRequests), MoveTemp(LabelRequests),
-				MoveTemp(DepthRequests), MoveTemp(BoundingBoxRequests), GetWorld()->GetTimeSeconds());
+		}
+
+		if (bFrameSend)
+		{
+			bRenderThreadLaunchPaused = false;
 		}
 	}
 
@@ -1008,12 +1072,14 @@ void UTempoCamera::RequestMeasurement(const TempoSensors::ColorImageRequest& Req
 {
 	FScopeLock RequestsLock(&RequestsMutex);
 	PendingColorImageRequests.Add({ Request, ResponseContinuation});
+	StreamsAwaitingRerequest.Remove(ResponseContinuation.GetHandle());
 }
 
 void UTempoCamera::RequestMeasurement(const TempoSensors::LabelImageRequest& Request, const TResponseDelegate<TempoSensors::LabelImage>& ResponseContinuation)
 {
 	FScopeLock RequestsLock(&RequestsMutex);
 	PendingLabelImageRequests.Add({ Request, ResponseContinuation});
+	StreamsAwaitingRerequest.Remove(ResponseContinuation.GetHandle());
 	LastLabelRequestFrame = GFrameCounter;
 }
 
@@ -1021,12 +1087,14 @@ void UTempoCamera::RequestMeasurement(const TempoSensors::DepthImageRequest& Req
 {
 	FScopeLock RequestsLock(&RequestsMutex);
 	PendingDepthImageRequests.Add({ Request, ResponseContinuation});
+	StreamsAwaitingRerequest.Remove(ResponseContinuation.GetHandle());
 }
 
 void UTempoCamera::RequestMeasurement(const TempoSensors::BoundingBoxesRequest& Request, const TResponseDelegate<TempoSensors::BoundingBoxes>& ResponseContinuation)
 {
 	FScopeLock RequestsLock(&RequestsMutex);
 	PendingBoundingBoxesRequests.Add({ Request, ResponseContinuation});
+	StreamsAwaitingRerequest.Remove(ResponseContinuation.GetHandle());
 	LastLabelRequestFrame = GFrameCounter;
 }
 
@@ -1201,41 +1269,20 @@ void UTempoCamera::LaunchDecodeForCompletedRead_RenderThread()
 		return;
 	}
 
-	// A read is decoded only for the requests waiting for it; with none it is kept for the next
-	// request or the frame's send, exactly as the game thread keeps it.
-	TArray<FColorImageRequest> ColorRequests;
-	TArray<FLabelImageRequest> LabelRequests;
-	TArray<FDepthImageRequest> DepthRequests;
-	TArray<FBoundingBoxesRequest> BoundingBoxRequests;
-	TSharedPtr<FTextureRead> TextureRead;
+	// One critical section with the game thread's send; see SendMeasurementsInternal.
+	FScopeLock RequestsLock(&RequestsMutex);
+
+	// A read is decoded only for the requests waiting for it, and only once every stream of the
+	// camera can be among them; until then it is kept for the next request or the frame's send,
+	// exactly as the game thread keeps it between frames. And not while the frame's send is under
+	// way: that send is about to take this read, with the requests this would take from it.
+	if (bRenderThreadLaunchPaused || !HasPendingImageRequests_Locked() || !StreamsAwaitingRerequest.IsEmpty() || DecodesInFlight->load() != 0)
 	{
-		FScopeLock RequestsLock(&RequestsMutex);
-		if (PendingColorImageRequests.IsEmpty() && PendingLabelImageRequests.IsEmpty() && PendingDepthImageRequests.IsEmpty() && PendingBoundingBoxesRequests.IsEmpty())
-		{
-			return;
-		}
-		TextureRead = TextureReadQueue.ClaimHeadForDecode();
-		if (!TextureRead)
-		{
-			return;
-		}
-		const bool bReadHasDepth = TextureRead->GetType() == TEXT("WithDepth");
-		const bool bReadHasLabels = bReadHasDepth
-			? static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->bLabelsRendered
-			: static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->bLabelsRendered;
-		ColorRequests = MoveTemp(PendingColorImageRequests);
-		if (bReadHasLabels)
-		{
-			LabelRequests = MoveTemp(PendingLabelImageRequests);
-			BoundingBoxRequests = MoveTemp(PendingBoundingBoxesRequests);
-		}
-		if (bReadHasDepth)
-		{
-			DepthRequests = MoveTemp(PendingDepthImageRequests);
-			bDepthRequestedSinceSend |= !DepthRequests.IsEmpty();
-		}
-		RenderThreadDecodes.Add(DecodeAndRespond(MoveTemp(TextureRead), MoveTemp(ColorRequests), MoveTemp(LabelRequests),
-			MoveTemp(DepthRequests), MoveTemp(BoundingBoxRequests), LastSendTimeSeconds));
+		return;
+	}
+	if (TSharedPtr<FTextureRead> TextureRead = TextureReadQueue.ClaimHeadForDecode())
+	{
+		RenderThreadDecodes.Add(TakeRequestsAndDecode_Locked(MoveTemp(TextureRead), LastSendTimeSeconds));
 	}
 }
 
@@ -1244,6 +1291,9 @@ void UTempoCamera::WaitForDecodes()
 	TArray<TFuture<void>> Decodes;
 	{
 		FScopeLock RequestsLock(&RequestsMutex);
+		// Until the frame's send has run (SendMeasurements). A launch already under way holds the
+		// lock, so its decode is in the list by now.
+		bRenderThreadLaunchPaused = true;
 		Decodes = MoveTemp(RenderThreadDecodes);
 	}
 	for (const TFuture<void>& Decode : Decodes)

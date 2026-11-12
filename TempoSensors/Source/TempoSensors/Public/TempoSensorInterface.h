@@ -44,6 +44,13 @@ public:
 	// Respond to pending measurement requests. Returns a future, so these can be parallelized.
 	virtual TOptional<TFuture<void>> SendMeasurements() = 0;
 
+	// Game thread, between frames. As SendMeasurements, but only once every stream the sensor's last
+	// measurement went to has asked for its next. A stream asks again when its response has been
+	// written, each in its own time, so a measurement sent before then would go to some of the
+	// sensor's streams and be lost to the rest. The frame's send, SendMeasurements, doesn't wait: by
+	// then the writes have been finished, and a stream that still hasn't asked has gone.
+	virtual TOptional<TFuture<void>> SendRequestedMeasurements() { return SendMeasurements(); }
+
 	// Game thread. Wait for the decodes this sensor launched itself (from the render thread, as a read
 	// completed) to have responded.
 	virtual void WaitForDecodes() {}

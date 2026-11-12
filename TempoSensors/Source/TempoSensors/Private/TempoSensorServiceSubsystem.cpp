@@ -320,7 +320,7 @@ void UTempoSensorServiceSubsystem::OnBetweenFramesPoll(UWorld* World)
 		{
 			continue;
 		}
-		if (TOptional<TFuture<void>> Future = Sensor->SendMeasurements())
+		if (TOptional<TFuture<void>> Future = Sensor->SendRequestedMeasurements())
 		{
 			DecodesInFlight.Emplace(Component, MoveTemp(Future.GetValue()));
 		}
