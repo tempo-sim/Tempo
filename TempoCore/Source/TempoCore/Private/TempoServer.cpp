@@ -294,6 +294,13 @@ void FTempoServer::Deinitialize()
 	checkf(Server.Get(), TEXT("Server was unexpectedly null"));
 	checkf(CompletionQueue.Get(), TEXT("CompletionQueue was unexpectedly null"));
 
+	// Closed first, so no response delegate, on whatever thread, writes to a call once the server and queue
+	// are shutting down, and none holds a manager the server is about to destroy.
+	for (const auto& RequestManager : RequestManagers)
+	{
+		RequestManager.Value->Close();
+	}
+
 	static constexpr int32 MaxShutdownTimeNanoSeconds = 5e7; // 0.05s
 	static constexpr gpr_timespec MaxShutdownWaitTime {0, MaxShutdownTimeNanoSeconds, GPR_TIMESPAN};
 	Server->Shutdown(MaxShutdownWaitTime);
@@ -608,7 +615,7 @@ void FTempoServer::HandleEventForTag(int32 Tag, bool bOk)
 	// A reference of its own, not a pointer into RequestManagers: the REQUESTED case adds to the map before it
 	// handles the request, and an add can reallocate the map's storage, which left the call after it reading
 	// its manager from freed memory. It also keeps the manager alive through its handler, whatever that does
-	// to the map.
+	// to the map. Like the map's, it is released on the game thread.
 	const TSharedPtr<FRequestManager>* Found = RequestManagers.Find(Tag);
 	if (!Found)
 	{
@@ -618,7 +625,7 @@ void FTempoServer::HandleEventForTag(int32 Tag, bool bOk)
 
 	if (!bOk)
 	{
-		RequestManagers.Remove(Tag);
+		RemoveRequestManager(Tag);
 		return;
 	}
 
@@ -656,9 +663,18 @@ void FTempoServer::HandleEventForTag(int32 Tag, bool bOk)
 		}
 	case FRequestManager::FINISHING: // The rpc has finished.
 		{
-			RequestManagers.Remove(Tag);
+			RemoveRequestManager(Tag);
 			break;
 		}
+	}
+}
+
+void FTempoServer::RemoveRequestManager(int32 Tag)
+{
+	if (const TSharedPtr<FRequestManager>* RequestManager = RequestManagers.Find(Tag))
+	{
+		(*RequestManager)->Close();
+		RequestManagers.Remove(Tag);
 	}
 }
 

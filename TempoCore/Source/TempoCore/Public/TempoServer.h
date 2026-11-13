@@ -29,66 +29,6 @@
 #include "Windows/HideWindowsPlatformTypes.h"
 #endif
 
-/**
- * The lock on a streaming request's responses, which a sensor's decode task takes from a worker thread while
- * the game thread handles the stream's write completions. An FCriticalSection, checked for the misuse that hung
- * a 5.8 sensors run: on Mac, 5.8's FCriticalSection is FAppleRecursiveMutex, whose Unlock trusts its caller. An
- * unlock by a thread that does not hold it -- or of a mutex destroyed and rebuilt in the same memory while its
- * holder was inside a locked scope -- takes its count to -1, and the next thread to lock it then keeps it for
- * good. That thread never notices (it re-enters freely); every other one blocks on it forever. On 5.7, and off
- * Mac, pthreads absorbs the same misuse unseen. Checked, it fails at the call that did it, with its callstack.
- */
-class FTempoResponseMutex
-{
-public:
-	FTempoResponseMutex() = default;
-	UE_NONCOPYABLE(FTempoResponseMutex);
-
-	~FTempoResponseMutex()
-	{
-		checkf(Owner.load(std::memory_order_relaxed) == 0,
-			TEXT("A request manager was destroyed while thread %u held its response lock."), Owner.load(std::memory_order_relaxed));
-		Alive = 0;
-	}
-
-	void Lock()
-	{
-		checkf(Alive == AliveValue, TEXT("A destroyed request manager's response lock was locked."));
-		Mutex.Lock();
-		const uint32 Self = FPlatformTLS::GetCurrentThreadId();
-		if (Depth++ == 0)
-		{
-			Owner.store(Self, std::memory_order_relaxed);
-		}
-		else
-		{
-			checkf(Owner.load(std::memory_order_relaxed) == Self,
-				TEXT("Thread %u re-entered a response lock held by thread %u."), Self, Owner.load(std::memory_order_relaxed));
-		}
-	}
-
-	void Unlock()
-	{
-		checkf(Alive == AliveValue, TEXT("A destroyed request manager's response lock was unlocked."));
-		const uint32 Self = FPlatformTLS::GetCurrentThreadId();
-		const uint32 Holder = Owner.load(std::memory_order_relaxed);
-		checkf(Holder == Self && Depth > 0,
-			TEXT("Thread %u unlocked a response lock it does not hold (held by thread %u)."), Self, Holder);
-		if (--Depth == 0)
-		{
-			Owner.store(0, std::memory_order_relaxed);
-		}
-		Mutex.Unlock();
-	}
-
-private:
-	static constexpr uint32 AliveValue = 0x7E3B0A11;
-	FCriticalSection Mutex;
-	std::atomic<uint32> Owner = 0;
-	uint32 Depth = 0;
-	volatile uint32 Alive = AliveValue;
-};
-
 template <class ResponseType>
 using TResponseDelegate = TDelegate<void(const ResponseType&, grpc::Status)>;
 
@@ -234,6 +174,10 @@ struct FRequestManager : TSharedFromThis<FRequestManager>
 	virtual void Activate(UObject* Object) = 0;
 	virtual void Deactivate() = 0;
 	virtual const FWeakObjectPtr& GetActiveObject() const = 0;
+	// Ends the manager's responses: its delegate does nothing from here on, and takes no further reference to
+	// it. Once this returns, nothing but the server holds the manager, so the server calls this before it
+	// releases one, and the manager is destroyed on the game thread. See TRequestManagerBase::BindResponseDelegate.
+	virtual void Close() = 0;
 };
 
 template <class HandlerType>
@@ -286,8 +230,52 @@ public:
 		return Handler->GetActiveObject();
 	}
 
+	virtual void Close() override
+	{
+		FScopeLock Lock(&Gate->Mutex);
+		Gate->bClosed = true;
+	}
+
 protected:
-	EState State;
+	using ResponseType = typename HandlerType::HandlerResponseType;
+
+	// What the manager and its response delegate share. A delegate may run on any thread (a sensor's decode
+	// task responds from a worker) and may outlive the manager, so the lock it takes lives here, not in the
+	// manager: a manager destroyed while a worker held a lock of its own freed that lock under it, and on Mac
+	// under 5.8, where FCriticalSection's Unlock does not check its owner, the lock rebuilt in that memory then
+	// read held for good. A sensors run hung on it.
+	struct FResponseGate
+	{
+		FCriticalSection Mutex;
+		bool bClosed = false; // Under Mutex.
+	};
+
+	// Binds ResponseDelegate to call OnResponse under the gate's lock, with the manager pinned, unless it is
+	// closed. The pin is taken only under the lock and only while the manager is open, and the server keeps
+	// its own reference until it closes it, so a pin is never the manager's last reference and none outlasts
+	// Close. Not CreateSP/CreateSPLambda: their check that the manager is alive is not made under this lock,
+	// and CreateSPLambda's ExecuteIfSafe does not even pin it for the call.
+	void BindResponseDelegate()
+	{
+		ResponseDelegate = TResponseDelegate<ResponseType>::CreateLambda([Gate = Gate, WeakThis = this->AsWeak()](const ResponseType& Response, grpc::Status Result)
+		{
+			FScopeLock Lock(&Gate->Mutex);
+			if (Gate->bClosed)
+			{
+				return;
+			}
+			if (const TSharedPtr<FRequestManager> PinnedThis = WeakThis.Pin())
+			{
+				static_cast<TRequestManagerBase*>(PinnedThis.Get())->OnResponse(Response, Result);
+			}
+		});
+	}
+
+	// A response, with the gate's lock held and the manager open.
+	virtual void OnResponse(const ResponseType& Response, grpc::Status Result) = 0;
+
+	// Read on the game thread while a delegate on a worker writes it.
+	std::atomic<EState> State;
 	int32 Tag;
 	const TSharedPtr<HandlerType> Handler;
 	const FName ServiceName;
@@ -296,6 +284,7 @@ protected:
 	grpc::ServerContext Context;
 	typename HandlerType::HandlerResponderType Responder;
 	TResponseDelegate<typename HandlerType::HandlerResponseType> ResponseDelegate;
+	const TSharedRef<FResponseGate> Gate = MakeShared<FResponseGate>();
 };
 
 template <class HandlerType>
@@ -315,17 +304,7 @@ public:
 	virtual void HandleAndRespond() override
 	{
 		check(Base::State == FRequestManager::EState::REQUESTED);
-		// Pinned for the call, not just checked: see the streaming manager's delegate below.
-		Base::ResponseDelegate = TResponseDelegate<ResponseType>::CreateSPLambda(static_cast<FRequestManager*>(this), [this, WeakThis = this->AsWeak()](const ResponseType& Response, grpc::Status Result)
-		{
-			const TSharedPtr<FRequestManager> PinnedThis = WeakThis.Pin();
-			if (!PinnedThis)
-			{
-				return;
-			}
-			Base::State = FRequestManager::EState::FINISHING;
-			Base::Responder.Finish(Response, Result, &(Base::Tag));
-		});
+		Base::BindResponseDelegate();
 		Base::State = FRequestManager::EState::HANDLING;
 		Base::Handler->HandleRequest(Base::Request, Base::ResponseDelegate);
 	}
@@ -333,6 +312,13 @@ public:
 	virtual FRequestManager* Duplicate(int32 NewTag) const override
 	{
 		return new TRequestManager(NewTag, Base::ServiceName, Base::Service, Base::Handler);
+	}
+
+protected:
+	virtual void OnResponse(const ResponseType& Response, grpc::Status Result) override
+	{
+		Base::State = FRequestManager::EState::FINISHING;
+		Base::Responder.Finish(Response, Result, &(Base::Tag));
 	}
 };
 
@@ -346,7 +332,7 @@ class TRequestManager<TStreamingRequestHandler<ServiceType, RequestType, Respons
 public:
 	virtual bool HasUnflushedWork() const override
 	{
-		UE::TScopeLock<FTempoResponseMutex> Lock(ResponseMutex);
+		FScopeLock Lock(&Base::Gate->Mutex);
 		// Either a write/finish is in flight, or we have responses queued behind the in-flight write.
 		return Base::State == FRequestManager::EState::RESPONDING
 			|| Base::State == FRequestManager::EState::FINISHING
@@ -364,29 +350,7 @@ public:
 			// for the next write-completion event to drain.
 			// A sensor's decode task runs this from a worker thread while the game thread handles this
 			// stream's write completions below (see UTempoSensorServiceSubsystem::OnBetweenFramesPoll).
-			// The lambda pins this manager for the call itself. A lambda bound with CreateSPLambda is only checked
-			// before it runs (TBaseSPLambdaDelegateInstance::ExecuteIfSafe tests IsValid, unlike a method delegate,
-			// which pins), so a decode task responding from a worker could be inside ResponseMutex when the game
-			// thread dropped the stream's manager and destroyed it. On Mac under 5.8 the freed lock then read held
-			// for good, and a sensors run hung on it. Pinned, the last reference may be released here instead, on
-			// the worker; the manager's request is over by then (its stream was cancelled or finished).
-			Base::ResponseDelegate = TResponseDelegate<ResponseType>::CreateSPLambda(static_cast<FRequestManager*>(this), [this, WeakThis = this->AsWeak()](const ResponseType& Response, grpc::Status Result)
-			{
-				const TSharedPtr<FRequestManager> PinnedThis = WeakThis.Pin();
-				if (!PinnedThis)
-				{
-					return;
-				}
-				UE::TScopeLock<FTempoResponseMutex> Lock(ResponseMutex);
-				if (Base::State == FRequestManager::EState::HANDLING)
-				{
-					Respond(Response, Result);
-				}
-				else
-				{
-					ResponseQueue.Enqueue(TPair<ResponseType, grpc::Status>(Response, Result));
-				}
-			});
+			Base::BindResponseDelegate();
 			Base::State = FRequestManager::EState::HANDLING;
 			Base::Handler->HandleRequest(Base::Request, Base::ResponseDelegate);
 			return;
@@ -396,7 +360,7 @@ public:
 		// Otherwise ask the user handler for more.
 		bool bResponded;
 		{
-			UE::TScopeLock<FTempoResponseMutex> Lock(ResponseMutex);
+			FScopeLock Lock(&Base::Gate->Mutex);
 			TPair<ResponseType, grpc::Status> ResponseItem;
 			bResponded = ResponseQueue.Dequeue(ResponseItem);
 			if (bResponded)
@@ -419,6 +383,20 @@ public:
 		return new TRequestManager(NewTag, Base::ServiceName, Base::Service, Base::Handler);
 	}
 
+protected:
+	virtual void OnResponse(const ResponseType& Response, grpc::Status Result) override
+	{
+		if (Base::State == FRequestManager::EState::HANDLING)
+		{
+			Respond(Response, Result);
+		}
+		else
+		{
+			ResponseQueue.Enqueue(TPair<ResponseType, grpc::Status>(Response, Result));
+		}
+	}
+
+	// With the gate's lock held.
 	void Respond(const ResponseType& Response, grpc::Status Result)
 	{
 		if (!Result.ok())
@@ -432,8 +410,8 @@ public:
 		Base::Responder.Write(Response, &(Base::Tag));
 	}
 
+	// Under the gate's lock.
 	TQueue<TPair<ResponseType, grpc::Status>> ResponseQueue;
-	mutable FTempoResponseMutex ResponseMutex;
 };
 
 /**
@@ -572,6 +550,9 @@ protected:
 	}
 
 	void HandleEventForTag(int32 Tag, bool bOk);
+
+	// Closes the manager for Tag and releases it, destroying it here (see FRequestManager::Close).
+	void RemoveRequestManager(int32 Tag);
 
 	bool bIsInitialized = false;
 

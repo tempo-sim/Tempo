@@ -15,7 +15,8 @@ Configuration comes from the environment (set by Scripts/TestPythonAPI.sh):
                                (Linux/macOS). Set to run several sims on one machine without
                                assigning each a port. Takes precedence over TEMPO_SERVER_PORT.
   TEMPO_SIM_STARTUP_TIMEOUT_S  How long to wait for the server to come up (default 300).
-  TEMPO_TEST_REQUEST_TIMEOUT_S Deadline on every unary RPC the tests make (default 300; 0 for none).
+  TEMPO_TEST_REQUEST_TIMEOUT_S Deadline on every unary RPC a test against the sim makes (default 900;
+                               0 for none). The first call to miss it stops the session.
   TEMPO_SIM_RENDER             "1" to render off-screen (sensors group); else -nullrhi.
   TEMPO_TEST_REPORT_DIR        If set, the sim's full log is written here (sim.log) so CI uploads it.
 """
@@ -62,11 +63,30 @@ SERVER_PORT = int(os.environ.get("TEMPO_SERVER_PORT", "10001"))
 SERVER_SOCKET = os.environ.get("TEMPO_SERVER_SOCKET", "").strip()
 PACKAGED_BINARY = os.environ.get("TEMPO_PACKAGED_BINARY", "")
 STARTUP_TIMEOUT_S = float(os.environ.get("TEMPO_SIM_STARTUP_TIMEOUT_S", "300"))
-# A deadline on every unary RPC (Step, SetStepsPerGameFrame, ...), so a sim whose game thread is wedged
-# fails the test that wedged it instead of hanging the run: a sensors run once sat for two and a half
-# hours on a Step that a deadlocked sim never answered. Far longer than any call should take. Streams
-# get no deadline from it (see tempo_sim.set_request_timeout); their reads are bounded where they're read.
-REQUEST_TIMEOUT_S = float(os.environ.get("TEMPO_TEST_REQUEST_TIMEOUT_S", "300")) or None
+def _env_seconds(name, default):
+    """A duration in seconds from the environment: unset or empty is the default, 0 is none."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        seconds = float(raw)
+    except ValueError:
+        raise pytest.UsageError(f"{name}={raw!r} is not a number of seconds")
+    if seconds < 0:
+        raise pytest.UsageError(f"{name}={raw!r} is negative; use 0 for no deadline")
+    return seconds or None
+
+
+# A deadline on every unary RPC a test against the sim makes (Step, SetStepsPerGameFrame, a level load...),
+# so a sim whose game thread is wedged fails the test that wedged it instead of hanging the run: a sensors
+# run once sat for two and a half hours on a Step that a deadlocked sim never answered. Long enough for a
+# cold machine compiling shaders through a level load or a first rendered step. Streams get no deadline from
+# it (see tempo_sim.with_request_timeout); their reads are bounded where they are read. A sim that misses it
+# is taken to be wedged, and the session stops there (see pytest_runtest_makereport).
+REQUEST_TIMEOUT_S = _env_seconds("TEMPO_TEST_REQUEST_TIMEOUT_S", 900.0)
+
+# The running sim, for pytest_runtest_makereport to stop.
+_sim_proc = None
 
 
 def _tail(path, n=200):
@@ -120,12 +140,13 @@ def sim_server():
         log = tempfile.NamedTemporaryFile(prefix="tempo-sim-", suffix=".log", delete=False)
     print(f"Sim log: {log.name}")
     proc = subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT)
+    global _sim_proc
+    _sim_proc = proc
 
     if SERVER_SOCKET:
         tempo_sim.set_socket(SERVER_SOCKET)
     else:
         tempo_sim.set_server(port=SERVER_PORT)
-    tempo_sim.set_request_timeout(REQUEST_TIMEOUT_S)
     deadline = time.monotonic() + STARTUP_TIMEOUT_S
     last_err = None
     while time.monotonic() < deadline:
@@ -149,9 +170,10 @@ def sim_server():
 
     yield proc
 
-    # Graceful shutdown first, then escalate.
+    # Graceful shutdown first, then escalate. Briefly: a wedged sim never answers.
     try:
-        tc.quit()
+        with tempo_sim.with_request_timeout(10.0):
+            tc.quit()
     except Exception:
         pass
     try:
@@ -185,3 +207,43 @@ def fixed_step(sim_server):
     # 1/SPS, making the per-step assertions deterministic.
     tc.step()
     return steps_per_second
+
+
+@pytest.fixture(autouse=True)
+def _sim_request_deadline(request):
+    """Give a test against the sim REQUEST_TIMEOUT_S on each unary RPC, for its fixtures and body. Scoped to
+    the test, never process-wide: the contract tests assert the client's own default, and may share the
+    session (`pytest Tests/Python`)."""
+    if "sim_server" not in request.fixturenames or REQUEST_TIMEOUT_S is None:
+        yield
+        return
+    import tempo_sim
+
+    with tempo_sim.with_request_timeout(REQUEST_TIMEOUT_S):
+        yield
+
+
+def _missed_deadline(exc):
+    import grpc
+
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        code = getattr(exc, "code", None)
+        if isinstance(exc, grpc.RpcError) and callable(code) and code() == grpc.StatusCode.DEADLINE_EXCEEDED:
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """A call that missed REQUEST_TIMEOUT_S means the sim is wedged, and every later test would wait out its
+    own deadlines against it. Stop the sim, and the session after this test, as -x would."""
+    outcome = yield
+    report = outcome.get_result()
+    if not report.failed or call.excinfo is None or not _missed_deadline(call.excinfo.value):
+        return
+    item.session.shouldstop = f"{item.nodeid} missed its {REQUEST_TIMEOUT_S:.0f}s request deadline; the sim is wedged"
+    if _sim_proc is not None and _sim_proc.poll() is None:
+        _sim_proc.kill()
