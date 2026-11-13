@@ -315,8 +315,14 @@ public:
 	virtual void HandleAndRespond() override
 	{
 		check(Base::State == FRequestManager::EState::REQUESTED);
-		Base::ResponseDelegate = TResponseDelegate<ResponseType>::CreateSPLambda(static_cast<FRequestManager*>(this), [this](const ResponseType& Response, grpc::Status Result)
+		// Pinned for the call, not just checked: see the streaming manager's delegate below.
+		Base::ResponseDelegate = TResponseDelegate<ResponseType>::CreateSPLambda(static_cast<FRequestManager*>(this), [this, WeakThis = this->AsWeak()](const ResponseType& Response, grpc::Status Result)
 		{
+			const TSharedPtr<FRequestManager> PinnedThis = WeakThis.Pin();
+			if (!PinnedThis)
+			{
+				return;
+			}
 			Base::State = FRequestManager::EState::FINISHING;
 			Base::Responder.Finish(Response, Result, &(Base::Tag));
 		});
@@ -358,8 +364,19 @@ public:
 			// for the next write-completion event to drain.
 			// A sensor's decode task runs this from a worker thread while the game thread handles this
 			// stream's write completions below (see UTempoSensorServiceSubsystem::OnBetweenFramesPoll).
-			Base::ResponseDelegate = TResponseDelegate<ResponseType>::CreateSPLambda(static_cast<FRequestManager*>(this), [this](const ResponseType& Response, grpc::Status Result)
+			// The lambda pins this manager for the call itself. A lambda bound with CreateSPLambda is only checked
+			// before it runs (TBaseSPLambdaDelegateInstance::ExecuteIfSafe tests IsValid, unlike a method delegate,
+			// which pins), so a decode task responding from a worker could be inside ResponseMutex when the game
+			// thread dropped the stream's manager and destroyed it. On Mac under 5.8 the freed lock then read held
+			// for good, and a sensors run hung on it. Pinned, the last reference may be released here instead, on
+			// the worker; the manager's request is over by then (its stream was cancelled or finished).
+			Base::ResponseDelegate = TResponseDelegate<ResponseType>::CreateSPLambda(static_cast<FRequestManager*>(this), [this, WeakThis = this->AsWeak()](const ResponseType& Response, grpc::Status Result)
 			{
+				const TSharedPtr<FRequestManager> PinnedThis = WeakThis.Pin();
+				if (!PinnedThis)
+				{
+					return;
+				}
 				UE::TScopeLock<FTempoResponseMutex> Lock(ResponseMutex);
 				if (Base::State == FRequestManager::EState::HANDLING)
 				{
