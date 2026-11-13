@@ -84,7 +84,7 @@ NUM_FRAMES = 8
 # plausible depth, whereas an irregular sequence pins each frame to exactly one pose.
 STEP_DELTAS_M = [0.0, 0.9, 0.3, 1.7, 0.2, 1.1, 2.3, 0.5, 1.3]
 
-# Depth is discretized inverse depth over [MinDepth, MaxDepth], so absolute precision degrades with
+# Depth is quantized logarithmically over [MinDepth, MaxDepth], so absolute precision degrades with
 # range. A whole-frame confusion moves depth by a STEP_DELTAS_M entry (>= 0.2 m), so this is far
 # tighter than needed to catch one while tolerating quantization.
 DEPTH_TOL_M = 0.05
@@ -276,9 +276,9 @@ def labeled_scene(readback_level):
         return
 
     # Label IDs must stay within what the camera's alpha encoding can represent
-    # (GTempoCamera_Max_Label = 253); 0 means "unlabeled", so start at 1.
+    # (GTempoCamera_Max_Label = 251); 0 means "unlabeled", so start at 1.
     assigned = []
-    for index, mesh in enumerate(meshes[:253]):
+    for index, mesh in enumerate(meshes[:251]):
         ts.set_static_mesh_type_semantic_id(static_mesh_path=mesh.mesh_path, semantic_id=index + 1)
         assigned.append(mesh.mesh_path)
 

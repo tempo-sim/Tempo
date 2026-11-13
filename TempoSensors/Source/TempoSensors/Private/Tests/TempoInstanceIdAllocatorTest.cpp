@@ -5,7 +5,7 @@
 #include "Misc/AutomationTest.h"
 
 // Covers FInstanceIdAllocator, which hands out the labeler's instance IDs and takes them back as
-// labeled objects go away. Only 253 IDs exist, so a large world shares them between live objects,
+// labeled objects go away. Only 251 IDs exist, so a large world shares them between live objects,
 // and the allocator has to keep count of every ID's sharing through arbitrary interleavings of
 // allocations and returns. Run via Scripts/Test.sh, or from the editor console with
 //   Automation RunTests Tempo.Sensors.InstanceIdAllocator
