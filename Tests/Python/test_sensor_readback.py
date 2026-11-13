@@ -941,17 +941,12 @@ class _Rates:
 
 async def _close(stream, *tasks):
     """Cancel what is still reading a stream and end its RPC, so its request doesn't stay pending on
-    the sensor into later tests.
+    the sensor into later tests, and the sim doesn't write the sensor's next response to a client
+    that will never read it.
 
-    Closing the generator is not enough. The RPC is cancelled when a read of it is cancelled; with
-    no read outstanding the call stays open until the garbage collector reaches it, and meanwhile
-    the sensor's next response is written to a client that will never read it. The sim finishes its
-    writes before a frame's send, so the next step would wait on that write for good. Hence the
-    extra read here, started only to be cancelled."""
+    The reads go first: an async generator can't be closed while one of them is running it. Closing
+    it then cancels the call."""
     tasks = [task for task in tasks if task is not None]
-    if all(task.done() for task in tasks):
-        tasks.append(asyncio.ensure_future(stream.__anext__()))
-        await asyncio.sleep(0)
     for task in tasks:
         if not task.done():
             task.cancel()

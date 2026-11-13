@@ -11,7 +11,10 @@ tempo_sim's _tolerate_closing has each loop it connects on drop such a completio
 
 The scenario runs in a child process: what it provokes is process-wide and permanent. It forces the
 no-file-descriptor path with a loop whose add_reader is unsupported, as a Proactor loop's is, so it
-runs the same on every platform. Against an in-process server, so it needs only the wheel."""
+runs the same on every platform. Against an in-process server, so it needs only the wheel.
+
+Also here: closing a generated stream ends its RPC, which is what keeps a stream that is closed early
+from being cancelled only once the garbage collector reaches it, with the loop long gone."""
 
 import subprocess
 import sys
@@ -102,9 +105,12 @@ SCENARIO = textwrap.dedent(f"""
 
 
     async def leave_a_stream_open():
-        stream = tw.stream_actor_state(actor="anything").__aiter__()
-        await stream.__anext__()
-        return stream  # outlives the loop, as a stream the caller never closed does
+        # A raw call: a generated stream cancels its call when it is closed, and asyncio.run closes
+        # it on the way out. A call held anywhere else -- a stub used directly, say -- outlives it.
+        stub = await tempo_context.tempo_context().get_stub(WorldState_pb2_grpc.WorldStateServiceStub)
+        call = stub.StreamActorState(WorldState_pb2.ActorStateRequest(actor="anything"))
+        await call.read()
+        return call  # outlives the loop, as a stream the caller never closed does
 
 
     blocking_call()
@@ -121,6 +127,83 @@ SCENARIO = textwrap.dedent(f"""
 def _run_scenario(*args):
     return subprocess.run([sys.executable, "-c", SCENARIO, *args], capture_output=True, text=True,
                           timeout=10 * (ITERATIONS + 2))
+
+
+# A generated stream must end its RPC when it is closed, without waiting for the garbage collector:
+# until then the sim goes on writing to a stream no one reads, and in fixed step waits on that write.
+CLOSE_SCENARIO = textwrap.dedent('''
+    import asyncio
+    import gc
+    import os
+    import sys
+    import threading
+    import time
+    from concurrent import futures
+
+    import grpc
+
+    import tempo_sim
+    import tempo_sim.tempo_world as tw
+    from tempo_sim.TempoWorld import WorldState_pb2, WorldState_pb2_grpc
+
+    ended = threading.Event()
+
+
+    class WorldState(WorldState_pb2_grpc.WorldStateServiceServicer):
+        def StreamActorState(self, request, context):
+            context.add_callback(ended.set)
+            while context.is_active():
+                yield WorldState_pb2.ActorState()
+                time.sleep(0.01)
+
+
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=8))
+    WorldState_pb2_grpc.add_WorldStateServiceServicer_to_server(WorldState(), server)
+    port = server.add_insecure_port("127.0.0.1:0")
+    server.start()
+    tempo_sim.set_server("127.0.0.1", port)
+    gc.disable()  # what is being checked is that nothing waits for it
+
+
+    def check(how):
+        if not ended.wait(5.0):
+            # The open stream holds a server thread, which would keep the process from exiting.
+            sys.stderr.write(f"closing {how} stream left its RPC open\\n")
+            sys.stderr.flush()
+            os._exit(1)
+        ended.clear()
+
+
+    async def read_one_then_close():
+        stream = tw.stream_actor_state(actor="anything").__aiter__()
+        await stream.__anext__()
+        await stream.aclose()
+        check("an async")
+
+    asyncio.run(read_one_then_close())
+
+
+    async def leave_early():
+        async for _ in tw.stream_actor_state(actor="anything"):
+            break
+        # async for doesn't close what it leaves; asyncio.run's shutdown does, after this returns.
+
+    asyncio.run(leave_early())
+    check("an abandoned async")
+
+    stream = tw.stream_actor_state(actor="anything")
+    next(stream)
+    stream.close()
+    check("a blocking")
+
+    server.stop(0)
+    print("ok")
+''')
+
+
+def test_closing_a_stream_ends_its_rpc():
+    result = subprocess.run([sys.executable, "-c", CLOSE_SCENARIO], capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
 
 
 def test_a_completion_for_a_closed_loop_does_not_stop_the_client():
