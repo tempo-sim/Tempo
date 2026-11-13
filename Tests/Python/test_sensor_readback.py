@@ -150,25 +150,31 @@ async def _capture_frames(owner, sensor, num_frames, move_camera=True):
     depth_stream = ts.stream_depth_images(owner=owner, sensor=sensor).__aiter__()
     box_stream = ts.stream_bounding_boxes(owner=owner, sensor=sensor).__aiter__()
 
+    streams = (color_stream, label_stream, depth_stream, box_stream)
     frames = []
+    pending = []
     x = RIG_ORIGIN[0]
-    for index in range(num_frames):
-        if move_camera:
-            x += STEP_DELTAS_M[index % len(STEP_DELTAS_M)]
-            await tw.set_actor_location(actor=owner, location=_vec(x, RIG_ORIGIN[1], RIG_ORIGIN[2]))
+    try:
+        for index in range(num_frames):
+            if move_camera:
+                x += STEP_DELTAS_M[index % len(STEP_DELTAS_M)]
+                await tw.set_actor_location(actor=owner, location=_vec(x, RIG_ORIGIN[1], RIG_ORIGIN[2]))
 
-        # Have the next receive outstanding before stepping: a capture only happens when a request
-        # is already pending, so issuing them after the step would race the capture.
-        pending = [
-            asyncio.ensure_future(stream.__anext__())
-            for stream in (color_stream, label_stream, depth_stream, box_stream)
-        ]
-        await asyncio.sleep(0.05)
+            # Have the next receive outstanding before stepping: a capture only happens when a request
+            # is already pending, so issuing them after the step would race the capture.
+            pending = [asyncio.ensure_future(stream.__anext__()) for stream in streams]
+            await asyncio.sleep(0.05)
 
-        await tc.step()
+            await tc.step()
 
-        color, label, depth, boxes = await asyncio.wait_for(asyncio.gather(*pending), timeout=60.0)
-        frames.append({"color": color, "label": label, "depth": depth, "boxes": boxes})
+            color, label, depth, boxes = await asyncio.wait_for(asyncio.gather(*pending), timeout=60.0)
+            frames.append({"color": color, "label": label, "depth": depth, "boxes": boxes})
+    finally:
+        # End the RPCs while this loop still runs. Left open, they outlive it (asyncio.run's loop
+        # leaves its channel behind unclosed), and the next test's step waits for good on a write to
+        # a stream nobody reads (see _close).
+        for stream, future in zip(streams, pending or [None] * len(streams)):
+            await _close(stream, future)
 
     return frames
 
@@ -667,11 +673,7 @@ async def _steps_until_frame_arrives(owner, sensor, steps_per_game_frame):
         return None
     finally:
         # Close the stream, or the camera keeps its color request pending into later tests.
-        pending.cancel()
-        try:
-            await stream.aclose()
-        except (RuntimeError, asyncio.CancelledError):
-            pass
+        await _close(stream, pending)
 
 
 def test_a_pipelined_frame_arrives_between_game_frames(camera_rig):
@@ -720,12 +722,7 @@ async def _capture_each_game_frame(owner, sensor, steps_per_game_frame, game_fra
             else:
                 images.append(None)
     finally:
-        if pending is not None:
-            pending.cancel()
-        try:
-            await stream.aclose()
-        except (RuntimeError, asyncio.CancelledError):
-            pass
+        await _close(stream, pending)
     return images
 
 
@@ -778,12 +775,7 @@ async def _capture_times(owner, sensor, captures, max_steps_per_capture):
                 times.append(None)
                 break
     finally:
-        if pending is not None:
-            pending.cancel()
-        try:
-            await stream.aclose()
-        except (RuntimeError, asyncio.CancelledError):
-            pass
+        await _close(stream, pending)
     return times
 
 
@@ -836,15 +828,7 @@ async def _sequence_ids_while_stepping(owner, sensor, steps):
             await asyncio.sleep(0.05)
             await tc.step()
     finally:
-        consumer.cancel()
-        try:
-            await consumer
-        except (asyncio.CancelledError, RuntimeError):
-            pass
-        try:
-            await stream.aclose()
-        except (RuntimeError, asyncio.CancelledError):
-            pass
+        await _close(stream, consumer)
     return ids
 
 
@@ -957,17 +941,12 @@ class _Rates:
 
 async def _close(stream, *tasks):
     """Cancel what is still reading a stream and end its RPC, so its request doesn't stay pending on
-    the sensor into later tests.
+    the sensor into later tests, and the sim doesn't write the sensor's next response to a client
+    that will never read it.
 
-    Closing the generator is not enough. The RPC is cancelled when a read of it is cancelled; with
-    no read outstanding the call stays open until the garbage collector reaches it, and meanwhile
-    the sensor's next response is written to a client that will never read it. The sim finishes its
-    writes before a frame's send, so the next step would wait on that write for good. Hence the
-    extra read here, started only to be cancelled."""
+    The reads go first: an async generator can't be closed while one of them is running it. Closing
+    it then cancels the call."""
     tasks = [task for task in tasks if task is not None]
-    if all(task.done() for task in tasks):
-        tasks.append(asyncio.ensure_future(stream.__anext__()))
-        await asyncio.sleep(0)
     for task in tasks:
         if not task.done():
             task.cancel()
