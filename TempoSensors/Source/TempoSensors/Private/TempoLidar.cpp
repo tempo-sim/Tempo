@@ -55,6 +55,15 @@ UTempoLidar::UTempoLidar()
 	bUseRayTracingIfEnabled = false;
 }
 
+TOptional<TFuture<void>> UTempoLidar::SendRequestedMeasurements()
+{
+	if (PendingRequests.IsEmpty() || !StreamsAwaitingRerequest.IsEmpty())
+	{
+		return TOptional<TFuture<void>>();
+	}
+	return SendMeasurements();
+}
+
 TOptional<TFuture<void>> UTempoLidar::SendMeasurements()
 {
 	TOptional<TFuture<void>> Future;
@@ -76,6 +85,14 @@ TOptional<TFuture<void>> UTempoLidar::SendMeasurements()
 
 	if (TextureReadQueue.NextReadComplete())
 	{
+		// Whoever the last sweep went to has asked again or gone: either this is the frame's send,
+		// with the writes finished, or SendRequestedMeasurements has checked.
+		StreamsAwaitingRerequest.Reset();
+		for (const FLidarScanRequest& Request : PendingRequests)
+		{
+			StreamsAwaitingRerequest.Add(Request.ResponseContinuation.GetHandle());
+		}
+
 		TSharedPtr<FTextureRead> TextureRead = TextureReadQueue.DequeueIfReadComplete();
 		const FName ReadType = TextureRead->GetType();
 		if (ReadType == TEXT("LidarShared"))
@@ -645,6 +662,7 @@ void UTempoLidar::SyncTiles()
 
 void UTempoLidar::RequestMeasurement(const TempoSensors::LidarScanRequest& Request, const TResponseDelegate<TempoSensors::LidarScanSegment>& ResponseContinuation)
 {
+	StreamsAwaitingRerequest.Remove(ResponseContinuation.GetHandle());
 	// A stream's handler is re-invoked when its write queue drains, which can happen while a decode
 	// task is still responding with the sweep's later segments; that stream then asks here a second
 	// time for the same request. One entry per stream, or the next sweep would go to it twice.

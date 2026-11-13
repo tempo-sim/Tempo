@@ -350,6 +350,7 @@ public:
 
 	// Begin ITempoSensorInterface
 	virtual TOptional<TFuture<void>> SendMeasurements() override;
+	virtual TOptional<TFuture<void>> SendRequestedMeasurements() override;
 	// End ITempoSensorInterface
 
 	void RequestMeasurement(const TempoSensors::LidarScanRequest& Request, const TResponseDelegate<TempoSensors::LidarScanSegment>& ResponseContinuation);
@@ -562,6 +563,9 @@ protected:
 	static constexpr int32 ColorOffDebounceFrames = 30;
 
 	TArray<FLidarScanRequest> PendingRequests;
+	// The streams the last sweep went to that haven't asked for their next yet; see
+	// ITempoSensorInterface::SendRequestedMeasurements. Game thread only, as PendingRequests is.
+	TSet<FDelegateHandle> StreamsAwaitingRerequest;
 
 	// Tile slots (fixed size: L=0, C=1, R=2). Stable storage — indices are never invalidated
 	// and held addresses remain valid across reconfigures. Transient: runtime-only state.
