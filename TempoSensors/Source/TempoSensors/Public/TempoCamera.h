@@ -328,6 +328,7 @@ public:
 
 	// Begin ITempoSensorInterface
 	virtual TOptional<TFuture<void>> SendMeasurements() override;
+	virtual bool HasPendingMeasurementRequests() const override;
 	// End ITempoSensorInterface
 
 	bool HasPendingCameraRequests() const;
@@ -514,6 +515,15 @@ protected:
 	TArray<FBoundingBoxesRequest> PendingBoundingBoxesRequests;
 	mutable FCriticalSection RequestsMutex;
 	bool bDepthRequestedSinceSend = false;
+	// The image request kinds (ERequestKind bits) with a request waiting, and those the last decode
+	// launched answered, under RequestsMutex. Every stream asks for its next image only once its last
+	// response is written, and a depth image takes longer to write than a color one, so between frames
+	// a read can complete with one of a camera's streams back and another not yet. See
+	// HasPendingMeasurementRequests.
+	enum ERequestKind : uint8 { RK_Color = 1, RK_Label = 2, RK_Depth = 4, RK_BoundingBoxes = 8 };
+	uint8 GetPendingRequestKinds_Locked() const;
+	static uint8 GetAnsweredRequestKindsMask(bool bReadHasDepth, bool bReadHasLabels);
+	uint8 LastAnsweredRequestKinds = 0;
 	// The world time at the game thread's latest send: the transmission time of a decode the render
 	// thread launches before the next one.
 	double LastSendTimeSeconds = 0.0;
