@@ -249,6 +249,28 @@ jobs:
         echo "trouble=false" >> "$GITHUB_OUTPUT"
         echo "Machine OK: $STAMP; ${FREE_GB}GB free"
 
+    # Whatever an earlier job left running from this engine's build tree. A cancelled or timed-out job's sim
+    # outlives it: pytest dies on SIGTERM without its fixture teardown, and TestCppAPI.sh gives the sim a
+    # process group of its own. It keeps writing into the tree, so it cannot be deleted. Every job does this
+    # again when it ends (the last step); here is for a job that ended without getting there.
+    - name: Stop Leftover Processes
+      run: &stop_leftover_processes |
+        [ -n "${CI_BUILD:-}" ] || exit 0
+        # Matched in awk through ENVIRON, so the path is in no matcher's own command line.
+        tree_pids() { ps -axo pid=,command= | awk 'index($0, ENVIRON["CI_BUILD"] "/") { print $1 }'; }
+        PIDS=$(tree_pids)
+        [ -n "$PIDS" ] || exit 0
+        echo "::warning title=Leftover processes::Stopping processes still running from $CI_BUILD."
+        ps -o pid=,etime=,command= -p "$(echo $PIDS | tr ' ' ',')" || true
+        kill -TERM $PIDS 2>/dev/null || true
+        for _ in $(seq 1 15); do
+          [ -n "$(tree_pids)" ] || exit 0
+          sleep 1
+        done
+        kill -KILL $(tree_pids) 2>/dev/null || true
+        sleep 2
+        [ -z "$(tree_pids)" ] || { echo "::error::Processes in $CI_BUILD survived SIGKILL."; exit 1; }
+
     - name: Prepare Build Tree
       env:
         CLEAN: ${{ inputs.clean }}
@@ -464,3 +486,8 @@ jobs:
         mv "$CI_GOLDEN.new" "$CI_GOLDEN"
         rm -rf "$CI_GOLDEN.old"
         echo "Golden tree updated to ${{ github.sha }} ($CI_STAMP)."
+
+    # Runs on cancellation and timeout too, which is when a sim is most likely left behind.
+    - name: Stop Leftover Processes
+      if: always()
+      run: *stop_leftover_processes
