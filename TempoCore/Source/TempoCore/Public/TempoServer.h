@@ -277,6 +277,7 @@ class TRequestManager<TStreamingRequestHandler<ServiceType, RequestType, Respons
 public:
 	virtual bool HasUnflushedWork() const override
 	{
+		FScopeLock Lock(&ResponseMutex);
 		// Either a write/finish is in flight, or we have responses queued behind the in-flight write.
 		return Base::State == FRequestManager::EState::RESPONDING
 			|| Base::State == FRequestManager::EState::FINISHING
@@ -292,8 +293,11 @@ public:
 			// First invocation for this request. Bind the delegate and run the user handler.
 			// The delegate writes immediately if no write is in flight; otherwise it enqueues
 			// for the next write-completion event to drain.
+			// A sensor's decode task runs this from a worker thread while the game thread handles this
+			// stream's write completions below (see UTempoSensorServiceSubsystem::OnBetweenFramesPoll).
 			Base::ResponseDelegate = TResponseDelegate<ResponseType>::CreateSPLambda(static_cast<FRequestManager*>(this), [this](const ResponseType& Response, grpc::Status Result)
 			{
+				FScopeLock Lock(&ResponseMutex);
 				if (Base::State == FRequestManager::EState::HANDLING)
 				{
 					Respond(Response, Result);
@@ -310,14 +314,22 @@ public:
 
 		// A write just completed. If more responses are queued, write the next one.
 		// Otherwise ask the user handler for more.
-		TPair<ResponseType, grpc::Status> ResponseItem;
-		if (ResponseQueue.Dequeue(ResponseItem))
+		bool bResponded;
 		{
-			Respond(ResponseItem.Key, ResponseItem.Value);
+			FScopeLock Lock(&ResponseMutex);
+			TPair<ResponseType, grpc::Status> ResponseItem;
+			bResponded = ResponseQueue.Dequeue(ResponseItem);
+			if (bResponded)
+			{
+				Respond(ResponseItem.Key, ResponseItem.Value);
+			}
+			else
+			{
+				Base::State = FRequestManager::EState::HANDLING;
+			}
 		}
-		else
+		if (!bResponded)
 		{
-			Base::State = FRequestManager::EState::HANDLING;
 			Base::Handler->HandleRequest(Base::Request, Base::ResponseDelegate);
 		}
 	}
@@ -341,6 +353,7 @@ public:
 	}
 
 	TQueue<TPair<ResponseType, grpc::Status>> ResponseQueue;
+	mutable FCriticalSection ResponseMutex;
 };
 
 /**

@@ -75,12 +75,20 @@ protected:
 	// Sends every measurement whose readback has completed, waiting for the decode tasks.
 	void SendCompletedMeasurements();
 
+	// Decode tasks launched between frames, at most one per sensor, responding from worker threads
+	// while the game thread goes on serving the client. The frame's send and shutdown wait for them.
+	TArray<TPair<TWeakObjectPtr<UActorComponent>, TFuture<void>>> DecodesInFlight;
+	void WaitForDecodesInFlight();
+
 	// Polled between the steps a client advances between frames; see ATempoWorldSettings::OnBetweenFramesPoll.
 	void OnBetweenFramesPoll(UWorld* World);
 
-	// Set while a between-frames readback poll is queued on the render thread, so OnBetweenFramesPoll (which
-	// runs far more often than the render thread drains) never queues a second.
-	TSharedRef<std::atomic<bool>> BetweenFramesReadbackPollInFlight = MakeShared<std::atomic<bool>>(false);
+	// Queues a render command that reads back every sensor whose render fence has signalled. Non-blocking.
+	void EnqueueReadbackPoll(TConstArrayView<class ITempoSensorInterface*> Sensors);
+
+	// Readback polls queued on the render thread and not yet run, so OnBetweenFramesPoll (which runs far
+	// more often than the render thread drains) never queues one behind another.
+	TSharedRef<std::atomic<int32>> ReadbackPollsQueued = MakeShared<std::atomic<int32>>(0);
 
 	FDelegateHandle BetweenFramesPollHandle;
 
