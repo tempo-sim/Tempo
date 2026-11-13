@@ -628,6 +628,17 @@ bool FTempoCameraDecodeDepthCodeTest::RunTest(const FString& Parameters)
 		DecodeDepth(GTempoCamera_Max_Depth_Code << 2), MinDepth, MinDepth * 1e-6f);
 	TestEqual(TEXT("The lane's bottom two bits are ignored"), DecodeDepth((1000u << 2) | 3u), DecodeDepth(1000u << 2));
 
+	// The decoder looks the depth up in two tables (see FCameraDepthDecoder); it must agree with the
+	// exact formula for codes that exercise both halves, including the ends of each table.
+	const double Log2RatioPerCode = FMath::Log2(static_cast<double>(MinDepth) / MaxDepth) / GTempoCamera_Max_Depth_Code;
+	for (const uint32 Code : { 0u, 1u, 2047u, 2048u, 2049u, 123456u, 1u << 21, 4194302u, GTempoCamera_Max_Depth_Code })
+	{
+		const double Exact = MaxDepth * FMath::Exp2(Code * Log2RatioPerCode);
+		const double RelativeError = FMath::Abs(DecodeDepth(Code << 2) - Exact) / Exact;
+		TestTrue(*FString::Printf(TEXT("Code %u decodes within 2e-7 of exact (got %.3g)"), Code, RelativeError),
+			RelativeError <= 2e-7);
+	}
+
 	// Each code is ln(MaxDepth / MinDepth) / 2^22 = 2.2e-6 of the depth it encodes, so a round trip
 	// is within half of that. Allow 1.5e-6 for the float the decode returns.
 	for (const double DepthCm : { 10.5, 37.0, 100.0, 999.0, 1234.5, 10000.0, 54321.0, 99990.0 })

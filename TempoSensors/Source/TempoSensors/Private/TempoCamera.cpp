@@ -509,6 +509,8 @@ void RespondToImageRequests(const TTextureRead<PixelType>* TextureRead,
 	char* ColorData = nullptr;
 	char* LabelData = nullptr;
 	float* DepthData = nullptr;
+	// Built once here and shared by every band; see FCameraDepthDecoder.
+	TUniquePtr<FCameraDepthDecoder> DepthDecoder;
 
 	EColorImageEncoding ColorEncoding = EColorImageEncoding::BGR8;
 
@@ -556,6 +558,7 @@ void RespondToImageRequests(const TTextureRead<PixelType>* TextureRead,
 			std::string* const DepthsOut = DepthImage.mutable_depths_m();
 			DepthsOut->resize(static_cast<size_t>(Width) * Height * sizeof(float));
 			DepthData = reinterpret_cast<float*>(DepthsOut->data());
+			DepthDecoder = MakeUnique<FCameraDepthDecoder>(TextureRead->MinDepth, TextureRead->MaxDepth);
 
 			TextureRead->ExtractMeasurementHeader(TransmissionTime, DepthImage.mutable_header());
 		}
@@ -568,6 +571,8 @@ void RespondToImageRequests(const TTextureRead<PixelType>* TextureRead,
 	{
 		BandBoxes.SetNum(NumBands);
 	}
+
+	const FCameraDepthDecoder* const DecodeDepth = DepthDecoder.Get();
 
 	if (ColorData || LabelData || DepthData || bNeedBoundingBoxes)
 	{
@@ -623,11 +628,10 @@ void RespondToImageRequests(const TTextureRead<PixelType>* TextureRead,
 					if (DepthData)
 					{
 						float* const DstRow = DepthData + static_cast<int64>(Y) * Width;
-						const FCameraDepthDecoder DecodeDepth(TextureRead->MinDepth, TextureRead->MaxDepth);
 						for (int32 X = 0; X < Width; ++X)
 						{
 							// The decoder returns centimeters; convert to meters for the wire.
-							DstRow[X] = QuantityConverter<CM2M>::Convert(DecodeDepth(SrcRow[X].DepthLane()));
+							DstRow[X] = QuantityConverter<CM2M>::Convert((*DecodeDepth)(SrcRow[X].DepthLane()));
 						}
 					}
 				}

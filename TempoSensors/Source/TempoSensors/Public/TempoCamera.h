@@ -55,24 +55,37 @@ private:
 
 // Turns the camera's depth code back into a depth in cm. The code is logarithmic: 0 at MaxDepth,
 // GTempoCamera_Max_Depth_Code at MinDepth (see TempoSensorsConstants.h), and arrives in the top 22
-// bits of the 24-bit depth lane. Double precision, because in float the exponent's own rounding is
-// about as large as one code step.
+// bits of the 24-bit depth lane, so the depth is MaxDepth * 2^(Code * K). An exp2 per pixel made
+// the decode ten times slower than the inverse-depth one it replaced, so the code is split into
+// 11-bit halves, 2^(Hi + Lo) = 2^Hi * 2^Lo, and each half is a table lookup: two loads and a
+// multiply per pixel. The float tables are built in double and are within 1.5e-7 of the exact
+// depth for every code, a fifteenth of a code step. Build one per decode, not per row or pixel:
+// that is 4096 exp2s and 16 KB.
 struct FCameraDepthDecoder
 {
 	FCameraDepthDecoder(float MinDepth, float MaxDepth)
-		: MaxDepth(MaxDepth)
-		, Log2RatioPerCode(FMath::Log2(static_cast<double>(MinDepth) / MaxDepth) / GTempoCamera_Max_Depth_Code)
 	{
+		const double Log2RatioPerCode = FMath::Log2(static_cast<double>(MinDepth) / MaxDepth) / GTempoCamera_Max_Depth_Code;
+		for (uint32 Index = 0; Index < TableSize; ++Index)
+		{
+			High[Index] = static_cast<float>(MaxDepth * FMath::Exp2(static_cast<double>(Index << LowBits) * Log2RatioPerCode));
+			Low[Index] = static_cast<float>(FMath::Exp2(static_cast<double>(Index) * Log2RatioPerCode));
+		}
 	}
 
 	float operator()(uint32 DepthLane) const
 	{
-		return static_cast<float>(MaxDepth * FMath::Exp2(static_cast<double>(DepthLane >> 2) * Log2RatioPerCode));
+		const uint32 Code = (DepthLane >> 2) & GTempoCamera_Max_Depth_Code;
+		return High[Code >> LowBits] * Low[Code & (TableSize - 1)];
 	}
 
 private:
-	double MaxDepth;
-	double Log2RatioPerCode;
+	static constexpr uint32 LowBits = 11;
+	static constexpr uint32 TableSize = 1u << LowBits;
+	static_assert(GTempoCamera_Max_Depth_Code == (1u << (2 * LowBits)) - 1u, "The two tables must cover the depth code exactly");
+
+	float High[TableSize];
+	float Low[TableSize];
 };
 
 // 8-byte pixel format where first 3 bytes are color, 4th byte is label.
