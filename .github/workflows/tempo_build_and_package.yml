@@ -79,13 +79,15 @@ jobs:
       automation_test_filter: Tempo.
       # The same groups the Linux fan-out jobs below run (codegen stays Linux-only: nothing it checks
       # depends on the platform), and sensors, which renders and so runs only here, where there is a GPU.
+      # Sensors runs without the ROS plugins: its tests load a level, and TempoROS crashes when a node
+      # is destroyed, as a level load destroys the world's (an allocator lifetime bug in rclcpp).
       test_commands: |
         python-contract: Scripts/TestPythonAPI.sh contract
         python-core: Scripts/TestPythonAPI.sh core
         python-world: Scripts/TestPythonAPI.sh world
         python-movement: Scripts/TestPythonAPI.sh movement
         python-core-socket: TEMPO_SERVER_SOCKET=$TEMPO_CI_SOCKET Scripts/TestPythonAPI.sh core
-        python-sensors: TEMPO_SIM_RENDER=1 Scripts/TestPythonAPI.sh sensors
+        python-sensors: TEMPO_SIM_RENDER=1 TEMPO_SIM_EXTRA_ARGS="-DisablePlugins=TempoROS,TempoROSBridge" Scripts/TestPythonAPI.sh sensors
         rust-contract: Scripts/TestRustAPI.sh contract
         rust-integration: Scripts/TestRustAPI.sh integration
         rust-typed: Scripts/TestRustAPI.sh typed
