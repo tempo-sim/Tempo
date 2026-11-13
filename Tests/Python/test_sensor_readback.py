@@ -173,25 +173,8 @@ async def _capture_frames(owner, sensor, num_frames, move_camera=True):
     return frames
 
 
-@pytest.fixture(scope="session")
-def readback_level(sim_server):
-    """Load the plugin's test level once for the whole session.
-
-    Session-scoped deliberately. Loading a level is destructive — it tears the world down, destroys
-    every actor and resets the clock — so doing it per test fought the function-scoped fixed_step
-    fixture and produced "Step was aborted by an external pause or unpause". Session scope also
-    fixes the ordering: pytest sets higher-scoped fixtures up first, so the level is guaranteed to
-    be in place before fixed_step pauses and primes the clock.
-    """
-    available = tc.get_available_levels(search_path="/TempoSensors").levels
-    if LEVEL not in available:
-        pytest.skip(
-            f"{LEVEL} is not in this build. Levels found under /TempoSensors: "
-            f"{list(available) or 'none'}. Plugin content is only cooked when something references "
-            "it — check that TempoSensors/Config/Editor.ini contributes "
-            "[AlwaysCookMaps] +Map=/TempoSensors/Maps/TempoSensorsTest and repackage."
-        )
-
+def _load_level_and_wait():
+    """Load the test level and return once the sim reports it as the current one."""
     try:
         tc.load_level(level=LEVEL)
     except Exception:
@@ -215,6 +198,28 @@ def readback_level(sim_server):
         pytest.fail(
             f"{LEVEL} did not come up within {LEVEL_LOAD_TIMEOUT_S}s; the sim last reported {last}"
         )
+
+
+@pytest.fixture(scope="session")
+def readback_level(sim_server):
+    """Load the plugin's test level once for the whole session.
+
+    Session-scoped deliberately. Loading a level is destructive — it tears the world down, destroys
+    every actor and resets the clock — so doing it per test fought the function-scoped fixed_step
+    fixture and produced "Step was aborted by an external pause or unpause". Session scope also
+    fixes the ordering: pytest sets higher-scoped fixtures up first, so the level is guaranteed to
+    be in place before fixed_step pauses and primes the clock.
+    """
+    available = tc.get_available_levels(search_path="/TempoSensors").levels
+    if LEVEL not in available:
+        pytest.skip(
+            f"{LEVEL} is not in this build. Levels found under /TempoSensors: "
+            f"{list(available) or 'none'}. Plugin content is only cooked when something references "
+            "it — check that TempoSensors/Config/Editor.ini contributes "
+            "[AlwaysCookMaps] +Map=/TempoSensors/Maps/TempoSensorsTest and repackage."
+        )
+
+    _load_level_and_wait()
 
     # A level's first frames can render before it is ready to (sky capture, shader and mesh setup), so
     # a capture a few frames after the load can come back without the scene in it. Let it run for a
@@ -533,6 +538,31 @@ def test_no_band_seam_artifacts(camera_rig, pipelining):
         )
 
 
+def _boxes_from_label_image(label):
+    """The bounding box of every instance id in a label image, as {id: [x0, y0, x1, y1]}.
+
+    Row by row, with bytes.index/rindex finding the extents at C speed; a per-pixel Python loop over
+    a full frame takes seconds.
+    """
+    w, h = label.width_px, label.height_px
+    data = label.data
+    expected = {}
+    for y in range(h):
+        row = data[y * w:(y + 1) * w]
+        for instance_id in set(row):
+            if instance_id == 0:
+                continue
+            x0, x1 = row.index(instance_id), row.rindex(instance_id)
+            box = expected.get(instance_id)
+            if box is None:
+                expected[instance_id] = [x0, y, x1, y]
+            else:
+                box[0] = min(box[0], x0)
+                box[2] = max(box[2], x1)
+                box[3] = y
+    return expected
+
+
 def test_measurement_types_agree(camera_rig, labeled_scene, pipelining):
     """Color, label, depth and bounding boxes for one capture must be mutually consistent.
 
@@ -564,25 +594,7 @@ def test_measurement_types_agree(camera_rig, labeled_scene, pipelining):
         assert len(frame["color"].data) == label.width_px * label.height_px * 3
         assert len(frame["depth"].depths_m) == label.width_px * label.height_px * 4
 
-        # Recompute the boxes from the label image and require an exact match. Row by row, with
-        # bytes.index/rindex finding the extents at C speed; a per-pixel Python loop over a full
-        # frame takes seconds.
-        w, h = label.width_px, label.height_px
-        data = label.data
-        expected = {}
-        for y in range(h):
-            row = data[y * w:(y + 1) * w]
-            for instance_id in set(row):
-                if instance_id == 0:
-                    continue
-                x0, x1 = row.index(instance_id), row.rindex(instance_id)
-                box = expected.get(instance_id)
-                if box is None:
-                    expected[instance_id] = [x0, y, x1, y]
-                else:
-                    box[0] = min(box[0], x0)
-                    box[2] = max(box[2], x1)
-                    box[3] = y
+        expected = _boxes_from_label_image(label)
 
         actual = {
             b.instance_id: [b.min_x_px, b.min_y_px, b.max_x_px, b.max_y_px]
@@ -893,3 +905,601 @@ def test_a_stream_read_across_paused_frames_drops_no_capture(camera_rig, fixed_s
     assert len(ids) >= 10, f"only {len(ids)} captures arrived: {ids}"
     dropped = [(a, b) for a, b in zip(ids, ids[1:]) if b - a != 1]
     assert not dropped, f"captures were dropped between sequence ids {dropped} (all ids {ids})"
+
+
+# ------------------------------------------------------------------------------------------------
+# Delivery under concurrency: several streams, a lidar's multi-segment sweeps, streams opened late,
+# cancelled part-way and torn down with the level. What these guard is who launches a decode and
+# when a response is written, which no single-stream test reaches.
+# ------------------------------------------------------------------------------------------------
+
+# Engine frames a camera goes on rendering labels after its last label or bounding box request, and
+# depth after its last depth request. Stepping past it puts the camera in its color-only state.
+DEBOUNCE_FRAMES = 30
+
+SETTLE_STEPS = int(os.environ.get("TEMPO_TEST_SETTLE_STEPS", str(DEBOUNCE_FRAMES + 10)))
+
+# Steps the soak test advances. The races it is after are statistical, so more is better; this is
+# what stays tolerable on a developer's machine.
+SOAK_STEPS = int(os.environ.get("TEMPO_TEST_SOAK_STEPS", "300"))
+
+
+def _sensors_measuring(measurement_type):
+    return [
+        (sensor.owner, sensor.name)
+        for sensor in ts.get_available_sensors().available_sensors
+        if measurement_type in sensor.measurement_types
+    ]
+
+
+class _Rates:
+    """Sets every listed sensor's RateHz, and puts the originals back on exit."""
+
+    def __init__(self, sensors, rate_hz):
+        self.sensors = sensors
+        self.rate_hz = rate_hz
+        self.originals = {}
+
+    def __enter__(self):
+        for owner, sensor in self.sensors:
+            self.originals[(owner, sensor)] = tw.get_property(actor=owner, component=sensor, property="RateHz").float_value
+            tw.set_property(actor=owner, component=sensor, property="RateHz", value=WorldControl.Value(float_value=self.rate_hz))
+        return self
+
+    def __exit__(self, *exc):
+        for (owner, sensor), rate_hz in self.originals.items():
+            try:
+                tw.set_property(actor=owner, component=sensor, property="RateHz", value=WorldControl.Value(float_value=rate_hz))
+            except Exception:
+                pass  # teardown only; the level may have been swapped under it
+        return False
+
+
+async def _close(stream, *tasks):
+    """Cancel what is still reading a stream and end its RPC, so its request doesn't stay pending on
+    the sensor into later tests.
+
+    Closing the generator is not enough. The RPC is cancelled when a read of it is cancelled; with
+    no read outstanding the call stays open until the garbage collector reaches it, and meanwhile
+    the sensor's next response is written to a client that will never read it. The sim finishes its
+    writes before a frame's send, so the next step would wait on that write for good. Hence the
+    extra read here, started only to be cancelled."""
+    tasks = [task for task in tasks if task is not None]
+    if all(task.done() for task in tasks):
+        tasks.append(asyncio.ensure_future(stream.__anext__()))
+        await asyncio.sleep(0)
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    for task in tasks:
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+    try:
+        await stream.aclose()
+    except (RuntimeError, asyncio.CancelledError):
+        pass
+
+
+async def _headers_while_stepping(streams, steps, settle_steps=0):
+    """Read every stream in `streams` ({name: async iterator}) continuously while stepping back to
+    back, and return {name: [message, ...]} with only what a delivery check needs kept from each
+    message: its header, and a lidar segment's place in its sweep.
+
+    The caller opens the streams, and has to do it in the body of a coroutine: the client picks a
+    wrapper's blocking or async variant by its caller's frame, so one opened from a helper, a lambda
+    or a comprehension comes back as the blocking generator.
+
+    What arrives during the first `settle_steps` steps is read and left out."""
+    received = {name: [] for name in streams}
+
+    async def consume(name, stream):
+        async for message in stream:
+            entry = {"header": message.header}
+            if hasattr(message, "scan_count"):
+                entry["scan_count"] = message.scan_count
+                entry["azimuth_min"] = message.azimuth_range_rad.min
+            received[name].append(entry)
+
+    consumers = {name: asyncio.ensure_future(consume(name, stream)) for name, stream in streams.items()}
+    try:
+        await asyncio.sleep(0.1)
+        for _ in range(settle_steps):
+            await tc.step()
+        settled = {name: len(messages) for name, messages in received.items()}
+        for _ in range(steps):
+            await tc.step()
+            failed = [name for name, consumer in consumers.items() if consumer.done()]
+            assert not failed, f"streams {failed} ended while stepping: {[consumers[n].exception() for n in failed]}"
+        # The last captures' readbacks finish in the frames after they were taken.
+        for _ in range(3):
+            await asyncio.sleep(0.05)
+            await tc.step()
+        await asyncio.sleep(0.2)
+    finally:
+        for name, stream in streams.items():
+            await _close(stream, consumers[name])
+    return {name: messages[settled[name]:] for name, messages in received.items()}
+
+
+def _assert_no_capture_dropped(name, ids, skip=2, at_least=10):
+    """`ids` are the sequence ids a stream delivered, one per capture. The first `skip` absorb a rate
+    change and a depth or color reconfigure."""
+    ids = ids[skip:]
+    assert len(ids) >= at_least, f"{name}: only {len(ids)} captures arrived: {ids}"
+    out_of_order = [(a, b) for a, b in zip(ids, ids[1:]) if b <= a]
+    assert not out_of_order, f"{name}: captures arrived out of order or twice at {out_of_order} (all ids {ids})"
+    dropped = [(a, b) for a, b in zip(ids, ids[1:]) if b - a != 1]
+    assert not dropped, f"{name}: captures were dropped between sequence ids {dropped} (all ids {ids})"
+
+
+def _assert_transmitted_after_capture(name, headers):
+    """A measurement goes on the wire no earlier than it was captured, and a stream's transmission
+    times never go back."""
+    # The sensors carry the transmission time in single precision, so it can read a hair under a
+    # capture time it equals. What this is after is a time from an earlier step, a tenth of a second off.
+    tolerance = 1e-3
+    early = [
+        (h.sequence_id, h.capture_time_s, h.transmission_time_s)
+        for h in headers
+        if h.transmission_time_s < h.capture_time_s - tolerance
+    ]
+    assert not early, f"{name}: (sequence id, capture time, transmission time) transmitted before capture: {early}"
+    times = [h.transmission_time_s for h in headers]
+    backwards = [(a, b) for a, b in zip(times, times[1:]) if b < a - tolerance]
+    assert not backwards, f"{name}: transmission times went back at {backwards}"
+
+
+def _sweeps(segments):
+    """Group a lidar stream's segments by sweep, in arrival order: [(sequence_id, [segment, ...])]."""
+    sweeps = []
+    for segment in segments:
+        sequence_id = segment["header"].sequence_id
+        if sweeps and sweeps[-1][0] == sequence_id:
+            sweeps[-1][1].append(segment)
+        else:
+            sweeps.append((sequence_id, [segment]))
+    return sweeps
+
+
+def _assert_sweeps_whole(name, segments, skip=2, at_least=10):
+    """Every sweep a lidar stream delivered has each of its segments exactly once, the sweeps are
+    consecutive, and no sweep's segments are interleaved with another's."""
+    sweeps = _sweeps(segments)
+    # The last sweep may have been cut off by the end of the test.
+    sweeps = sweeps[skip:-1]
+    assert len(sweeps) >= at_least, f"{name}: only {len(sweeps)} whole sweeps arrived"
+    ids = [sequence_id for sequence_id, _ in sweeps]
+    assert len(set(ids)) == len(ids), (
+        f"{name}: a sweep's segments were split up by another sweep's, or a sweep was sent twice: {ids}"
+    )
+    for sequence_id, sweep in sweeps:
+        scan_count = sweep[0]["scan_count"]
+        azimuths = [round(segment["azimuth_min"], 6) for segment in sweep]
+        assert len(sweep) == scan_count and len(set(azimuths)) == scan_count, (
+            f"{name}: sweep {sequence_id} should have {scan_count} distinct segments and delivered "
+            f"{len(sweep)}, starting at azimuths {azimuths}"
+        )
+    dropped = [(a, b) for a, b in zip(ids, ids[1:]) if b - a != 1]
+    assert not dropped, f"{name}: sweeps were dropped between sequence ids {dropped} (all ids {ids})"
+
+
+LIDAR_TYPE = os.environ.get("TEMPO_TEST_LIDAR_TYPE", "TempoLidar")
+
+
+def _add_lidar():
+    """Add a lidar to the actor that carries the level's camera and return (owner, sensor), or None
+    if the level has no camera to put it beside or the lidar doesn't show up as a sensor."""
+    cameras = _sensors_measuring(SensorsPb.MT_COLOR_IMAGE)
+    if not cameras:
+        return None
+    owner = cameras[0][0]
+    name = tw.add_component(component_type=LIDAR_TYPE, actor=owner, name="ReadbackTestLidar").name
+    for _ in range(20):
+        if (owner, name) in _sensors_measuring(SensorsPb.MT_LIDAR_SCAN):
+            return owner, name
+        time.sleep(0.1)
+    tw.destroy_component(actor=owner, component=name)
+    return None
+
+
+@pytest.fixture
+def lidar_rig(readback_level, fixed_step):
+    """Yield (owner, sensor) for a lidar: one the test level provides, or else one added to its
+    sensor rig for the test."""
+    lidars = _sensors_measuring(SensorsPb.MT_LIDAR_SCAN)
+    added = None
+    if not lidars:
+        added = _add_lidar()
+        if added is None:
+            pytest.skip(f"No lidar found on {LEVEL} and a {LIDAR_TYPE} could not be added to its sensor rig.")
+    try:
+        yield lidars[0] if lidars else added
+    finally:
+        if added is not None:
+            try:
+                tw.destroy_component(actor=added[0], component=added[1])
+            except Exception:
+                pass  # teardown only
+
+
+@pytest.mark.parametrize("steps_per_game_frame", [1, 4])
+def test_a_lidar_stream_read_while_stepping_delivers_whole_sweeps(lidar_rig, fixed_step, steps_per_game_frame):
+    """A lidar stream read while the client steps must receive every sweep, each segment once.
+
+    A sweep is several responses to one request. The stream asks for its next measurement whenever
+    its write queue drains, which can happen part-way through a sweep while the decode is still
+    responding; a lidar that takes that as a second request sends the next sweep to the stream
+    twice, and one that loses it sends none."""
+    owner, sensor = lidar_rig
+    tc.set_steps_per_game_frame(steps_per_game_frame=steps_per_game_frame)
+    _pipelined(True)
+    async def run():
+        return await _headers_while_stepping(
+            {"lidar": ts.stream_lidar_scans(owner=owner, sensor=sensor).__aiter__()},
+            20 * steps_per_game_frame)
+
+    try:
+        with _Rates([lidar_rig], fixed_step / steps_per_game_frame):
+            received = asyncio.run(run())
+    finally:
+        _pipelined(False)
+        tc.set_steps_per_game_frame(steps_per_game_frame=1)
+
+    _assert_sweeps_whole("lidar", received["lidar"])
+    _assert_transmitted_after_capture("lidar", [segment["header"] for segment in received["lidar"]])
+
+
+@pytest.mark.parametrize("steps_per_game_frame", [1, 4])
+def test_every_stream_read_at_once_while_stepping_drops_no_capture(lidar_rig, fixed_step, steps_per_game_frame):
+    """Every camera's color and depth and every lidar, streamed at once over many steps, must each
+    receive every capture, in order, with nothing transmitted before it was captured.
+
+    This is the soak for what a single stream can't provoke: one sensor's decode responding while
+    another's is launched, a read completing while the game thread is sending, two streams of one
+    camera answered by one decode. Their failures are a capture missing from one stream, or
+    delivered out of order, once in some hundreds of steps. TEMPO_TEST_SOAK_STEPS lengthens it."""
+    cameras = _sensors_measuring(SensorsPb.MT_COLOR_IMAGE)
+    lidars = _sensors_measuring(SensorsPb.MT_LIDAR_SCAN)
+    if not cameras:
+        pytest.skip(f"No camera found on {LEVEL}.")
+
+    async def run():
+        streams = {}
+        for owner, sensor in cameras:
+            streams[f"{owner}/{sensor} color"] = ts.stream_color_images(owner=owner, sensor=sensor).__aiter__()
+            streams[f"{owner}/{sensor} depth"] = ts.stream_depth_images(owner=owner, sensor=sensor).__aiter__()
+        for owner, sensor in lidars:
+            streams[f"{owner}/{sensor} lidar"] = ts.stream_lidar_scans(owner=owner, sensor=sensor).__aiter__()
+        return await _headers_while_stepping(streams, SOAK_STEPS, settle_steps=SETTLE_STEPS * steps_per_game_frame)
+
+    tc.set_steps_per_game_frame(steps_per_game_frame=steps_per_game_frame)
+    _pipelined(True)
+    try:
+        with _Rates(cameras + lidars, fixed_step / steps_per_game_frame):
+            received = asyncio.run(run())
+    finally:
+        _pipelined(False)
+        tc.set_steps_per_game_frame(steps_per_game_frame=1)
+
+    expected = SOAK_STEPS // steps_per_game_frame
+    for name, messages in received.items():
+        headers = [message["header"] for message in messages]
+        if name.endswith("lidar"):
+            _assert_sweeps_whole(name, messages, at_least=expected // 2)
+        else:
+            _assert_no_capture_dropped(name, [h.sequence_id for h in headers], at_least=expected // 2)
+        _assert_transmitted_after_capture(name, headers)
+
+
+async def _step_reading(stream, steps):
+    """Step `steps` times with a read of `stream` outstanding before each, and return the messages."""
+    messages = []
+    pending = None
+    try:
+        for _ in range(steps):
+            pending = asyncio.ensure_future(stream.__anext__())
+            await asyncio.sleep(0.05)
+            await tc.step()
+            messages.append(await asyncio.wait_for(pending, timeout=60.0))
+            pending = None
+    finally:
+        if pending is not None:
+            pending.cancel()
+    return messages
+
+
+async def _settle_reading(stream, steps):
+    """Step at least `steps` times reading `stream`, without requiring a capture from every step, and
+    return with no read outstanding.
+
+    A camera that stops being asked for depth turns it off some frames later, and the reconfigure
+    skips a capture. Whether that falls in a test depends on what ran before it, so a test that
+    needs a capture per step first steps past it with this."""
+    pending = None
+    for step in range(steps + 10):
+        if pending is None:
+            if step >= steps:
+                return
+            pending = asyncio.ensure_future(stream.__anext__())
+            await asyncio.sleep(0.05)
+        await tc.step()
+        done, _ = await asyncio.wait({pending}, timeout=2.0)
+        if done:
+            pending.result()
+            pending = None
+    pending.cancel()
+    raise AssertionError(f"no capture arrived in the last steps of {steps + 10} while settling")
+
+
+def test_a_label_stream_opened_late_is_served_promptly(camera_rig, labeled_scene, fixed_step):
+    """Label and bounding box streams opened on a camera that has only streamed color for a while
+    must get labeled frames within a couple of captures, and they must be real: the labels of the
+    scene, agreeing with the boxes and with the color frame of the same capture.
+
+    A camera with no label request has no reason to render what the labels are read from. One that
+    stops must start again as soon as a request arrives, and must not answer a label request from a
+    capture that was rendered without them, which would be a label image of zeros."""
+    owner, sensor = camera_rig
+
+    async def run():
+        color_stream = ts.stream_color_images(owner=owner, sensor=sensor).__aiter__()
+        label_stream = box_stream = None
+        pending = []
+        try:
+            # Long enough for the camera to have settled into rendering color alone.
+            await _settle_reading(color_stream, DEBOUNCE_FRAMES + 10)
+            before = await _step_reading(color_stream, 5)
+
+            label_stream = ts.stream_label_images(owner=owner, sensor=sensor).__aiter__()
+            box_stream = ts.stream_bounding_boxes(owner=owner, sensor=sensor).__aiter__()
+            pending = [asyncio.ensure_future(label_stream.__anext__()), asyncio.ensure_future(box_stream.__anext__())]
+            await asyncio.sleep(0.1)
+
+            colors = {}
+            steps = 0
+            while not all(read.done() for read in pending):
+                assert steps < 3, (
+                    f"label and bounding box streams opened after {DEBOUNCE_FRAMES + 15} color-only captures "
+                    f"had not both been served {steps} captures later"
+                )
+                color_read = asyncio.ensure_future(color_stream.__anext__())
+                pending.append(color_read)
+                await asyncio.sleep(0.05)
+                await tc.step()
+                color = await asyncio.wait_for(color_read, timeout=60.0)
+                pending.remove(color_read)
+                colors[color.header.sequence_id] = color
+                steps += 1
+                await asyncio.sleep(0.2)
+            return before, pending[0].result(), pending[1].result(), colors
+        finally:
+            await _close(color_stream, *pending)
+            for stream in (label_stream, box_stream):
+                if stream is not None:
+                    await _close(stream)
+
+    before, label, boxes, colors = asyncio.run(run())
+
+    _assert_no_capture_dropped("color before the label stream", [c.header.sequence_id for c in before], skip=0, at_least=5)
+    assert label.header.sequence_id == boxes.header.sequence_id, (
+        f"the first label image and the first bounding boxes are of different captures: "
+        f"{label.header.sequence_id} and {boxes.header.sequence_id}"
+    )
+    assert label.header.sequence_id in colors, (
+        f"the first label image is of capture {label.header.sequence_id}, not one taken since the "
+        f"stream opened ({sorted(colors)})"
+    )
+    color = colors[label.header.sequence_id]
+    assert label.header.capture_time_s == color.header.capture_time_s
+    assert (label.width_px, label.height_px) == (color.width_px, color.height_px)
+
+    expected = _boxes_from_label_image(label)
+    if not labeled_scene:
+        pytest.skip("The level has no static meshes to label, so there was no label to look for.")
+    assert expected, (
+        "the first label image after opening the stream late has no labeled pixel, in a scene whose "
+        "meshes are all labeled: it was answered from a capture that didn't render labels"
+    )
+    actual = {b.instance_id: [b.min_x_px, b.min_y_px, b.max_x_px, b.max_y_px] for b in boxes.bounding_boxes}
+    assert actual == expected, f"bounding boxes {actual} disagree with the label image's {expected}"
+
+
+def _byte_difference(a, b, stride=31):
+    """(mean absolute difference, fraction differing by more than 16 levels) over every `stride`th
+    byte of two equally sized images. The stride is coprime with the three channels, so it samples
+    all of them, and it keeps a full frame to milliseconds of Python."""
+    assert len(a) == len(b)
+    pairs = list(zip(a[::stride], b[::stride]))
+    differences = [abs(x - y) for x, y in pairs]
+    return sum(differences) / len(differences), sum(1 for d in differences if d > 16) / len(differences)
+
+
+def test_color_is_the_same_with_and_without_a_label_stream(camera_rig, labeled_scene, fixed_step):
+    """The color image of a static scene must not depend on whether anyone is streaming labels.
+
+    Labels ride in the same render as color, and a camera may leave out the part of that render
+    only they need. Whatever it leaves out, color has to come out the same. Frames of a static
+    scene still differ a little from one to the next (temporal anti-aliasing, exposure), so the
+    comparison is against how much the color-only frames differ among themselves."""
+    owner, sensor = camera_rig
+    count = 6
+
+    async def run():
+        color_stream = ts.stream_color_images(owner=owner, sensor=sensor).__aiter__()
+        label_stream = None
+        label_reader = None
+        try:
+            # Settle: temporal history, exposure, and the camera into rendering color alone.
+            await _settle_reading(color_stream, DEBOUNCE_FRAMES + 10)
+            alone = await _step_reading(color_stream, count)
+
+            label_stream = ts.stream_label_images(owner=owner, sensor=sensor).__aiter__()
+
+            async def read_labels():
+                async for _ in label_stream:
+                    pass
+
+            label_reader = asyncio.ensure_future(read_labels())
+            await asyncio.sleep(0.1)
+            await _step_reading(color_stream, 4)
+            with_labels = await _step_reading(color_stream, count)
+            return alone, with_labels
+        finally:
+            await _close(color_stream)
+            if label_stream is not None:
+                await _close(label_stream, label_reader)
+
+    alone, with_labels = asyncio.run(run())
+
+    noise = [_byte_difference(a.data, b.data) for a, b in zip(alone, alone[1:])]
+    noise_mean = max(mean for mean, _ in noise)
+    noise_fraction = max(fraction for _, fraction in noise)
+    across = [_byte_difference(a.data, b.data) for a in alone[-2:] for b in with_labels]
+    across_mean = max(mean for mean, _ in across)
+    across_fraction = max(fraction for _, fraction in across)
+
+    assert across_mean <= 3.0 * noise_mean + 1.0 and across_fraction <= 3.0 * noise_fraction + 0.005, (
+        f"color changed when a label stream was opened: frames differ by {across_mean:.2f} levels on "
+        f"average with {across_fraction:.2%} of bytes off by more than 16, against {noise_mean:.2f} and "
+        f"{noise_fraction:.2%} between color-only frames of the same static scene"
+    )
+
+
+def test_streams_cancelled_and_reopened_while_stepping_leave_delivery_intact(camera_rig, lidar_rig, fixed_step):
+    """Streams cancelled with a response on its way, again and again while the client steps, must
+    leave the sim serving: the next stream gets every capture.
+
+    A cancelled stream's request is still held by the sensor, and its response may be mid-decode on
+    a worker thread, or queued behind a write, when the server learns the client has gone."""
+    owner, sensor = camera_rig
+    lidar_owner, lidar_sensor = lidar_rig
+
+    async def churn(rounds):
+        for index in range(rounds):
+            streams = [
+                ts.stream_color_images(owner=owner, sensor=sensor).__aiter__(),
+                ts.stream_depth_images(owner=owner, sensor=sensor).__aiter__(),
+                ts.stream_label_images(owner=owner, sensor=sensor).__aiter__(),
+                ts.stream_bounding_boxes(owner=owner, sensor=sensor).__aiter__(),
+                ts.stream_lidar_scans(owner=lidar_owner, sensor=lidar_sensor).__aiter__(),
+            ]
+            reads = [asyncio.ensure_future(stream.__anext__()) for stream in streams]
+            await asyncio.sleep(0.05)
+            await tc.step()
+            # Three ways to leave, in turn: at once, with the responses probably mid-decode; a
+            # moment later, with them probably being written; and a capture later, with the first
+            # response read and the stream's next request registered. Never a step with a response
+            # left unread: the sim finishes its writes before a frame's send, and a write the
+            # client isn't reading doesn't finish.
+            if index % 3 == 1:
+                await asyncio.sleep(0.03)
+            elif index % 3 == 2:
+                await asyncio.wait_for(asyncio.gather(*reads), timeout=60.0)
+                reads = [asyncio.ensure_future(stream.__anext__()) for stream in streams]
+                await asyncio.sleep(0.05)
+                await tc.step()
+            for stream, read in zip(streams, reads):
+                await _close(stream, read)
+
+    async def run():
+        await churn(18)
+        return await _headers_while_stepping(
+            {"depth": ts.stream_depth_images(owner=owner, sensor=sensor).__aiter__()}, 20)
+
+    _pipelined(True)
+    try:
+        with _Rates([camera_rig, lidar_rig], fixed_step):
+            received = asyncio.run(run())
+    finally:
+        _pipelined(False)
+
+    headers = [message["header"] for message in received["depth"]]
+    _assert_no_capture_dropped("depth after the churn", [h.sequence_id for h in headers])
+    _assert_transmitted_after_capture("depth after the churn", headers)
+
+
+# Keep this the last test in the file: it swaps the world out from under everything the fixtures
+# above set up.
+def test_reloading_the_level_with_streams_open_leaves_the_sim_serving(readback_level):
+    """Loading a level while sensor streams are open and frames are flowing must not crash or hang
+    the sim, and the new world's sensors must stream.
+
+    The load destroys every sensor and takes the sensor service down and up again. Decodes may be
+    in flight on worker threads, and readbacks on the GPU, for sensors that no longer exist."""
+    cameras = _sensors_measuring(SensorsPb.MT_COLOR_IMAGE)
+    if not cameras:
+        pytest.skip(f"No camera found on {LEVEL}.")
+    lidars = _sensors_measuring(SensorsPb.MT_LIDAR_SCAN)
+    if not lidars:
+        # Not removed afterwards: it goes with the level.
+        added = _add_lidar()
+        lidars = [added] if added else []
+
+    async def stream_until_the_level_goes(seconds_before_load):
+        streams = []
+        for owner, sensor in cameras:
+            streams.append(ts.stream_color_images(owner=owner, sensor=sensor).__aiter__())
+            streams.append(ts.stream_depth_images(owner=owner, sensor=sensor).__aiter__())
+        for owner, sensor in lidars:
+            streams.append(ts.stream_lidar_scans(owner=owner, sensor=sensor).__aiter__())
+        counts = [0] * len(streams)
+
+        async def consume(index):
+            async for _ in streams[index]:
+                counts[index] += 1
+
+        consumers = [asyncio.ensure_future(consume(index)) for index in range(len(streams))]
+        try:
+            await asyncio.sleep(seconds_before_load)
+            try:
+                await tc.load_level(level=LEVEL)
+            except Exception:
+                pass  # the transition can strand this call; see _load_level_and_wait
+            # The old world's streams end, with an error or without, when their service goes down.
+            await asyncio.wait(consumers, timeout=30.0)
+        finally:
+            for stream, consumer in zip(streams, consumers):
+                await _close(stream, consumer)
+        return counts
+
+    async def one_frame(owner, sensor):
+        stream = ts.stream_color_images(owner=owner, sensor=sensor).__aiter__()
+        read = asyncio.ensure_future(stream.__anext__())
+        try:
+            return await asyncio.wait_for(read, timeout=60.0)
+        finally:
+            await _close(stream, read)
+
+    tc.set_time_mode(time_mode=Time.TM_WALL_CLOCK)
+    tc.play()
+    _pipelined(True)
+    try:
+        counts = asyncio.run(stream_until_the_level_goes(2.0))
+        assert any(counts), "no stream delivered anything before the level was reloaded, so nothing was in flight"
+
+        # The same level again, so the name alone doesn't say the load has happened: wait for the
+        # services to answer and for a camera of the new world to deliver a frame.
+        deadline = time.monotonic() + LEVEL_LOAD_TIMEOUT_S
+        image = None
+        last = None
+        while image is None and time.monotonic() < deadline:
+            try:
+                assert tc.get_current_level_name().level == LEVEL.rsplit("/", 1)[-1]
+                new_cameras = _sensors_measuring(SensorsPb.MT_COLOR_IMAGE)
+                if new_cameras:
+                    image = asyncio.run(one_frame(*new_cameras[0]))
+            except Exception as error:  # services are briefly down across the swap
+                last = repr(error)
+                time.sleep(0.5)
+        assert image is not None, (
+            f"no camera streamed within {LEVEL_LOAD_TIMEOUT_S}s of reloading {LEVEL} with streams open; "
+            f"last error: {last}"
+        )
+        assert image.width_px > 0 and len(image.data) == image.width_px * image.height_px * 3
+    finally:
+        try:
+            _pipelined(False)
+        except Exception:
+            pass
