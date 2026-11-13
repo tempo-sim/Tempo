@@ -267,6 +267,26 @@ jobs:
         submodules: recursive
         token: ${{ steps.submodules_app_token.outputs.token != '' && steps.submodules_app_token.outputs.token || (inputs.submodules_token != '' && inputs.submodules_token || github.token) }}
         allow-unsafe-pr-checkout: ${{ inputs.allow_unsafe_pr_checkout }}
+    # Test the PR as it would merge, not as it was branched: a PR opened before a fix on the base branch
+    # otherwise keeps failing on what is already fixed until someone rebases it. github.sha is the base
+    # branch's tip when the event fired, so every job of a run (each engine's build, and the test jobs
+    # in test_packaged.yml, which do the same) tests the same code. A PR that conflicts is tested as is.
+    - name: Merge Base Branch Into PR
+      if: ${{ github.event_name == 'pull_request_target' && inputs.allow_unsafe_pr_checkout }}
+      working-directory: ${{ inputs.checkout_path }}
+      env:
+        BASE_SHA: ${{ github.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: |
+        if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then git fetch -q --unshallow origin "$HEAD_SHA"; fi
+        git fetch -q --no-tags origin "$BASE_SHA"
+        if git -c user.name="Tempo CI" -c user.email="ci@invalid" merge -q --no-ff -m "Merge $BASE_SHA into $HEAD_SHA" "$BASE_SHA"; then
+          git submodule update -q --init --recursive
+          echo "Testing PR head $HEAD_SHA merged with base $BASE_SHA."
+        else
+          git merge --abort
+          echo "::warning title=Not merged with the base branch::This PR conflicts with $BASE_SHA, so its head $HEAD_SHA is tested as is. Resolve the conflicts to test it against the base branch."
+        fi
     - name: Find Common Ancestor with Base Branch
       if: ${{ ! inputs.clean }}
       id: common_ancestor
