@@ -443,8 +443,7 @@ sim (not the editor). They cover the client-facing API contract and behavior ove
   launches the packaged binary headless, polls until the gRPC server answers, and tears it down.
   RHI is `-nullrhi` by default; `TEMPO_SIM_RENDER=1` renders off-screen (the `sensors` group, which
   also wants a GPU). The sim's full log is written to `TEMPO_TEST_REPORT_DIR/sim.log` (uploaded as a
-  CI artifact) for post-mortem. On teardown the fixture asks the sim to quit and fails the session if it
-  hangs or exits non-zero. `contract` groups never launch a sim. Python's `fixed_step` fixture
+  CI artifact) for post-mortem. `contract` groups never launch a sim. Python's `fixed_step` fixture
   gives deterministic stepping.
 - **Runner scripts** (`Scripts/TestPythonAPI.sh` / `TestRustAPI.sh`, with `.bat` mirrors) locate the
   `Packaged` build, install the shipped client (`Packaged/API/Python/*.whl` — *all* wheels, so a
