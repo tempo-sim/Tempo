@@ -11,12 +11,15 @@ on:
     branches:
       - main
   pull_request_target:
-    types: [opened, synchronize]
+    # closed: only to cancel the PR's native job, which would otherwise still hold the one machine.
+    types: [opened, synchronize, closed]
   workflow_dispatch:
 
 jobs:
   build_and_package:
     name: Build and Package Tempo Plugins
+    # Its test jobs below need it, so they skip with it.
+    if: github.event.action != 'closed'
     permissions:
       contents: read
       pull-requests: write
@@ -77,6 +80,7 @@ jobs:
       gen_cpp_api: true
       require_reflected_api: true
       automation_test_filter: Tempo.
+      cancel_only: ${{ github.event.action == 'closed' }}
       # The same groups the Linux fan-out jobs below run (codegen stays Linux-only: nothing it checks
       # depends on the platform), and sensors, which renders and so runs only here, where there is a GPU.
       # Sensors runs without the ROS plugins: its tests load a level, and TempoROS crashes when a node

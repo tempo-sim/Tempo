@@ -116,6 +116,13 @@ on:
         type: string
         description: Python for the tests, installed with the machine's uv (as test_packaged.yml sets one up). Empty uses the machine's python3.
         default: '3.11'
+      cancel_only:
+        type: boolean
+        description: >-
+          Build nothing; only cancel this ref's queued or running job (on a GitHub-hosted runner, so it never
+          waits for the machine). Callers pass it when a PR closes, whose job would otherwise still hold the
+          machine.
+        default: false
     outputs:
       machine_trouble:
         description: '"true" when the job failed because the machine needs attention (not because of the code). Callers alert on it from a job that runs no PR code.'
@@ -125,18 +132,34 @@ on:
         value: ${{ jobs.build.outputs.machine_trouble_reason }}
 
 jobs:
+  # Joins the build job's concurrency group, which cancels whatever is queued or running in it. A job
+  # skipped by `if` takes no part in concurrency, so the cancelling job has to actually run.
+  cancel:
+    name: Cancel (${{ inputs.unreal_version }})
+    if: ${{ inputs.cancel_only }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: native-${{ github.repository }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.runner }}-${{ inputs.unreal_version }}
+      cancel-in-progress: true
+    permissions: {}
+    steps:
+    - run: echo "Cancelled any native job in progress for ${{ github.event.pull_request.number && format('PR {0}', github.event.pull_request.number) || github.ref }}."
+
   build:
     name: Build, Package and Test (${{ inputs.unreal_version }})
+    if: ${{ !inputs.cancel_only }}
     # Plus the engine's own label: a machine runs one runner per engine version, so jobs for different
     # engines run side by side and two jobs never share a (fixed, unlocked) build tree.
     runs-on: ${{ fromJSON(format('["{0}","tempo-ue-{1}"]', join(fromJSON(inputs.runner), '","'), inputs.unreal_version)) }}
     environment: ${{ inputs.environment != '' && inputs.environment || null }}
     timeout-minutes: 300
-    # A new push to a PR supersedes the run in progress: the machine runs one job at a time, so a stale
-    # run would delay the current one. Runs on cache_branch are never cancelled - they update the golden tree.
+    # The machine runs one job at a time, so a superseded one only delays the current one: a new push to a
+    # PR or to cache_branch cancels the job in progress for it, and closing a PR cancels its job (the
+    # `cancel` job above). Cancelling a cache_branch build is safe: the golden tree is only replaced by a
+    # build that finished, and the newest push's build will. Keep the group in step with `cancel`'s.
     concurrency:
       group: native-${{ github.repository }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.runner }}-${{ inputs.unreal_version }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request_target' || github.event_name == 'pull_request' }}
+      cancel-in-progress: true
     permissions:
       contents: read
     outputs:
@@ -225,6 +248,28 @@ jobs:
         } >> "$GITHUB_ENV"
         echo "trouble=false" >> "$GITHUB_OUTPUT"
         echo "Machine OK: $STAMP; ${FREE_GB}GB free"
+
+    # Whatever an earlier job left running from this engine's build tree. A cancelled or timed-out job's sim
+    # outlives it: pytest dies on SIGTERM without its fixture teardown, and TestCppAPI.sh gives the sim a
+    # process group of its own. It keeps writing into the tree, so it cannot be deleted. Every job does this
+    # again when it ends (the last step); here is for a job that ended without getting there.
+    - name: Stop Leftover Processes
+      run: &stop_leftover_processes |
+        [ -n "${CI_BUILD:-}" ] || exit 0
+        # Matched in awk through ENVIRON, so the path is in no matcher's own command line.
+        tree_pids() { ps -axo pid=,command= | awk 'index($0, ENVIRON["CI_BUILD"] "/") { print $1 }'; }
+        PIDS=$(tree_pids)
+        [ -n "$PIDS" ] || exit 0
+        echo "::warning title=Leftover processes::Stopping processes still running from $CI_BUILD."
+        ps -o pid=,etime=,command= -p "$(echo $PIDS | tr ' ' ',')" || true
+        kill -TERM $PIDS 2>/dev/null || true
+        for _ in $(seq 1 15); do
+          [ -n "$(tree_pids)" ] || exit 0
+          sleep 1
+        done
+        kill -KILL $(tree_pids) 2>/dev/null || true
+        sleep 2
+        [ -z "$(tree_pids)" ] || { echo "::error::Processes in $CI_BUILD survived SIGKILL."; exit 1; }
 
     - name: Prepare Build Tree
       env:
@@ -441,3 +486,8 @@ jobs:
         mv "$CI_GOLDEN.new" "$CI_GOLDEN"
         rm -rf "$CI_GOLDEN.old"
         echo "Golden tree updated to ${{ github.sha }} ($CI_STAMP)."
+
+    # Runs on cancellation and timeout too, which is when a sim is most likely left behind.
+    - name: Stop Leftover Processes
+      if: always()
+      run: *stop_leftover_processes
