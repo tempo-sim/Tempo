@@ -861,6 +861,44 @@ bool UTempoCamera::HasPendingCameraRequests() const
 	return !PendingColorImageRequests.IsEmpty() || !PendingLabelImageRequests.IsEmpty() || !PendingDepthImageRequests.IsEmpty() || !PendingBoundingBoxesRequests.IsEmpty() || !PendingVideoRequests.IsEmpty();
 }
 
+uint8 UTempoCamera::GetPendingRequestKinds_Locked() const
+{
+	return static_cast<uint8>((PendingColorImageRequests.IsEmpty() ? 0 : RK_Color)
+		| (PendingLabelImageRequests.IsEmpty() ? 0 : RK_Label)
+		| (PendingDepthImageRequests.IsEmpty() ? 0 : RK_Depth)
+		| (PendingBoundingBoxesRequests.IsEmpty() ? 0 : RK_BoundingBoxes));
+}
+
+uint8 UTempoCamera::GetAnsweredRequestKindsMask(bool bReadHasDepth, bool bReadHasLabels)
+{
+	// A read without depth, or without labels, leaves those requests pending: it answers the rest.
+	return static_cast<uint8>(RK_Color | (bReadHasDepth ? RK_Depth : 0) | (bReadHasLabels ? RK_Label | RK_BoundingBoxes : 0));
+}
+
+bool UTempoCamera::HasPendingMeasurementRequests() const
+{
+	FScopeLock RequestsLock(&RequestsMutex);
+
+	// Video is sent from its own encoder's packets, not from the read, and is never held.
+	if (!PendingVideoRequests.IsEmpty())
+	{
+		return true;
+	}
+
+	// One read answers every image stream of this camera, and each stream asks for its next image only
+	// once its last response is written. Between frames, a read sent while one stream is back and
+	// another (typically depth, the larger write) is still being written answers the first and is lost
+	// to the second, which then skips that capture. So wait for every kind the last read answered,
+	// while a write is still in flight that could be the missing stream's: once none is, every stream
+	// still open has asked again, and a kind still missing belongs to a stream that has closed.
+	const uint8 PendingKinds = GetPendingRequestKinds_Locked();
+	if (PendingKinds == 0)
+	{
+		return false;
+	}
+	return (PendingKinds & LastAnsweredRequestKinds) == LastAnsweredRequestKinds || !FTempoServer::Get().HasUnflushedWork();
+}
+
 TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 {
 	TOptional<TFuture<void>> Future;
@@ -893,6 +931,7 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 			const bool bReadHasLabels = bReadHasDepth
 				? static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->bLabelsRendered
 				: static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->bLabelsRendered;
+			LastAnsweredRequestKinds = static_cast<uint8>(GetPendingRequestKinds_Locked() & GetAnsweredRequestKindsMask(bReadHasDepth, bReadHasLabels));
 			TArray<FColorImageRequest> ColorRequests = MoveTemp(PendingColorImageRequests);
 			TArray<FLabelImageRequest> LabelRequests;
 			TArray<FDepthImageRequest> DepthRequests;
@@ -1217,7 +1256,12 @@ void UTempoCamera::LaunchDecodeForCompletedRead_RenderThread()
 		{
 			return;
 		}
-		if (PendingColorImageRequests.IsEmpty() && PendingLabelImageRequests.IsEmpty() && PendingDepthImageRequests.IsEmpty() && PendingBoundingBoxesRequests.IsEmpty())
+		// Nor while a kind the last read answered hasn't asked again: its stream's last response may
+		// still be being written, and this read would be lost to it (see HasPendingMeasurementRequests).
+		// Whether that stream has closed instead is the server's to say, on the game thread, whose send
+		// then takes the read.
+		const uint8 PendingKinds = GetPendingRequestKinds_Locked();
+		if (PendingKinds == 0 || (PendingKinds & LastAnsweredRequestKinds) != LastAnsweredRequestKinds)
 		{
 			return;
 		}
@@ -1230,6 +1274,7 @@ void UTempoCamera::LaunchDecodeForCompletedRead_RenderThread()
 		const bool bReadHasLabels = bReadHasDepth
 			? static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->bLabelsRendered
 			: static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->bLabelsRendered;
+		LastAnsweredRequestKinds = static_cast<uint8>(PendingKinds & GetAnsweredRequestKindsMask(bReadHasDepth, bReadHasLabels));
 		ColorRequests = MoveTemp(PendingColorImageRequests);
 		if (bReadHasLabels)
 		{
