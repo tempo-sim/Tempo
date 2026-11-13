@@ -14,7 +14,9 @@
 #include "Rendering/SlateRenderer.h"
 #include "RHICommandList.h"
 #include "Slate/SceneViewport.h"
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
 #include "Slate/SlateViewportProvider.h"
+#endif
 #include "UnrealClient.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Kismet/GameplayStatics.h"
@@ -56,15 +58,9 @@ namespace
 	std::atomic<const SWindow*> GameWindowToClear{nullptr};
 	FDelegateHandle BackBufferReadyToPresentHandle;
 
-	void ClearGameWindowBackBuffer_RenderThread(SWindow& Window, ISlateViewportProvider& ViewportProvider)
+	void ClearGameWindowBackBuffer_RenderThread(SWindow& Window, FRHITexture* BackBuffer)
 	{
-		if (&Window != GameWindowToClear.load(std::memory_order_relaxed))
-		{
-			return;
-		}
-
-		FRHITexture* BackBuffer = ViewportProvider.GetBackBufferResource();
-		if (!BackBuffer)
+		if (&Window != GameWindowToClear.load(std::memory_order_relaxed) || !BackBuffer)
 		{
 			return;
 		}
@@ -82,6 +78,18 @@ namespace
 		RHICmdList.Transition(FRHITransitionInfo(BackBuffer, ERHIAccess::RTV, ERHIAccess::Present));
 	}
 
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+	void OnBackBufferReadyToPresent(SWindow& Window, ISlateViewportProvider& ViewportProvider)
+	{
+		ClearGameWindowBackBuffer_RenderThread(Window, ViewportProvider.GetBackBufferResource());
+	}
+#else
+	void OnBackBufferReadyToPresent(SWindow& Window, const FTextureRHIRef& BackBuffer)
+	{
+		ClearGameWindowBackBuffer_RenderThread(Window, BackBuffer.GetReference());
+	}
+#endif
+
 	void SetGameWindowToClear(const SWindow* Window)
 	{
 		GameWindowToClear.store(Window, std::memory_order_relaxed);
@@ -98,7 +106,7 @@ namespace
 
 		if (Window && !BackBufferReadyToPresentHandle.IsValid())
 		{
-			BackBufferReadyToPresentHandle = Renderer->OnBackBufferReadyToPresent().AddStatic(&ClearGameWindowBackBuffer_RenderThread);
+			BackBufferReadyToPresentHandle = Renderer->OnBackBufferReadyToPresent().AddStatic(&OnBackBufferReadyToPresent);
 		}
 		else if (!Window && BackBufferReadyToPresentHandle.IsValid())
 		{
