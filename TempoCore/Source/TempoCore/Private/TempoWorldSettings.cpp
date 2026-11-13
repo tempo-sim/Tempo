@@ -5,10 +5,16 @@
 #include "TempoCore.h"
 #include "TempoCoreSettings.h"
 #include "TempoServer.h"
+#include "ClearQuad.h"
 #include "EngineUtils.h"
+#include "Framework/Application/SlateApplication.h"
 #include "HAL/IConsoleManager.h"
 #include "Misc/CoreDelegates.h"
 #include "PhysicsEngine/PhysicsSettings.h"
+#include "Rendering/SlateRenderer.h"
+#include "RHICommandList.h"
+#include "Slate/SceneViewport.h"
+#include "Slate/SlateViewportProvider.h"
 #include "UnrealClient.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Kismet/GameplayStatics.h"
@@ -19,6 +25,7 @@
 #include "Editor/EditorEngine.h"
 #endif
 
+#include <atomic>
 #include <cmath>
 
 FTempoBetweenFramesPollDelegate ATempoWorldSettings::OnBetweenFramesPoll;
@@ -37,38 +44,67 @@ namespace
 	constexpr float ExposureBiasToBrightnessScale = 3.93342962372f;
 	constexpr float ExposureBiasToBrightnessOffset = -34.1331407526f;
 
-	// How many frames the game viewport keeps drawing (clearing to black, with world rendering off) after
-	// main viewport rendering is disabled, before its draw is skipped altogether. Slate loads the window's
-	// back buffer rather than clearing it, so once the viewport stops drawing, nothing writes those pixels
-	// again and the window keeps presenting whatever its swapchain buffers last held -- the last few
-	// frames, cycling. Clearing every buffer first (a swapchain has at most three, plus the frames the
-	// render thread and RHI have in flight) leaves the window black instead.
-	constexpr int32 ViewportClearFramesBeforeSkip = 8;
-	int32 ViewportClearFramesLeft = 0;
-	FDelegateHandle ViewportClearEndFrameHandle;
+	// With the game viewport's draw skipped, Slate still presents its window every frame, but it draws into
+	// the window's back buffer with a load rather than a clear, so the window would present whatever each
+	// swapchain buffer last held: the last few frames, cycling. Instead, the window's back buffer is cleared
+	// just before every present, which is correct however many buffers the swapchain has and however many
+	// frames are in flight. Only a viewport drawing straight into its window's back buffer (a standalone
+	// game) needs it: one with a separate render target (PIE) shares its window with the editor's UI, and
+	// Slate composites that target, which keeps a single frame rather than cycling.
+	//
+	// Written on the game thread, compared (never dereferenced) on the render thread.
+	std::atomic<const SWindow*> GameWindowToClear{nullptr};
+	FDelegateHandle BackBufferReadyToPresentHandle;
 
-	void CancelDeferredGameRenderingDisable()
+	void ClearGameWindowBackBuffer_RenderThread(SWindow& Window, ISlateViewportProvider& ViewportProvider)
 	{
-		if (ViewportClearEndFrameHandle.IsValid())
+		if (&Window != GameWindowToClear.load(std::memory_order_relaxed))
 		{
-			FCoreDelegates::OnEndFrame.Remove(ViewportClearEndFrameHandle);
-			ViewportClearEndFrameHandle.Reset();
+			return;
 		}
-		ViewportClearFramesLeft = 0;
+
+		FRHITexture* BackBuffer = ViewportProvider.GetBackBufferResource();
+		if (!BackBuffer)
+		{
+			return;
+		}
+
+		// Slate's graph leaves the back buffer ready to present, and its present expects it so again. The
+		// back buffer's clear value binding differs between RHIs (none at all on Vulkan), so this draws a
+		// clear quad with an explicit color rather than relying on a clear load action.
+		FRHICommandListImmediate& RHICmdList = FRHICommandListImmediate::Get();
+		const FIntVector Size = BackBuffer->GetSizeXYZ();
+		RHICmdList.Transition(FRHITransitionInfo(BackBuffer, ERHIAccess::Present, ERHIAccess::RTV));
+		RHICmdList.BeginRenderPass(FRHIRenderPassInfo(BackBuffer, ERenderTargetActions::DontLoad_Store), TEXT("TempoClearGameWindow"));
+		RHICmdList.SetViewport(0.0f, 0.0f, 0.0f, Size.X, Size.Y, 1.0f);
+		DrawClearQuad(RHICmdList, FLinearColor::Black);
+		RHICmdList.EndRenderPass();
+		RHICmdList.Transition(FRHITransitionInfo(BackBuffer, ERHIAccess::RTV, ERHIAccess::Present));
 	}
 
-	void DisableGameRenderingAfterClearFrames()
+	void SetGameWindowToClear(const SWindow* Window)
 	{
-		CancelDeferredGameRenderingDisable();
-		ViewportClearFramesLeft = ViewportClearFramesBeforeSkip;
-		ViewportClearEndFrameHandle = FCoreDelegates::OnEndFrame.AddLambda([]()
+		GameWindowToClear.store(Window, std::memory_order_relaxed);
+
+		if (!FSlateApplication::IsInitialized())
 		{
-			if (--ViewportClearFramesLeft <= 0)
-			{
-				CancelDeferredGameRenderingDisable();
-				FViewport::SetGameRenderingEnabled(false);
-			}
-		});
+			return;
+		}
+		FSlateRenderer* Renderer = FSlateApplication::Get().GetRenderer();
+		if (!Renderer)
+		{
+			return;
+		}
+
+		if (Window && !BackBufferReadyToPresentHandle.IsValid())
+		{
+			BackBufferReadyToPresentHandle = Renderer->OnBackBufferReadyToPresent().AddStatic(&ClearGameWindowBackBuffer_RenderThread);
+		}
+		else if (!Window && BackBufferReadyToPresentHandle.IsValid())
+		{
+			Renderer->OnBackBufferReadyToPresent().Remove(BackBufferReadyToPresentHandle);
+			BackBufferReadyToPresentHandle.Reset();
+		}
 	}
 }
 
@@ -834,6 +870,8 @@ void ATempoWorldSettings::TempoCoreRenderSettingsChanged() const
 
 void ATempoWorldSettings::SetMainViewportRenderEnabled(bool bEnabled) const
 {
+	const SWindow* WindowToClear = nullptr;
+
 	if (const APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0))
 	{
 		if (ULocalPlayer* ClientPlayer = PlayerController->GetLocalPlayer())
@@ -849,24 +887,23 @@ void ATempoWorldSettings::SetMainViewportRenderEnabled(bool bEnabled) const
 				{
 					ViewportWidget->SetVisibility(bEnabled ? EVisibility::Visible : EVisibility::Hidden);
 				}
+
+				// FSceneViewport declares its override private; ISlateViewport's is public.
+				const ISlateViewport* GameViewport = ViewportClient->GetGameViewport();
+				if (!bEnabled && GameViewport && !GameViewport->UseSeparateRenderTarget())
+				{
+					WindowToClear = ViewportClient->GetWindow().Get();
+				}
 			}
 		}
 	}
 
-	// Skips the game thread's viewport draw (per-player view setup, canvas, and present) before it ever
-	// reaches the checks above. Static, but non-game (editor) viewports draw regardless of it. Disabling
-	// waits a few frames, in which the viewport draws with world rendering off and so clears to black;
-	// skipping its draw straight away leaves the window showing stale frames instead (see
-	// ViewportClearFramesBeforeSkip).
-	if (bEnabled)
-	{
-		CancelDeferredGameRenderingDisable();
-		FViewport::SetGameRenderingEnabled(true);
-	}
-	else if (FViewport::IsGameRenderingEnabled())
-	{
-		DisableGameRenderingAfterClearFrames();
-	}
+	// Skips the game thread's viewport draw (per-player view setup and canvas) before it ever reaches the
+	// checks above. Static, but non-game (editor) viewports draw regardless of it.
+	FViewport::SetGameRenderingEnabled(bEnabled);
+
+	// See GameWindowToClear.
+	SetGameWindowToClear(WindowToClear);
 }
 
 float ATempoWorldSettings::GetDefaultAutoExposureBias()
