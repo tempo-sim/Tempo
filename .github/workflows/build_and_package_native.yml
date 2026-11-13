@@ -116,6 +116,13 @@ on:
         type: string
         description: Python for the tests, installed with the machine's uv (as test_packaged.yml sets one up). Empty uses the machine's python3.
         default: '3.11'
+      cancel_only:
+        type: boolean
+        description: >-
+          Build nothing; only cancel this ref's queued or running job (on a GitHub-hosted runner, so it never
+          waits for the machine). Callers pass it when a PR closes, whose job would otherwise still hold the
+          machine.
+        default: false
     outputs:
       machine_trouble:
         description: '"true" when the job failed because the machine needs attention (not because of the code). Callers alert on it from a job that runs no PR code.'
@@ -125,18 +132,34 @@ on:
         value: ${{ jobs.build.outputs.machine_trouble_reason }}
 
 jobs:
+  # Joins the build job's concurrency group, which cancels whatever is queued or running in it. A job
+  # skipped by `if` takes no part in concurrency, so the cancelling job has to actually run.
+  cancel:
+    name: Cancel (${{ inputs.unreal_version }})
+    if: ${{ inputs.cancel_only }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: native-${{ github.repository }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.runner }}-${{ inputs.unreal_version }}
+      cancel-in-progress: true
+    permissions: {}
+    steps:
+    - run: echo "Cancelled any native job in progress for ${{ github.event.pull_request.number && format('PR {0}', github.event.pull_request.number) || github.ref }}."
+
   build:
     name: Build, Package and Test (${{ inputs.unreal_version }})
+    if: ${{ !inputs.cancel_only }}
     # Plus the engine's own label: a machine runs one runner per engine version, so jobs for different
     # engines run side by side and two jobs never share a (fixed, unlocked) build tree.
     runs-on: ${{ fromJSON(format('["{0}","tempo-ue-{1}"]', join(fromJSON(inputs.runner), '","'), inputs.unreal_version)) }}
     environment: ${{ inputs.environment != '' && inputs.environment || null }}
     timeout-minutes: 300
-    # A new push to a PR supersedes the run in progress: the machine runs one job at a time, so a stale
-    # run would delay the current one. Runs on cache_branch are never cancelled - they update the golden tree.
+    # The machine runs one job at a time, so a superseded one only delays the current one: a new push to a
+    # PR or to cache_branch cancels the job in progress for it, and closing a PR cancels its job (the
+    # `cancel` job above). Cancelling a cache_branch build is safe: the golden tree is only replaced by a
+    # build that finished, and the newest push's build will. Keep the group in step with `cancel`'s.
     concurrency:
       group: native-${{ github.repository }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.runner }}-${{ inputs.unreal_version }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request_target' || github.event_name == 'pull_request' }}
+      cancel-in-progress: true
     permissions:
       contents: read
     outputs:
