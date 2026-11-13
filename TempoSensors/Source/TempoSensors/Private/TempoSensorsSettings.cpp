@@ -71,6 +71,19 @@ void UTempoSensorsSettings::SetRuntimeSemanticLabelTable(UDataTable* SemanticLab
 		return;
 	}
 
+	// The table is held by this CDO, and in a cooked build a native class's CDO is in the GC's
+	// disregard set: its references are never traced, so they keep nothing alive, and GC
+	// verification fatals on one that points at an unrooted object. A table loaded at runtime is a
+	// fresh transient object nothing else holds, so root it for as long as it is installed, and
+	// release the one it replaces.
+	if (RuntimeSemanticLabelTable)
+	{
+		RuntimeSemanticLabelTable->RemoveFromRoot();
+	}
+	if (SemanticLabelTableIn)
+	{
+		SemanticLabelTableIn->AddToRoot();
+	}
 	RuntimeSemanticLabelTable = SemanticLabelTableIn;
 
 	TempoSensorsLabelSettingsChangedEvent.Broadcast();

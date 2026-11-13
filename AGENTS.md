@@ -466,10 +466,12 @@ sim (not the editor). They cover the client-facing API contract and behavior ove
   to test its **own** custom API surface (its generated client ships in the same `Packaged/API`
   folders) by passing its own `test_command` and `submodules: recursive`.
 
-**Still absent:** functional/agents/ROS tests, and the GPU-gated `sensors` group in CI. Adding a
-new behavior test = a new marker (Python) or `tests/*.rs` (Rust); a brand-new group also needs a
-matrix entry in `tempo_build_and_package.yml` (and, for Python, a line in `pytest.ini`). Enabling
-`sensors` means a GPU `runner` + `render: true` on that matrix entry.
+**Still absent:** functional/agents/ROS tests, and the GPU-gated `sensors` group anywhere but the
+native job (`python-sensors` in its `test_commands`; the machines there have GPUs), so not on Linux
+or Windows. Adding a new behavior test = a new marker (Python) or `tests/*.rs` (Rust); a brand-new
+group also needs a matrix entry in `tempo_build_and_package.yml` (and, for Python, a line in
+`pytest.ini`). Running `sensors` in a fan-out job means a GPU `runner` + `render: true` on that
+matrix entry.
 
 ---
 

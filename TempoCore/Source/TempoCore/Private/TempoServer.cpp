@@ -9,6 +9,7 @@
 #include "TempoWorldSettings.h"
 #include "TempoCore.h"
 
+#include "HAL/IConsoleManager.h"
 #include "HAL/PlatformMisc.h"
 #include "Misc/App.h"
 #include "Misc/CommandLine.h"
@@ -121,6 +122,13 @@ grpc_compression_level CompressionLevelTogRPC(EServerCompressionLevel TempoCompr
 
 namespace
 {
+	TAutoConsoleVariable<float> CVarWriteStallTimeoutMs(
+		TEXT("Tempo.WriteStallTimeoutMs"), 2000.0f,
+		TEXT("How long the server waits for a request's write or finish to complete before it stops waiting on that ")
+		TEXT("request. A write completes only once the client has room for it, so a client that never reads a stream ")
+		TEXT("again would otherwise hold the game thread forever. A stalled request is waited on again once its write ")
+		TEXT("completes."));
+
 	// sysexits.h's EX_CONFIG - the sim cannot start with the endpoint it was given. Distinct from 1
 	// so a harness can tell this apart from any other early exit.
 	constexpr uint8 ServerStartFailureExitCode = 78;
@@ -307,6 +315,7 @@ void FTempoServer::Deinitialize()
 	RequestManagers.Empty();
 	HeldRequestTags.Reset();
 	DeferredEvents.Reset();
+	StalledTags.Reset();
 
 	if (!BoundSocketPath.IsEmpty())
 	{
@@ -411,6 +420,11 @@ void FTempoServer::TickInternal()
 				if (TimeMode == ETimeMode::FixedStep)
 				{
 					bProcessedPendingEvents = !HasUnflushedWork();
+					if (!bProcessedPendingEvents && FPlatformTime::Seconds() - Start > GetWriteStallTimeoutSeconds())
+					{
+						MarkStalledWrites();
+						bProcessedPendingEvents = true;
+					}
 				}
 				else
 				{
@@ -491,12 +505,32 @@ bool FTempoServer::HasUnflushedWork() const
 {
 	for (const auto& Elem : RequestManagers)
 	{
-		if (Elem.Value->HasUnflushedWork())
+		if (Elem.Value->HasUnflushedWork() && !StalledTags.Contains(Elem.Key))
 		{
 			return true;
 		}
 	}
 	return false;
+}
+
+double FTempoServer::GetWriteStallTimeoutSeconds()
+{
+	return FMath::Max(0.0f, CVarWriteStallTimeoutMs.GetValueOnGameThread()) / 1000.0;
+}
+
+void FTempoServer::MarkStalledWrites()
+{
+	for (const auto& Elem : RequestManagers)
+	{
+		if (Elem.Value->HasUnflushedWork() && !StalledTags.Contains(Elem.Key))
+		{
+			StalledTags.Add(Elem.Key);
+			UE_LOG(LogTempoCore, Warning, TEXT("A %s request's response was not accepted by its client within %.0f ms. ")
+				TEXT("Not waiting on it again until it is (Tempo.WriteStallTimeoutMs). A client that stops reading a ")
+				TEXT("stream should cancel it."),
+				*Elem.Value->GetServiceName().ToString(), GetWriteStallTimeoutSeconds() * 1000.0);
+		}
+	}
 }
 
 void FTempoServer::FinishWrites()
@@ -510,8 +544,18 @@ void FTempoServer::FinishWrites()
 
 	const int32 MaxEventWaitTimeNanoSeconds = GetDefault<UTempoCoreSettings>()->GetMaxEventWaitTime();
 	const gpr_timespec MaxEventWaitTime {0, MaxEventWaitTimeNanoSeconds, GPR_TIMESPAN};
+	const double DeadlineSeconds = FPlatformTime::Seconds() + GetWriteStallTimeoutSeconds();
 	while (HasUnflushedWork())
 	{
+		// A write completes only once its client has room for it. One that never reads the stream again
+		// (it dropped the stream without cancelling it) would hold the game thread here forever, with
+		// the client's next Step among the events set aside: neither side could move.
+		if (FPlatformTime::Seconds() > DeadlineSeconds)
+		{
+			MarkStalledWrites();
+			return;
+		}
+
 		int32* Tag;
 		bool bOk;
 		switch (CompletionQueue->AsyncNext(reinterpret_cast<void**>(&Tag), &bOk, MaxEventWaitTime))
@@ -558,6 +602,9 @@ void FTempoServer::HandleDeferredEvents()
 
 void FTempoServer::HandleEventForTag(int32 Tag, bool bOk)
 {
+	// Its write completed (or failed): it is waited on like any other request from here on.
+	StalledTags.Remove(Tag);
+
 	if (TSharedPtr<FRequestManager>* RequestManager = RequestManagers.Find(Tag))
 	{
 		if (!bOk)

@@ -413,7 +413,8 @@ public:
 	bool HasHeldRequests() const { return !HeldRequestTags.IsEmpty(); }
 
 	// Whether any request has a write or finish in flight, or responses queued behind one. A stream
-	// asks its handler for its next response only once these drain.
+	// asks its handler for its next response only once these drain. A stalled request (see
+	// FinishWrites) does not count until its write completes.
 	bool HasUnflushedWork() const;
 
 	// Handles write and finish completions until no request has unflushed work, and nothing else: any
@@ -422,7 +423,10 @@ public:
 	// before its time has moved. A stream's handler is re-invoked when its last write completes, which
 	// every streaming handler answers by registering interest and responding later (see
 	// ITempoServiceProvider); one that responded at once would run here, and keep this from draining.
-	// Like a FixedStep server tick, it waits as long as the writes take.
+	// Like a FixedStep server tick, it waits as long as the writes take, up to Tempo.WriteStallTimeoutMs:
+	// a write completes only once its client has room for it, and a client that dropped a stream without
+	// cancelling it never makes room. Every request still unflushed then is marked stalled, and neither
+	// this nor a FixedStep server tick waits on it again until its write completes.
 	void FinishWrites();
 
 protected:
@@ -498,6 +502,12 @@ protected:
 	// Events FinishWrites set aside, in the order they arrived.
 	TArray<TPair<int32, bool>> DeferredEvents;
 	void HandleDeferredEvents();
+
+	// Requests whose write or finish outlasted Tempo.WriteStallTimeoutMs, which HasUnflushedWork ignores
+	// until their next event.
+	TSet<int32> StalledTags;
+	static double GetWriteStallTimeoutSeconds();
+	void MarkStalledWrites();
 
 	// The game world the server pumps from, whose ATempoWorldSettings decides whether a GameFrameOnly
 	// request must wait.

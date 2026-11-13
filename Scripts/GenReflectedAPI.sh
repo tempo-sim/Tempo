@@ -66,12 +66,16 @@ rm -f "$CPP_API_DIR"/lib/*/libtempo_reflected.a "$CPP_API_DIR"/lib/*/tempo_refle
 # The project package's import name, from gen_naming.py -- the function that names it for the
 # proto wrappers too, so TempoSample's is tempo_sample. Derived rather than spelled here, because a
 # second place that spells it is a second place to get it wrong.
+#
+# The paths go in as arguments, never spliced into the program text: on Windows the interpreter is
+# a native python.exe, and MSYS translates a /c/... path only where it is a whole argument. Spliced
+# into the -c string it stays /c/Users/..., which Windows Python cannot resolve.
 IMPORT_NAME=$("$PYTHON_BIN" -c "
 import sys
-sys.path.insert(0, '$PYTHON_DIR')
+sys.path.insert(0, sys.argv[1])
 from gen_naming import package_import_name, project_package_name
-print(package_import_name(project_package_name('$PROJECT_ROOT')))
-")
+print(package_import_name(project_package_name(sys.argv[2])))
+" "$PYTHON_DIR" "$PROJECT_ROOT")
 
 EDITOR_CMD=""
 case "$OSTYPE" in

@@ -424,8 +424,12 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         max_attempts: 3
+        # Retries a failure, never a timeout: a timeout kills only the docker client, and the
+        # container it leaves running would race the next attempt in the same project directory.
+        # The limit is for a hung download, so it sits well above the ~45s a normal run takes
+        # to fetch and extract the gRPC and rclcpp archives.
         retry_on: error
-        timeout_seconds: 60
+        timeout_seconds: 600
         command: |
           docker run --rm \
             ${UBA_NO_DETOUR} \

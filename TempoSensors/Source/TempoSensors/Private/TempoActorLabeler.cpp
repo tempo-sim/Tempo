@@ -823,6 +823,41 @@ void UTempoActorLabeler::OnWorldBeginPlay(UWorld& InWorld)
 		UnLabelComponent(Component);
 	});
 
+	// Actors in a streamed-in level (a World Partition cell, a level instance) are loaded, not spawned,
+	// so the spawn handler never sees them, and the physics delegate only catches components with
+	// collision. A purely visual mesh -- CitySample's freeway deck, whose collision is a separate
+	// actor -- would go unlabeled and draw no custom depth, letting labels behind it show through.
+	FWorldDelegates::LevelAddedToWorld.AddWeakLambda(this, [this](ULevel* Level, UWorld* World)
+	{
+		// Without a table there is nothing to label with (LoadLabelTable labels the world when one
+		// arrives), and LabelActor would log an error per actor.
+		if (World == GetWorld() && Level && SemanticLabelTable)
+		{
+			for (AActor* Actor : Level->Actors)
+			{
+				if (IsValid(Actor))
+				{
+					LabelActor(Actor);
+				}
+			}
+		}
+	});
+
+	// And give a streamed-out level's IDs back: its actors are not destroyed one by one.
+	FWorldDelegates::LevelRemovedFromWorld.AddWeakLambda(this, [this](ULevel* Level, UWorld* World)
+	{
+		if (World == GetWorld() && Level)
+		{
+			for (AActor* Actor : Level->Actors)
+			{
+				if (Actor)
+				{
+					UnLabelActor(Actor);
+				}
+			}
+		}
+	});
+
 	GetMutableDefault<UTempoSensorsSettings>()->TempoSensorsLabelSettingsChangedEvent.AddUObject(this, &UTempoActorLabeler::OnLabelSettingsChanged);
 }
 
@@ -840,6 +875,8 @@ void UTempoActorLabeler::Deinitialize()
 	// Drop our binding before clearing the table below, so the resulting broadcast doesn't send us
 	// re-labeling a world that is going away.
 	GetMutableDefault<UTempoSensorsSettings>()->TempoSensorsLabelSettingsChangedEvent.RemoveAll(this);
+	FWorldDelegates::LevelAddedToWorld.RemoveAll(this);
+	FWorldDelegates::LevelRemovedFromWorld.RemoveAll(this);
 
 	// A table loaded over the API lives on the rooted settings CDO, not the world, so left in place
 	// it would silently supersede the configured asset in every later session of this process —

@@ -203,8 +203,9 @@ void UTempoSensorServiceSubsystem::OnWorldTickStart(UWorld* World, ELevelTick Ti
 		// client's next Step times out and this frame runs paused, would otherwise leave the next
 		// readback with no request here, and it would be dropped. Only write completions are handled:
 		// no new request runs inside the world tick, and a stream's re-invoked handler only registers
-		// its next request (see FTempoServer::FinishWrites). No timeout: the server tick that follows
-		// would wait for the same writes as long as they take.
+		// its next request (see FTempoServer::FinishWrites). It waits as long as the writes take, as the
+		// server tick that follows would, up to Tempo.WriteStallTimeoutMs: a client that dropped a
+		// stream without cancelling it never accepts its write, and the wait would hold its next Step.
 		WaitForDecodesInFlight();
 		if (GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep)
 		{
