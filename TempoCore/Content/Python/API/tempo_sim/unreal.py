@@ -487,7 +487,7 @@ class _Package:
         self._hashes = None
 
     def _load(self, *parts):
-        with open(os.path.join(self.directory, *parts)) as f:
+        with open(os.path.join(self.directory, *parts), encoding="utf-8") as f:
             return json.load(f)
 
     @property
@@ -539,7 +539,7 @@ class _Package:
             for candidate in candidates:
                 path = os.path.join(self.directory, candidate)
                 if os.path.exists(path):
-                    with open(path) as f:
+                    with open(path, encoding="utf-8") as f:
                         self._modules[module] = json.load(f)
                     break
             else:
