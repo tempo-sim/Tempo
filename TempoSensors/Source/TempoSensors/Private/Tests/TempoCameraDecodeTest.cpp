@@ -43,7 +43,7 @@ namespace
 	// by writing raw bytes from the post-process material, so the tests do the same. Both layouts
 	// are 4 label/color bytes (order differs per type, which is exactly why the reference below
 	// reads through the accessors rather than assuming an order) plus, for the depth format, a
-	// uint32 of discretized inverse depth.
+	// uint32 depth lane.
 	template <typename PixelType>
 	void WritePixelBytes(PixelType& Pixel, uint8 Byte0, uint8 Byte1, uint8 Byte2, uint8 Label, uint32 DiscreteDepth)
 	{
@@ -74,7 +74,7 @@ namespace
 				const uint8 Byte0 = static_cast<uint8>((X * 7 + Y * 13) & 0xFF);
 				const uint8 Byte1 = static_cast<uint8>((X * 31 + Y * 3 + 17) & 0xFF);
 				const uint8 Byte2 = static_cast<uint8>((Index * 101) & 0xFF);
-				// Spread across the 24-bit discretized inverse depth range, dominated by the row.
+				// Spread across the 24-bit depth lane, dominated by the row.
 				const uint32 DiscreteDepth =
 					static_cast<uint32>((static_cast<int64>(Y) * 4099 + X * 7) % (1 << 24));
 				WritePixelBytes(Image[Index], Byte0, Byte1, Byte2, LabelFn(X, Y), DiscreteDepth);
@@ -125,12 +125,12 @@ namespace
 
 	TArray<float> ReferenceDepth(const TArray<FCameraPixelWithDepth>& Image, float MinDepth, float MaxDepth)
 	{
+		const FCameraDepthDecoder DecodeDepth(MinDepth, MaxDepth);
 		TArray<float> Out;
 		Out.SetNumUninitialized(Image.Num());
 		for (int32 Index = 0; Index < Image.Num(); ++Index)
 		{
-			Out[Index] = QuantityConverter<CM2M>::Convert(
-				Image[Index].Depth(MinDepth, MaxDepth, GTempoCamera_Max_Discrete_Depth));
+			Out[Index] = QuantityConverter<CM2M>::Convert(DecodeDepth(Image[Index].DepthLane()));
 		}
 		return Out;
 	}
@@ -593,6 +593,60 @@ bool FTempoCameraDecodeNoDepthTest::RunTest(const FString& Parameters)
 		const TMap<int32, FBox2D> ExpectedBoxes = ReferenceBoundingBoxes(Read.Image, Size.X, Size.Y);
 		TestEqual(*FString::Printf(TEXT("%s: box count"), *What),
 			Results.Boxes->bounding_boxes_size(), ExpectedBoxes.Num());
+	}
+
+	return true;
+}
+
+// The depth code itself. Everything above checks the decode against a reference that calls the same
+// decoder, so neither would notice the decoder drifting from what the post-process material
+// writes. EncodeDepthLane mirrors the material's custom HLSL (M_TempoCamera_Distort_WithDepth) and
+// the stitch pass's widening to the 24-bit lane; keep the three in step.
+namespace
+{
+	uint32 EncodeDepthLane(double DepthCm, double MinDepth, double MaxDepth)
+	{
+		const double Clamped = FMath::Clamp(DepthCm, MinDepth, MaxDepth);
+		const double Fraction = FMath::Log2(MaxDepth / Clamped) / FMath::Log2(MaxDepth / MinDepth);
+		const uint32 Code = static_cast<uint32>(FMath::Clamp(Fraction, 0.0, 1.0) * GTempoCamera_Max_Depth_Code + 0.5);
+		return Code << 2;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoCameraDecodeDepthCodeTest,
+	"Tempo.Sensors.CameraDecode.DepthCode", TempoCameraDecodeTestFlags)
+bool FTempoCameraDecodeDepthCodeTest::RunTest(const FString& Parameters)
+{
+	// The default near plane and MaxCameraDepth: 10 cm to 1 km.
+	constexpr float MinDepth = 10.0f;
+	constexpr float MaxDepth = 100000.0f;
+	const FCameraDepthDecoder DecodeDepth(MinDepth, MaxDepth);
+
+	// Code 0 is MaxDepth, so an unrendered pixel (alpha 0) reads as far away rather than at the lens.
+	TestEqual(TEXT("Code 0 decodes to MaxDepth"), DecodeDepth(0), MaxDepth, MaxDepth * 1e-6f);
+	TestEqual(TEXT("The largest code decodes to MinDepth"),
+		DecodeDepth(GTempoCamera_Max_Depth_Code << 2), MinDepth, MinDepth * 1e-6f);
+	TestEqual(TEXT("The lane's bottom two bits are ignored"), DecodeDepth((1000u << 2) | 3u), DecodeDepth(1000u << 2));
+
+	// Each code is ln(MaxDepth / MinDepth) / 2^22 = 2.2e-6 of the depth it encodes, so a round trip
+	// is within half of that. Allow 1.5e-6 for the float the decode returns.
+	for (const double DepthCm : { 10.5, 37.0, 100.0, 999.0, 1234.5, 10000.0, 54321.0, 99990.0 })
+	{
+		const double RoundTrip = DecodeDepth(EncodeDepthLane(DepthCm, MinDepth, MaxDepth));
+		const double RelativeError = FMath::Abs(RoundTrip - DepthCm) / DepthCm;
+		TestTrue(*FString::Printf(TEXT("%.1f cm round trips within 1.5e-6 (got %.3g)"), DepthCm, RelativeError),
+			RelativeError <= 1.5e-6);
+	}
+
+	// Strictly decreasing in the code, with steps of the expected relative size. The decoder returns
+	// a float, whose rounding is ~5% of a step, hence the loose tolerance on its size.
+	const double ExpectedStep = FMath::Loge(static_cast<double>(MaxDepth) / MinDepth) / GTempoCamera_Max_Depth_Code;
+	for (const uint32 Code : { 0u, 1u, 1000u, 1u << 20, 3000000u, GTempoCamera_Max_Depth_Code - 1u })
+	{
+		const double Far = DecodeDepth(Code << 2);
+		const double Near = DecodeDepth((Code + 1u) << 2);
+		TestTrue(*FString::Printf(TEXT("Code %u decodes farther than code %u"), Code, Code + 1u), Far > Near);
+		TestEqual(*FString::Printf(TEXT("Step after code %u"), Code), (Far - Near) / Far, ExpectedStep, ExpectedStep * 0.2);
 	}
 
 	return true;

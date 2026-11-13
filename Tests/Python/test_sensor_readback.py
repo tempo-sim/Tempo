@@ -84,7 +84,7 @@ NUM_FRAMES = 8
 # plausible depth, whereas an irregular sequence pins each frame to exactly one pose.
 STEP_DELTAS_M = [0.0, 0.9, 0.3, 1.7, 0.2, 1.1, 2.3, 0.5, 1.3]
 
-# Depth is discretized inverse depth over [MinDepth, MaxDepth], so absolute precision degrades with
+# Depth is quantized logarithmically over [MinDepth, MaxDepth], so absolute precision degrades with
 # range. A whole-frame confusion moves depth by a STEP_DELTAS_M entry (>= 0.2 m), so this is far
 # tighter than needed to catch one while tolerating quantization.
 DEPTH_TOL_M = 0.05

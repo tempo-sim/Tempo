@@ -623,12 +623,11 @@ void RespondToImageRequests(const TTextureRead<PixelType>* TextureRead,
 					if (DepthData)
 					{
 						float* const DstRow = DepthData + static_cast<int64>(Y) * Width;
+						const FCameraDepthDecoder DecodeDepth(TextureRead->MinDepth, TextureRead->MaxDepth);
 						for (int32 X = 0; X < Width; ++X)
 						{
-							// FCameraPixelWithDepth::Depth returns centimeters; convert to meters
-							// for the wire.
-							DstRow[X] = QuantityConverter<CM2M>::Convert(
-								SrcRow[X].Depth(TextureRead->MinDepth, TextureRead->MaxDepth, GTempoCamera_Max_Discrete_Depth));
+							// The decoder returns centimeters; convert to meters for the wire.
+							DstRow[X] = QuantityConverter<CM2M>::Convert(DecodeDepth(SrcRow[X].DepthLane()));
 						}
 					}
 				}
@@ -2446,7 +2445,6 @@ void UTempoCamera::SetTileDepthEnabled(FTempoCameraTile& Tile, bool bTileDepthEn
 		Tile.MaxDepth = TempoSensorsSettings->GetMaxCameraDepth();
 		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MinDepth"), Tile.MinDepth);
 		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDepth"), Tile.MaxDepth);
-		Tile.PostProcessMaterialInstance->SetScalarParameterValue(TEXT("MaxDiscreteDepth"), GTempoCamera_Max_Discrete_Depth);
 
 		// F-Theta (BrownConrady, Rational): single-tile, tile axis = camera axis, so SceneDepth is
 		// already depth along the camera axis — the historical contract. Equidistant family

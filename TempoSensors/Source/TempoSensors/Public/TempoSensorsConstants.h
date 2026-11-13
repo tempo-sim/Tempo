@@ -13,8 +13,13 @@
 //
 //   bits = 0x00800000 + (label << 22) + depth22      (label 0..251, depth22 0..2^22-1)
 //
-// The stitch pass widens depth22 to the 24-bit code (<< 2) the merge pass and the CPU decode use,
-// so the camera's depth is quantized to 22 bits of inverse depth.
+// depth22 is logarithmic in depth: 0 at MaxDepth, GTempoCamera_Max_Depth_Code at MinDepth, so
+// each code step is the same fraction of the depth it encodes -- ln(MaxDepth / MinDepth) / 2^22,
+// 2.2e-6 for a 10 cm near plane and a 1 km MaxDepth (2.2 mm at 1 km, 22 um at 10 m). Inverse
+// depth, which the camera used before, puts half its codes between MinDepth and 2 * MinDepth;
+// at 22 bits it would resolve only 2.4 m at 1 km. A pixel with nothing rendered (alpha 0) decodes
+// as code 0, i.e. MaxDepth, as the sky should. The stitch pass widens depth22 to the 24-bit lane
+// (<< 2) that the merge pass and the readback carry, and the CPU decode shifts it back.
 //
 // Two earlier layouts each broke a range of labels. The label used to occupy the raw top byte,
 // which left the exponent zero for labels 0 and 128 -- a subnormal, decoding to MaxDepth. Then it
@@ -23,10 +28,13 @@
 // them read back as label 126 at MaxDepth (and the sign bit, depth's top bit, was clamped to 0).
 // Semantic labels are small, so only instance labels showed it.
 //
-// Discretized depth is limited to 24 bits (2^24 = 16777216). Used as the divisor when decoding
-// depth on CPU. The lidar reuses this 24-bit limit for both pixel formats: the WithColor
-// format reserves the top 8 bits of each fp32 lane as a NaN/denormal-safety prefix, and the
-// no-color format gives up its top depth byte to carry a reflectivity estimate.
+// Largest camera depth code (see above): 2^22 - 1, at MinDepth.
+constexpr uint32 GTempoCamera_Max_Depth_Code = (1u << 22) - 1u;
+
+// The lidar discretizes inverse depth to 24 bits (2^24 = 16777216), the divisor when decoding it
+// on CPU, for both pixel formats: the WithColor format reserves the top 8 bits of each fp32 lane
+// as a NaN/denormal-safety prefix, and the no-color format gives up its top depth byte to carry a
+// reflectivity estimate.
 constexpr float GTempoCamera_Max_Discrete_Depth = 16777216.0;
 
 // Largest label ID the camera's alpha encoding can represent (see above): label IDs run 0..251.

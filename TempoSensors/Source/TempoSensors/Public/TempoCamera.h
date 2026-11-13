@@ -7,6 +7,7 @@
 #include "TempoSensors/Camera.pb.h"
 #include "TempoTiledSceneCaptureComponent.h"
 #include "TempoServer.h"
+#include "TempoSensorsConstants.h"
 
 #include "CoreMinimal.h"
 #include "HAL/CriticalSection.h"
@@ -52,6 +53,28 @@ private:
 	uint8 U4 = 0;
 };
 
+// Turns the camera's depth code back into a depth in cm. The code is logarithmic: 0 at MaxDepth,
+// GTempoCamera_Max_Depth_Code at MinDepth (see TempoSensorsConstants.h), and arrives in the top 22
+// bits of the 24-bit depth lane. Double precision, because in float the exponent's own rounding is
+// about as large as one code step.
+struct FCameraDepthDecoder
+{
+	FCameraDepthDecoder(float MinDepth, float MaxDepth)
+		: MaxDepth(MaxDepth)
+		, Log2RatioPerCode(FMath::Log2(static_cast<double>(MinDepth) / MaxDepth) / GTempoCamera_Max_Depth_Code)
+	{
+	}
+
+	float operator()(uint32 DepthLane) const
+	{
+		return static_cast<float>(MaxDepth * FMath::Exp2(static_cast<double>(DepthLane >> 2) * Log2RatioPerCode));
+	}
+
+private:
+	double MaxDepth;
+	double Log2RatioPerCode;
+};
+
 // 8-byte pixel format where first 3 bytes are color, 4th byte is label.
 // 5th-8th bytes are a uint32 representing discrete depth.
 struct FCameraPixelWithDepth
@@ -64,13 +87,8 @@ struct FCameraPixelWithDepth
 
 	uint8 Label() const { return U4; }
 
-	float Depth(float MinDepth, float MaxDepth, float MaxDiscretizedDepth) const
-	{
-	   // We discretize inverse depth to give more consistent precision vs depth.
-		const float InverseDepthFraction = static_cast<float>(U5) / MaxDiscretizedDepth;
-		const float InverseDepth = InverseDepthFraction * (1.0 / MinDepth - 1.0 / MaxDepth) + 1.0 / MaxDepth;
-		return 1.0 / InverseDepth;
-	}
+	// The 24-bit depth lane, whose top 22 bits are the camera's depth code (see FCameraDepthDecoder).
+	uint32 DepthLane() const { return U5; }
 
 private:
 	uint8 U1 = 0;
