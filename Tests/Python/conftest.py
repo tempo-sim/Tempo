@@ -156,9 +156,13 @@ def sim_server():
                 f"Sim exited early (exit code {proc.returncode}). Log tail:\n{_tail(log.name)}"
             )
         try:
-            tc.get_current_level_name()
+            # A deadline on each probe, or a sim that accepts the connection and never answers would hold
+            # this call past STARTUP_TIMEOUT_S, which is checked only between probes. Session setup runs
+            # outside _sim_request_deadline.
+            with tempo_sim.with_request_timeout(max(1.0, min(10.0, deadline - time.monotonic()))):
+                tc.get_current_level_name()
             break
-        except Exception as e:  # gRPC server not accepting connections yet
+        except Exception as e:  # gRPC server not accepting connections yet, or not answering
             last_err = e
             time.sleep(1.0)
     else:
