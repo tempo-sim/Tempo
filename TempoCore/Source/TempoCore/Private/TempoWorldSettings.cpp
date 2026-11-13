@@ -308,6 +308,15 @@ int32 ATempoWorldSettings::GetStepsUntilGameFrame() const
 	return FMath::Max(1, GetStepsPerGameFrame() - StepsIntoGameFrame);
 }
 
+bool ATempoWorldSettings::IsGameFrameIncomplete() const
+{
+	// RunStep counts a step into the game frame before OnStep fires, so the step that completes the
+	// frame sees StepsIntoGameFrame == GetStepsPerGameFrame(), and the frame resets it to 0 before it
+	// ticks.
+	return GetDefault<UTempoCoreSettings>()->GetTimeMode() == ETimeMode::FixedStep
+		&& StepsIntoGameFrame > 0 && StepsIntoGameFrame < GetStepsPerGameFrame();
+}
+
 void ATempoWorldSettings::Play()
 {
 	AbortStep(ETempoStepResult::AbortedByExternalPause);
