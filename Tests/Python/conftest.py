@@ -15,6 +15,7 @@ Configuration comes from the environment (set by Scripts/TestPythonAPI.sh):
                                (Linux/macOS). Set to run several sims on one machine without
                                assigning each a port. Takes precedence over TEMPO_SERVER_PORT.
   TEMPO_SIM_STARTUP_TIMEOUT_S  How long to wait for the server to come up (default 300).
+  TEMPO_TEST_REQUEST_TIMEOUT_S Deadline on every unary RPC the tests make (default 300; 0 for none).
   TEMPO_SIM_RENDER             "1" to render off-screen (sensors group); else -nullrhi.
   TEMPO_TEST_REPORT_DIR        If set, the sim's full log is written here (sim.log) so CI uploads it.
 """
@@ -61,6 +62,11 @@ SERVER_PORT = int(os.environ.get("TEMPO_SERVER_PORT", "10001"))
 SERVER_SOCKET = os.environ.get("TEMPO_SERVER_SOCKET", "").strip()
 PACKAGED_BINARY = os.environ.get("TEMPO_PACKAGED_BINARY", "")
 STARTUP_TIMEOUT_S = float(os.environ.get("TEMPO_SIM_STARTUP_TIMEOUT_S", "300"))
+# A deadline on every unary RPC (Step, SetStepsPerGameFrame, ...), so a sim whose game thread is wedged
+# fails the test that wedged it instead of hanging the run: a sensors run once sat for two and a half
+# hours on a Step that a deadlocked sim never answered. Far longer than any call should take. Streams
+# get no deadline from it (see tempo_sim.set_request_timeout); their reads are bounded where they're read.
+REQUEST_TIMEOUT_S = float(os.environ.get("TEMPO_TEST_REQUEST_TIMEOUT_S", "300")) or None
 
 
 def _tail(path, n=200):
@@ -119,6 +125,7 @@ def sim_server():
         tempo_sim.set_socket(SERVER_SOCKET)
     else:
         tempo_sim.set_server(port=SERVER_PORT)
+    tempo_sim.set_request_timeout(REQUEST_TIMEOUT_S)
     deadline = time.monotonic() + STARTUP_TIMEOUT_S
     last_err = None
     while time.monotonic() < deadline:

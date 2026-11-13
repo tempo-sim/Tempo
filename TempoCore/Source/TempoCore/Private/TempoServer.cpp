@@ -605,51 +605,59 @@ void FTempoServer::HandleEventForTag(int32 Tag, bool bOk)
 	// Its write completed (or failed): it is waited on like any other request from here on.
 	StalledTags.Remove(Tag);
 
-	if (TSharedPtr<FRequestManager>* RequestManager = RequestManagers.Find(Tag))
+	// A reference of its own, not a pointer into RequestManagers: the REQUESTED case adds to the map before it
+	// handles the request, and an add can reallocate the map's storage, which left the call after it reading
+	// its manager from freed memory. It also keeps the manager alive through its handler, whatever that does
+	// to the map.
+	const TSharedPtr<FRequestManager>* Found = RequestManagers.Find(Tag);
+	if (!Found)
 	{
-		if (!bOk)
+		return;
+	}
+	const TSharedPtr<FRequestManager> RequestManager = *Found;
+
+	if (!bOk)
+	{
+		RequestManagers.Remove(Tag);
+		return;
+	}
+
+	switch (RequestManager->GetState())
+	{
+	case FRequestManager::UNINITIALIZED: // Shouldn't happen.
+		{
+			checkf(false, TEXT("Got event for uninitialized request manager."))
+			break;
+		}
+	case FRequestManager::REQUESTED: // A request has been received.
+		{
+			if (RequestManager->IsGameFrameOnly() && ShouldHoldGameFrameOnlyRequests())
+			{
+				HeldRequestTags.Add(Tag);
+				break;
+			}
+
+			// Immediately prepare to receive another request.
+			const int32 NewTag = TagAllocator++;
+			RequestManagers.Emplace(NewTag, RequestManager->Duplicate(NewTag))->Init(CompletionQueue.Get());
+
+			RequestManager->HandleAndRespond();
+			break;
+		}
+	case FRequestManager::HANDLING: // Shouldn't happen.
+		{
+			checkf(false, TEXT("Got event for request manager while it was handling another request."))
+			break;
+		}
+	case FRequestManager::RESPONDING: // A response has been sent, and there are more to come.
+		{
+			RequestManager->HandleAndRespond();
+			break;
+		}
+	case FRequestManager::FINISHING: // The rpc has finished.
 		{
 			RequestManagers.Remove(Tag);
-			return;
-		}
-
-		switch ((*RequestManager)->GetState())
-		{
-		case FRequestManager::UNINITIALIZED: // Shouldn't happen.
-			{
-				checkf(false, TEXT("Got event for uninitialized request manager."))
-				break;
-			}
-		case FRequestManager::REQUESTED: // A request has been received.
-			{
-				if ((*RequestManager)->IsGameFrameOnly() && ShouldHoldGameFrameOnlyRequests())
-				{
-					HeldRequestTags.Add(Tag);
-					break;
-				}
-
-				// Immediately prepare to receive another request.
-				const int32 NewTag = TagAllocator++;
-				RequestManagers.Emplace(NewTag, (*RequestManager)->Duplicate(NewTag))->Init(CompletionQueue.Get());
-
-				(*RequestManager)->HandleAndRespond();
-				break;
-			}
-		case FRequestManager::HANDLING: // Shouldn't happen.
-			{
-				checkf(false, TEXT("Got event for request manager while it was handling another request."))
-				break;
-			}
-		case FRequestManager::RESPONDING: // A response has been sent, and there are more to come.
-			{
-				(*RequestManager)->HandleAndRespond();
-				break;
-			}
-		case FRequestManager::FINISHING: // The rpc has finished.
-			{
-				RequestManagers.Remove(Tag);
-				break;
-			}
+			break;
 		}
 	}
 }
