@@ -294,9 +294,18 @@ public:
 			// The delegate writes immediately if no write is in flight; otherwise it enqueues
 			// for the next write-completion event to drain.
 			// A sensor's decode task runs this from a worker thread while the game thread handles this
-			// stream's write completions below (see UTempoSensorServiceSubsystem::OnBetweenFramesPoll).
-			Base::ResponseDelegate = TResponseDelegate<ResponseType>::CreateSPLambda(static_cast<FRequestManager*>(this), [this](const ResponseType& Response, grpc::Status Result)
+			// stream's write completions below (see UTempoSensorServiceSubsystem::OnBetweenFramesPoll),
+			// and a completion that fails, as a cancelled stream's does, removes this manager. So the
+			// delegate holds the manager for as long as it runs: a delegate bound with CreateSPLambda
+			// only checks that its object is alive before calling, and the manager could then be
+			// destroyed under the lock this takes.
+			Base::ResponseDelegate = TResponseDelegate<ResponseType>::CreateLambda([this, WeakThis = TWeakPtr<FRequestManager>(this->AsShared())](const ResponseType& Response, grpc::Status Result)
 			{
+				const TSharedPtr<FRequestManager> PinnedThis = WeakThis.Pin();
+				if (!PinnedThis.IsValid())
+				{
+					return;
+				}
 				FScopeLock Lock(&ResponseMutex);
 				if (Base::State == FRequestManager::EState::HANDLING)
 				{
