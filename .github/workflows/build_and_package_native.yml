@@ -313,6 +313,7 @@ jobs:
     - name: Check Out
       env:
         REF: ${{ steps.checkout_ref.outputs.REF }}
+        MERGE_BASE_SHA: ${{ github.event_name == 'pull_request_target' && inputs.allow_unsafe_pr_checkout && github.sha || '' }}
         REPO: ${{ github.repository }}
         HOST_PROJECT: ${{ inputs.host_project }}
         PROJECT_ROOT: ${{ inputs.project_root }}
@@ -355,6 +356,20 @@ jobs:
           sync "$CI_BUILD/$CHECKOUT_PATH" "$REPO" "$REF"
         else
           sync "$CI_BUILD/$CHECKOUT_PATH" "$REPO" "$REF"
+        fi
+
+        # Test the PR as it would merge, as build_and_package.yml does (see there): a PR opened before a
+        # fix on the base branch otherwise keeps failing on what is already fixed until it is rebased.
+        if [ -n "$MERGE_BASE_SHA" ]; then
+          cd "$CI_BUILD/$CHECKOUT_PATH"
+          git "${AUTH[@]}" fetch -q --no-tags origin "$MERGE_BASE_SHA"
+          if git -c user.name="Tempo CI" -c user.email="ci@invalid" merge -q --no-ff -m "Merge $MERGE_BASE_SHA into $REF" "$MERGE_BASE_SHA"; then
+            git "${AUTH[@]}" submodule update -q --init --recursive --force
+          else
+            git merge --abort
+            echo "::warning title=Not merged with the base branch::This PR conflicts with $MERGE_BASE_SHA, so its head $REF is tested as is. Resolve the conflicts to test it against the base branch."
+          fi
+          cd - > /dev/null
         fi
         echo "Repo under test at $(git -C "$CI_BUILD/$CHECKOUT_PATH" log --oneline -1)"
 

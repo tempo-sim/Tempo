@@ -126,6 +126,23 @@ jobs:
         ref: ${{ steps.checkout_ref.outputs.REF }}
         submodules: ${{ inputs.submodules }}
         allow-unsafe-pr-checkout: ${{ inputs.allow_unsafe_pr_checkout }}
+    # The same merge build_and_package.yml makes, so the tests match the package they run against.
+    - name: Merge Base Branch Into PR
+      if: ${{ github.event_name == 'pull_request_target' && inputs.allow_unsafe_pr_checkout }}
+      working-directory: ${{ inputs.checkout_path }}
+      env:
+        BASE_SHA: ${{ github.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: |
+        if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then git fetch -q --unshallow origin "$HEAD_SHA"; fi
+        git fetch -q --no-tags origin "$BASE_SHA"
+        if git -c user.name="Tempo CI" -c user.email="ci@invalid" merge -q --no-ff -m "Merge $BASE_SHA into $HEAD_SHA" "$BASE_SHA"; then
+          git submodule update -q --init --recursive
+          echo "Testing PR head $HEAD_SHA merged with base $BASE_SHA."
+        else
+          git merge --abort
+          echo "::warning title=Not merged with the base branch::This PR conflicts with $BASE_SHA, so its head $HEAD_SHA is tested as is."
+        fi
     # The artifact backend intermittently answers ListArtifacts with
     # "(403) Forbidden: Error from intermediary", and download-artifact's own retry logic classifies
     # 403 as non-retryable, so a single blip fails the job outright. A dozen of these jobs fan out
