@@ -512,8 +512,9 @@ struct TEMPOSENSORS_API FDoubleSphereDistortion : FLensModel
 	static double RadialProject(double Theta, double Xi, double Alpha);
 };
 
-// Aim for one tile of a multi-tile fisheye capture. (YawDeg, PitchDeg) is the midpoint of the
-// (yaw, pitch) extent of the tile's four covered-rect corners. AxisShift is where that aim lands
+// Aim for one tile of a multi-tile fisheye capture. The aim centers the angular extent of the tile's
+// four covered-rect corners, measured with yaw or with pitch as the outer rotation, whichever keeps
+// the farthest corner closer to it (so a top/bottom split aims as well as a left/right one). AxisShift is where that aim lands
 // in the parent output plane, as a displacement from the tile's pixel-rect center in r_d units.
 struct FFisheyeTileAim
 {

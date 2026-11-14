@@ -6,6 +6,24 @@
 
 #include <cmath>
 
+namespace
+{
+	// Unit view direction (X=right, Y=down, Z=forward) for a (yaw, pitch_UE) aim, in the convention
+	// PixelOffsetToYawPitchDeg uses: R_Y(yaw) * R_X(-pitch_UE) * (0, 0, 1).
+	FVector YawPitchDegToDirection(double YawDeg, double PitchDeg)
+	{
+		const double YawRad = FMath::DegreesToRadians(YawDeg);
+		const double PitchRad = FMath::DegreesToRadians(PitchDeg);
+		return FVector(FMath::Sin(YawRad) * FMath::Cos(PitchRad), -FMath::Sin(PitchRad), FMath::Cos(YawRad) * FMath::Cos(PitchRad));
+	}
+
+	void DirectionToYawPitchDeg(const FVector& Direction, double& OutYawDeg, double& OutPitchDeg)
+	{
+		OutYawDeg = FMath::RadiansToDegrees(FMath::Atan2(Direction.X, Direction.Z));
+		OutPitchDeg = FMath::RadiansToDegrees(FMath::Atan2(-Direction.Y, FMath::Sqrt(Direction.X * Direction.X + Direction.Z * Direction.Z)));
+	}
+}
+
 TUniquePtr<FLensModel> CreateLensModel(const FTempoLensParameters& LensParameters, double YawDegrees, double PitchDegrees,
 	double AxisShiftXRd, double AxisShiftYRd)
 {
@@ -774,10 +792,7 @@ FFisheyeTileAim ComputeFisheyeTileAim(const FLensModel& Model, double FOutput,
 		return Aim;
 	}
 
-	double YawMin = TNumericLimits<double>::Max();
-	double YawMax = TNumericLimits<double>::Lowest();
-	double PitchMin = TNumericLimits<double>::Max();
-	double PitchMax = TNumericLimits<double>::Lowest();
+	TArray<FVector, TInlineAllocator<4>> Corners;
 	for (const double Dx : { LDx, RDx })
 	{
 		for (const double Dy : { TDy, BDy })
@@ -785,14 +800,56 @@ FFisheyeTileAim ComputeFisheyeTileAim(const FLensModel& Model, double FOutput,
 			double Yaw = 0.0;
 			double Pitch = 0.0;
 			Model.PixelOffsetToYawPitchDeg(Dx, Dy, FOutput, Yaw, Pitch);
-			YawMin = FMath::Min(YawMin, Yaw);
-			YawMax = FMath::Max(YawMax, Yaw);
-			PitchMin = FMath::Min(PitchMin, Pitch);
-			PitchMax = FMath::Max(PitchMax, Pitch);
+			Corners.Add(YawPitchDegToDirection(Yaw, Pitch));
 		}
 	}
-	Aim.YawDeg = 0.5 * (YawMin + YawMax);
-	Aim.PitchDeg = 0.5 * (PitchMin + PitchMax);
+
+	// Center the corners' extent in two angle pairs, one with yaw as the outer rotation and one
+	// with pitch, and keep whichever leaves the farthest corner closer to the aim. The outer angle
+	// is well behaved along its own axis but its partner swings toward +-90 degrees near the poles
+	// of that decomposition, which drags the midpoint off the content. Yaw-outer alone therefore
+	// treats a top/bottom split worse than the same lens rotated into a left/right split: on the
+	// TerraVerse seed fisheye the top tile's outer corners land ~93 degrees from its aim (forcing
+	// quadrants) where the rotated layout reaches ~72.
+	const auto CenterExtent = [&Corners](bool bPitchOuter)
+	{
+		double AMin = TNumericLimits<double>::Max();
+		double AMax = TNumericLimits<double>::Lowest();
+		double BMin = TNumericLimits<double>::Max();
+		double BMax = TNumericLimits<double>::Lowest();
+		for (const FVector& Corner : Corners)
+		{
+			// Yaw-outer: A = yaw about the camera's vertical axis, B = pitch out of the horizontal plane.
+			// Pitch-outer: A = pitch about the camera's horizontal axis, B = yaw out of the vertical plane.
+			const double Along = bPitchOuter ? -Corner.Y : Corner.X;
+			const double Across = bPitchOuter ? Corner.X : -Corner.Y;
+			const double A = FMath::Atan2(Along, Corner.Z);
+			const double B = FMath::Atan2(Across, FMath::Sqrt(Along * Along + Corner.Z * Corner.Z));
+			AMin = FMath::Min(AMin, A);
+			AMax = FMath::Max(AMax, A);
+			BMin = FMath::Min(BMin, B);
+			BMax = FMath::Max(BMax, B);
+		}
+		const double A = 0.5 * (AMin + AMax);
+		const double B = 0.5 * (BMin + BMax);
+		const double Along = FMath::Sin(A) * FMath::Cos(B);
+		const double Across = FMath::Sin(B);
+		const double Z = FMath::Cos(A) * FMath::Cos(B);
+		return bPitchOuter ? FVector(Across, -Along, Z) : FVector(Along, -Across, Z);
+	};
+	const auto MinCornerCos = [&Corners](const FVector& Direction)
+	{
+		double MinCos = 1.0;
+		for (const FVector& Corner : Corners)
+		{
+			MinCos = FMath::Min(MinCos, Corner | Direction);
+		}
+		return MinCos;
+	};
+	const FVector YawOuter = CenterExtent(/*bPitchOuter=*/ false);
+	const FVector PitchOuter = CenterExtent(/*bPitchOuter=*/ true);
+	const FVector AimDirection = (MinCornerCos(PitchOuter) > MinCornerCos(YawOuter)) ? PitchOuter : YawOuter;
+	DirectionToYawPitchDeg(AimDirection, Aim.YawDeg, Aim.PitchDeg);
 
 	// Forward-project the centroid back to a pixel offset to recover the axis position in the
 	// parent image plane, then express its displacement from the tile's pixel center in r_d units
@@ -851,14 +908,6 @@ TArray<FFisheyeTileLayout> ComputeFisheyeTileLayouts(const FLensModel& Model, do
 		return TPair<double, double>(Low - Center, Low + Span.Covered - Center);
 	};
 
-	// Unit view direction for a (yaw, pitch) aim, in the convention PixelOffsetToYawPitchDeg uses.
-	const auto Direction = [](double YawDeg, double PitchDeg)
-	{
-		const double YawRad = FMath::DegreesToRadians(YawDeg);
-		const double PitchRad = FMath::DegreesToRadians(PitchDeg);
-		return FVector(FMath::Sin(YawRad) * FMath::Cos(PitchRad), -FMath::Sin(PitchRad), FMath::Cos(YawRad) * FMath::Cos(PitchRad));
-	};
-
 	TArray<FFisheyeTileLayout> Layouts;
 	bool bCornerBehindTile = false;
 	int32 AtlasX = 0;
@@ -889,7 +938,7 @@ TArray<FFisheyeTileLayout> ComputeFisheyeTileLayouts(const FLensModel& Model, do
 					0.5 * (ColumnEdges.Key + ColumnEdges.Value), 0.5 * (RowEdges.Key + RowEdges.Value));
 			}
 
-			const FVector AimDirection = Direction(Layout.Aim.YawDeg, Layout.Aim.PitchDeg);
+			const FVector AimDirection = YawPitchDegToDirection(Layout.Aim.YawDeg, Layout.Aim.PitchDeg);
 			for (const double Dx : { ColumnEdges.Key, ColumnEdges.Value })
 			{
 				for (const double Dy : { RowEdges.Key, RowEdges.Value })
@@ -897,7 +946,7 @@ TArray<FFisheyeTileLayout> ComputeFisheyeTileLayouts(const FLensModel& Model, do
 					double CornerYawDeg = 0.0;
 					double CornerPitchDeg = 0.0;
 					Model.PixelOffsetToYawPitchDeg(Dx, Dy, FOutput, CornerYawDeg, CornerPitchDeg);
-					bCornerBehindTile |= (Direction(CornerYawDeg, CornerPitchDeg) | AimDirection) <= 0.0;
+					bCornerBehindTile |= (YawPitchDegToDirection(CornerYawDeg, CornerPitchDeg) | AimDirection) <= 0.0;
 				}
 			}
 			AtlasX += Column.Covered;
