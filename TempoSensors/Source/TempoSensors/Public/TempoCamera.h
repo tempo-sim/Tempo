@@ -279,7 +279,7 @@ struct FTempoCameraTile
 
 	// Re-aim correction in parent r_d units: how far the optical axis sits from the tile's
 	// pixel-rect center. Zero for radial/single-capture tiles and for centered fisheye tiles;
-	// non-zero for fisheye corner tiles where the angular centroid lies inside the tile rect.
+	// non-zero for off-axis fisheye tiles, whose aim is the axis of the cone bounding the tile rect.
 	double AxisShiftXRd = 0.0;
 	double AxisShiftYRd = 0.0;
 

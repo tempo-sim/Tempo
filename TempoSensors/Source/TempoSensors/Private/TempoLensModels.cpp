@@ -6,6 +6,135 @@
 
 #include <cmath>
 
+namespace
+{
+	// Unit view direction (X=right, Y=down, Z=forward) for a (yaw, pitch_UE) aim, in the convention
+	// PixelOffsetToYawPitchDeg uses: R_Y(yaw) * R_X(-pitch_UE) * (0, 0, 1).
+	FVector YawPitchDegToDirection(double YawDeg, double PitchDeg)
+	{
+		const double YawRad = FMath::DegreesToRadians(YawDeg);
+		const double PitchRad = FMath::DegreesToRadians(PitchDeg);
+		return FVector(FMath::Sin(YawRad) * FMath::Cos(PitchRad), -FMath::Sin(PitchRad), FMath::Cos(YawRad) * FMath::Cos(PitchRad));
+	}
+
+	void DirectionToYawPitchDeg(const FVector& Direction, double& OutYawDeg, double& OutPitchDeg)
+	{
+		OutYawDeg = FMath::RadiansToDegrees(FMath::Atan2(Direction.X, Direction.Z));
+		OutPitchDeg = FMath::RadiansToDegrees(FMath::Atan2(-Direction.Y, FMath::Sqrt(Direction.X * Direction.X + Direction.Z * Direction.Z)));
+	}
+
+	using FTileBoundaryDirections = TArray<FVector, TInlineAllocator<8>>;
+
+	// View directions of a tile's covered-rect corners and edge midpoints, the samples a fisheye
+	// model's ComputeRenderConfig bounds the tile's frustum with. Edges are signed pixel offsets
+	// from the full image's optical center.
+	FTileBoundaryDirections ComputeTileBoundaryDirections(const FLensModel& Model, double FOutput,
+		double LDx, double RDx, double TDy, double BDy)
+	{
+		const double CDx = 0.5 * (LDx + RDx);
+		const double CDy = 0.5 * (TDy + BDy);
+		const double Dx[] = { LDx, RDx, LDx, RDx, CDx, CDx, LDx, RDx };
+		const double Dy[] = { TDy, TDy, BDy, BDy, TDy, BDy, CDy, CDy };
+		FTileBoundaryDirections Directions;
+		for (int32 I = 0; I < 8; ++I)
+		{
+			double YawDeg = 0.0;
+			double PitchDeg = 0.0;
+			Model.PixelOffsetToYawPitchDeg(Dx[I], Dy[I], FOutput, YawDeg, PitchDeg);
+			Directions.Add(YawPitchDegToDirection(YawDeg, PitchDeg));
+		}
+		return Directions;
+	}
+
+	// How far a perspective frustum aimed at (yaw, pitch) must open to its widest side to hold a set
+	// of unit directions: the angle whose tangent is the largest |x/z| or |y/z| among them in the
+	// aimed camera's frame. 90 when a direction lies on or behind the camera's horizon, which no
+	// frustum reaches.
+	double ComputeFrustumHalfAngleDeg(double YawDeg, double PitchDeg, TConstArrayView<FVector> Directions)
+	{
+		const double YawRad = FMath::DegreesToRadians(YawDeg);
+		const FVector Forward = YawPitchDegToDirection(YawDeg, PitchDeg);
+		const FVector Right(FMath::Cos(YawRad), 0.0, -FMath::Sin(YawRad));
+		const FVector Down = Forward ^ Right;
+		double MaxTan = 0.0;
+		for (const FVector& Direction : Directions)
+		{
+			const double Z = Direction | Forward;
+			if (Z <= UE_DOUBLE_SMALL_NUMBER)
+			{
+				return 90.0;
+			}
+			MaxTan = FMath::Max3(MaxTan, FMath::Abs(Direction | Right) / Z, FMath::Abs(Direction | Down) / Z);
+		}
+		return FMath::RadiansToDegrees(FMath::Atan(MaxTan));
+	}
+
+	// Axis of the narrowest cone that holds every one of a set of unit directions.
+	//
+	// The smallest ball enclosing points on the unit sphere meets the sphere in the smallest cap
+	// holding them, so the cone's axis runs through that ball's center. The ball is unique and
+	// moves continuously with the points, which is what keeps the axis from jumping; it is found
+	// exactly, as the smallest ball through two or three of the points that holds the rest, so
+	// mirrored point sets get mirrored axes. Directions that fit no cone narrower than a hemisphere
+	// leave the ball centered on the origin, and the axis falls back to their mean.
+	FVector ComputeBoundingConeAxis(TConstArrayView<FVector> Directions)
+	{
+		constexpr double Tolerance = 1e-12;
+		FVector BestCenter = FVector::ZeroVector;
+		double BestRadiusSquared = TNumericLimits<double>::Max();
+		const auto Consider = [&](const FVector& Center, double RadiusSquared)
+		{
+			if (RadiusSquared >= BestRadiusSquared)
+			{
+				return;
+			}
+			for (const FVector& Direction : Directions)
+			{
+				if (FVector::DistSquared(Direction, Center) > RadiusSquared + Tolerance)
+				{
+					return;
+				}
+			}
+			BestCenter = Center;
+			BestRadiusSquared = RadiusSquared;
+		};
+
+		for (int32 I = 0; I < Directions.Num(); ++I)
+		{
+			const FVector& A = Directions[I];
+			for (int32 J = I + 1; J < Directions.Num(); ++J)
+			{
+				const FVector AB = Directions[J] - A;
+				Consider(A + 0.5 * AB, 0.25 * AB.SizeSquared());
+				for (int32 K = J + 1; K < Directions.Num(); ++K)
+				{
+					const FVector AC = Directions[K] - A;
+					const FVector Normal = AB ^ AC;
+					const double NormalSizeSquared = Normal.SizeSquared();
+					if (NormalSizeSquared < Tolerance)
+					{
+						continue;
+					}
+					const FVector ToCircumcenter =
+						(AC.SizeSquared() * (Normal ^ AB) + AB.SizeSquared() * (AC ^ Normal)) / (2.0 * NormalSizeSquared);
+					Consider(A + ToCircumcenter, ToCircumcenter.SizeSquared());
+				}
+			}
+		}
+
+		FVector Axis = BestCenter;
+		if (BestRadiusSquared == TNumericLimits<double>::Max() || Axis.SizeSquared() < 1e-6)
+		{
+			Axis = FVector::ZeroVector;
+			for (const FVector& Direction : Directions)
+			{
+				Axis += Direction;
+			}
+		}
+		return Axis.GetSafeNormal(UE_DOUBLE_SMALL_NUMBER, FVector(0.0, 0.0, 1.0));
+	}
+}
+
 TUniquePtr<FLensModel> CreateLensModel(const FTempoLensParameters& LensParameters, double YawDegrees, double PitchDegrees,
 	double AxisShiftXRd, double AxisShiftYRd)
 {
@@ -721,8 +850,8 @@ FDistortionRenderConfig FKannalaBrandtDistortion::ComputeRenderConfig(const FInt
 	//
 	// A sample at or behind the tile's horizon still has in-domain pixels between it and the tile
 	// center whose tan grows without bound in the sample's direction, so it is counted at that
-	// limit: its side of the frustum opens to the cap below. ComputeFisheyeTileLayouts splits
-	// finely enough that no tile corner lands behind its camera, so this is a fallback.
+	// limit: its side of the frustum opens to the cap below. ComputeFisheyeTileLayouts splits into
+	// quadrants well before a tile reaches that far, so this is a fallback for quadrants that still do.
 	double MinRenderX = +TNumericLimits<double>::Max();
 	double MaxRenderX = -TNumericLimits<double>::Max();
 	double MinRenderY = +TNumericLimits<double>::Max();
@@ -774,27 +903,11 @@ FFisheyeTileAim ComputeFisheyeTileAim(const FLensModel& Model, double FOutput,
 		return Aim;
 	}
 
-	double YawMin = TNumericLimits<double>::Max();
-	double YawMax = TNumericLimits<double>::Lowest();
-	double PitchMin = TNumericLimits<double>::Max();
-	double PitchMax = TNumericLimits<double>::Lowest();
-	for (const double Dx : { LDx, RDx })
-	{
-		for (const double Dy : { TDy, BDy })
-		{
-			double Yaw = 0.0;
-			double Pitch = 0.0;
-			Model.PixelOffsetToYawPitchDeg(Dx, Dy, FOutput, Yaw, Pitch);
-			YawMin = FMath::Min(YawMin, Yaw);
-			YawMax = FMath::Max(YawMax, Yaw);
-			PitchMin = FMath::Min(PitchMin, Pitch);
-			PitchMax = FMath::Max(PitchMax, Pitch);
-		}
-	}
-	Aim.YawDeg = 0.5 * (YawMin + YawMax);
-	Aim.PitchDeg = 0.5 * (PitchMin + PitchMax);
+	const FTileBoundaryDirections Boundary = ComputeTileBoundaryDirections(Model, FOutput, LDx, RDx, TDy, BDy);
+	DirectionToYawPitchDeg(ComputeBoundingConeAxis(Boundary), Aim.YawDeg, Aim.PitchDeg);
+	Aim.FrustumHalfAngleDeg = ComputeFrustumHalfAngleDeg(Aim.YawDeg, Aim.PitchDeg, Boundary);
 
-	// Forward-project the centroid back to a pixel offset to recover the axis position in the
+	// Forward-project the aim back to a pixel offset to recover the axis position in the
 	// parent image plane, then express its displacement from the tile's pixel center in r_d units
 	// (FOutput is pixels/r_d for the model's output unit).
 	double DxAxis = 0.0;
@@ -851,16 +964,8 @@ TArray<FFisheyeTileLayout> ComputeFisheyeTileLayouts(const FLensModel& Model, do
 		return TPair<double, double>(Low - Center, Low + Span.Covered - Center);
 	};
 
-	// Unit view direction for a (yaw, pitch) aim, in the convention PixelOffsetToYawPitchDeg uses.
-	const auto Direction = [](double YawDeg, double PitchDeg)
-	{
-		const double YawRad = FMath::DegreesToRadians(YawDeg);
-		const double PitchRad = FMath::DegreesToRadians(PitchDeg);
-		return FVector(FMath::Sin(YawRad) * FMath::Cos(PitchRad), -FMath::Sin(PitchRad), FMath::Cos(YawRad) * FMath::Cos(PitchRad));
-	};
-
 	TArray<FFisheyeTileLayout> Layouts;
-	bool bCornerBehindTile = false;
+	bool bTileTooWide = false;
 	int32 AtlasX = 0;
 	int32 AtlasY = 0;
 	for (int32 RowIndex = 0; RowIndex < Rows.Num(); ++RowIndex)
@@ -881,33 +986,27 @@ TArray<FFisheyeTileLayout> ComputeFisheyeTileLayouts(const FLensModel& Model, do
 			Layout.OwnedSize = FIntPoint(Column.Owned, Row.Owned);
 
 			// A single tile on a centered optical axis aims straight ahead with no re-aim. Otherwise
-			// aim at the angular centroid of the covered rect (see ComputeFisheyeTileAim).
+			// aim down the axis of the narrowest cone holding the covered rect (see ComputeFisheyeTileAim).
 			if (bSplitHorizontal || bSplitVertical || !PrincipalPoint.IsNearlyZero())
 			{
 				Layout.Aim = ComputeFisheyeTileAim(Model, FOutput,
 					ColumnEdges.Key, ColumnEdges.Value, RowEdges.Key, RowEdges.Value,
 					0.5 * (ColumnEdges.Key + ColumnEdges.Value), 0.5 * (RowEdges.Key + RowEdges.Value));
 			}
-
-			const FVector AimDirection = Direction(Layout.Aim.YawDeg, Layout.Aim.PitchDeg);
-			for (const double Dx : { ColumnEdges.Key, ColumnEdges.Value })
+			else
 			{
-				for (const double Dy : { RowEdges.Key, RowEdges.Value })
-				{
-					double CornerYawDeg = 0.0;
-					double CornerPitchDeg = 0.0;
-					Model.PixelOffsetToYawPitchDeg(Dx, Dy, FOutput, CornerYawDeg, CornerPitchDeg);
-					bCornerBehindTile |= (Direction(CornerYawDeg, CornerPitchDeg) | AimDirection) <= 0.0;
-				}
+				Layout.Aim.FrustumHalfAngleDeg = ComputeFrustumHalfAngleDeg(0.0, 0.0, ComputeTileBoundaryDirections(Model, FOutput,
+					ColumnEdges.Key, ColumnEdges.Value, RowEdges.Key, RowEdges.Value));
 			}
+			bTileTooWide |= Layout.Aim.FrustumHalfAngleDeg >= MaxFisheyeTileFrustumHalfAngleDeg;
 			AtlasX += Column.Covered;
 		}
 		AtlasY += Row.Covered;
 	}
-	// A tile corner 90 degrees or more from the tile's aim lies behind its camera, so no frustum can
-	// cover the pixels approaching it; capping the frustum to reach toward them would cut sampling
-	// density across the whole tile. Quadrants are narrower, so each keeps its corners in front.
-	if (bCornerBehindTile && !(bSplitHorizontal && bSplitVertical))
+	// A frustum opened that wide spends most of its pixels on its rim, and one that would have to
+	// reach 90 degrees cannot cover its content at all. Quadrants are narrower, so they sample the
+	// same image more densely.
+	if (bTileTooWide && !(bSplitHorizontal && bSplitVertical))
 	{
 		return ComputeFisheyeTileLayouts(Model, FOutput, SizeXY, PrincipalPoint, FeatherPixels,
 			/*bSplitHorizontal=*/ true, /*bSplitVertical=*/ true, OutAtlasSize);
