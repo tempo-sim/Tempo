@@ -5,10 +5,18 @@
 #include "TempoCore.h"
 #include "TempoCoreSettings.h"
 #include "TempoServer.h"
+#include "ClearQuad.h"
 #include "EngineUtils.h"
+#include "Framework/Application/SlateApplication.h"
 #include "HAL/IConsoleManager.h"
 #include "Misc/CoreDelegates.h"
 #include "PhysicsEngine/PhysicsSettings.h"
+#include "Rendering/SlateRenderer.h"
+#include "RHICommandList.h"
+#include "Slate/SceneViewport.h"
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+#include "Slate/SlateViewportProvider.h"
+#endif
 #include "UnrealClient.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Kismet/GameplayStatics.h"
@@ -19,6 +27,7 @@
 #include "Editor/EditorEngine.h"
 #endif
 
+#include <atomic>
 #include <cmath>
 
 FTempoBetweenFramesPollDelegate ATempoWorldSettings::OnBetweenFramesPoll;
@@ -36,11 +45,96 @@ namespace
 	// These values result in relatively consistent perceived brightness across a huge range of scene intensity.
 	constexpr float ExposureBiasToBrightnessScale = 3.93342962372f;
 	constexpr float ExposureBiasToBrightnessOffset = -34.1331407526f;
+
+	// With the game viewport's draw skipped, Slate still presents its window every frame, but it draws into
+	// the window's back buffer with a load rather than a clear, so the window would present whatever each
+	// swapchain buffer last held: the last few frames, cycling. Instead, the window's back buffer is cleared
+	// just before every present, which is correct however many buffers the swapchain has and however many
+	// frames are in flight. Only a viewport drawing straight into its window's back buffer (a standalone
+	// game) needs it: one with a separate render target (PIE) shares its window with the editor's UI, and
+	// Slate composites that target, which keeps a single frame rather than cycling.
+	//
+	// Written on the game thread, compared (never dereferenced) on the render thread.
+	std::atomic<const SWindow*> GameWindowToClear{nullptr};
+	FDelegateHandle BackBufferReadyToPresentHandle;
+
+	void ClearGameWindowBackBuffer_RenderThread(SWindow& Window, FRHITexture* BackBuffer)
+	{
+		if (&Window != GameWindowToClear.load(std::memory_order_relaxed) || !BackBuffer)
+		{
+			return;
+		}
+
+		// Slate's graph leaves the back buffer ready to present, and its present expects it so again. The
+		// back buffer's clear value binding differs between RHIs (none at all on Vulkan), so this draws a
+		// clear quad with an explicit color rather than relying on a clear load action.
+		FRHICommandListImmediate& RHICmdList = FRHICommandListImmediate::Get();
+		const FIntVector Size = BackBuffer->GetSizeXYZ();
+		RHICmdList.Transition(FRHITransitionInfo(BackBuffer, ERHIAccess::Present, ERHIAccess::RTV));
+		RHICmdList.BeginRenderPass(FRHIRenderPassInfo(BackBuffer, ERenderTargetActions::DontLoad_Store), TEXT("TempoClearGameWindow"));
+		RHICmdList.SetViewport(0.0f, 0.0f, 0.0f, Size.X, Size.Y, 1.0f);
+		DrawClearQuad(RHICmdList, FLinearColor::Black);
+		RHICmdList.EndRenderPass();
+		RHICmdList.Transition(FRHITransitionInfo(BackBuffer, ERHIAccess::RTV, ERHIAccess::Present));
+	}
+
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+	void OnBackBufferReadyToPresent(SWindow& Window, ISlateViewportProvider& ViewportProvider)
+	{
+		ClearGameWindowBackBuffer_RenderThread(Window, ViewportProvider.GetBackBufferResource());
+	}
+#else
+	void OnBackBufferReadyToPresent(SWindow& Window, const FTextureRHIRef& BackBuffer)
+	{
+		ClearGameWindowBackBuffer_RenderThread(Window, BackBuffer.GetReference());
+	}
+#endif
+
+	void SetGameWindowToClear(const SWindow* Window)
+	{
+		GameWindowToClear.store(Window, std::memory_order_relaxed);
+
+		if (!FSlateApplication::IsInitialized())
+		{
+			return;
+		}
+		FSlateRenderer* Renderer = FSlateApplication::Get().GetRenderer();
+		if (!Renderer)
+		{
+			return;
+		}
+
+		if (Window && !BackBufferReadyToPresentHandle.IsValid())
+		{
+			BackBufferReadyToPresentHandle = Renderer->OnBackBufferReadyToPresent().AddStatic(&OnBackBufferReadyToPresent);
+		}
+		else if (!Window && BackBufferReadyToPresentHandle.IsValid())
+		{
+			Renderer->OnBackBufferReadyToPresent().Remove(BackBufferReadyToPresentHandle);
+			BackBufferReadyToPresentHandle.Reset();
+		}
+	}
+}
+
+bool ATempoWorldSettings::IsWorldsOwnSettings() const
+{
+	const UWorld* World = GetWorld();
+	return World && World->GetWorldSettings(/*bCheckStreamingPersistent*/ false, /*bChecked*/ false) == this;
 }
 
 void ATempoWorldSettings::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// Every level has a world settings actor, and with WorldSettingsClassName naming this class, the levels
+	// World Partition streams in have one of these too, and play begins and ends for each as its level
+	// loads and unloads. Only the persistent level's speaks for the world. Another, ending play, turned
+	// main viewport rendering back on (and the next one beginning play turned it straight off again), so a
+	// client that had turned it off saw the window flicker between stale frames as the city streamed.
+	if (!IsWorldsOwnSettings())
+	{
+		return;
+	}
 
 	SettingsChangedHandle = GetMutableDefault<UTempoCoreSettings>()->TempoCoreTimeSettingsChangedEvent.AddUObject(this, &ATempoWorldSettings::OnTimeSettingsChanged);
 	LastTimeMode = GetDefault<UTempoCoreSettings>()->GetTimeMode();
@@ -73,6 +167,12 @@ void ATempoWorldSettings::BeginPlay()
 void ATempoWorldSettings::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	Super::EndPlay(EndPlayReason);
+
+	// A streamed level's world settings set nothing up in BeginPlay, so have nothing to undo.
+	if (!IsWorldsOwnSettings())
+	{
+		return;
+	}
 
 	FCoreDelegates::OnBeginFrame.Remove(BeginFrameHandle);
 	StepsIntoGameFrame = 0;
@@ -787,6 +887,8 @@ void ATempoWorldSettings::TempoCoreRenderSettingsChanged() const
 
 void ATempoWorldSettings::SetMainViewportRenderEnabled(bool bEnabled) const
 {
+	const SWindow* WindowToClear = nullptr;
+
 	if (const APlayerController* PlayerController = UGameplayStatics::GetPlayerController(GetWorld(), 0))
 	{
 		if (ULocalPlayer* ClientPlayer = PlayerController->GetLocalPlayer())
@@ -802,13 +904,23 @@ void ATempoWorldSettings::SetMainViewportRenderEnabled(bool bEnabled) const
 				{
 					ViewportWidget->SetVisibility(bEnabled ? EVisibility::Visible : EVisibility::Hidden);
 				}
+
+				// FSceneViewport declares its override private; ISlateViewport's is public.
+				const ISlateViewport* GameViewport = ViewportClient->GetGameViewport();
+				if (!bEnabled && GameViewport && !GameViewport->UseSeparateRenderTarget())
+				{
+					WindowToClear = ViewportClient->GetWindow().Get();
+				}
 			}
 		}
 	}
 
-	// Skips the game thread's viewport draw (per-player view setup, canvas, and present) before it ever
-	// reaches the checks above. Static, but non-game (editor) viewports draw regardless of it.
+	// Skips the game thread's viewport draw (per-player view setup and canvas) before it ever reaches the
+	// checks above. Static, but non-game (editor) viewports draw regardless of it.
 	FViewport::SetGameRenderingEnabled(bEnabled);
+
+	// See GameWindowToClear.
+	SetGameWindowToClear(WindowToClear);
 }
 
 float ATempoWorldSettings::GetDefaultAutoExposureBias()

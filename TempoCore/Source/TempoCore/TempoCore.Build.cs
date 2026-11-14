@@ -34,6 +34,8 @@ public class TempoCore : TempoModuleRules
 				"CoreUObject",
 				"Engine",
 				"InputCore",
+				"RenderCore",
+				"RHI",
 				"Slate",
 				"SlateCore",
 				"UMG",
