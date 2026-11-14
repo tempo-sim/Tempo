@@ -667,7 +667,9 @@ void RespondToImageRequests(const TTextureRead<PixelType>* TextureRead,
 
 		for (int32 InstanceId = 1; InstanceId < 256; ++InstanceId)
 		{
-			if (!BoundingBoxes.Contains(InstanceId))
+			// A class's own ID is shared by many objects -- every road or building, or every far-off car
+			// one instanced mesh draws -- so the extent of its pixels is no object's box.
+			if (!BoundingBoxes.Contains(InstanceId) || TextureRead->ClassInstanceIds.Contains(static_cast<uint8>(InstanceId)))
 			{
 				continue;
 			}
@@ -1929,9 +1931,11 @@ void UTempoCamera::RenderCapture()
 
 	// Build the FTextureRead for the stitched output, sized to the camera's final SizeXY.
 	TMap<uint8, uint8> InstanceToSemanticMap;
+	TSet<uint8> ClassInstanceIds;
 	if (UTempoActorLabeler* Labeler = GetWorld()->GetSubsystem<UTempoActorLabeler>())
 	{
 		InstanceToSemanticMap = Labeler->GetInstanceToSemanticIdMap();
+		ClassInstanceIds = Labeler->GetClassInstanceIds();
 	}
 
 	TSharedPtr<FTextureRead> NewRead;
@@ -1939,13 +1943,14 @@ void UTempoCamera::RenderCapture()
 	{
 		NewRead = MakeShared<TTextureRead<FCameraPixelWithDepth>>(
 			SizeXY, SequenceId, GetWorld()->GetTimeSeconds(), GetOwnerName(), GetSensorName(),
-			GetComponentTransform(), MinDepth, MaxDepth, MoveTemp(InstanceToSemanticMap), bLabelsNeeded);
+			GetComponentTransform(), MinDepth, MaxDepth, MoveTemp(InstanceToSemanticMap), MoveTemp(ClassInstanceIds),
+			bLabelsNeeded);
 	}
 	else
 	{
 		NewRead = MakeShared<TTextureRead<FCameraPixelNoDepth>>(
 			SizeXY, SequenceId, GetWorld()->GetTimeSeconds(), GetOwnerName(), GetSensorName(),
-			GetComponentTransform(), MoveTemp(InstanceToSemanticMap), bLabelsNeeded);
+			GetComponentTransform(), MoveTemp(InstanceToSemanticMap), MoveTemp(ClassInstanceIds), bLabelsNeeded);
 	}
 
 	NewRead->StagingTexture = AcquireNextStagingTexture();
