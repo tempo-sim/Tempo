@@ -1065,9 +1065,21 @@ void UTempoCamera::RequestMeasurement(const TempoSensors::LabelImageRequest& Req
 
 void UTempoCamera::RequestMeasurement(const TempoSensors::DepthImageRequest& Request, const TResponseDelegate<TempoSensors::DepthImage>& ResponseContinuation)
 {
-	FScopeLock RequestsLock(&RequestsMutex);
-	PendingDepthImageRequests.Add({ Request, ResponseContinuation});
-	bRequestedSinceCapture = true;
+	{
+		FScopeLock RequestsLock(&RequestsMutex);
+		PendingDepthImageRequests.Add({ Request, ResponseContinuation});
+		bRequestedSinceCapture = true;
+	}
+
+	// Turn depth on now, ahead of the next capture, rather than at the next send. The server takes a
+	// stream's first request before the frame's capture, so a camera whose streams have just opened
+	// otherwise captures its first frame without depth, and the depth stream starts at the second.
+	// Worse, the send that then turns depth on rebuilds the staging textures and empties the read
+	// queue (InitFinalRenderTargetAndStaging), so with pipelined rendering, where that first read is
+	// still in flight, every stream loses it. Nothing is in flight yet when a fresh camera's first
+	// request arrives.
+	FramesWithoutDepth = 0;
+	SetDepthEnabled(true);
 }
 
 void UTempoCamera::RequestMeasurement(const TempoSensors::BoundingBoxesRequest& Request, const TResponseDelegate<TempoSensors::BoundingBoxes>& ResponseContinuation)
