@@ -1252,6 +1252,18 @@ def test_a_label_stream_opened_late_is_served_promptly(camera_rig, labeled_scene
                 colors[color.header.sequence_id] = color
                 steps += 1
                 await asyncio.sleep(0.2)
+            # A step's color reply can be the capture before it: a decode that takes the request
+            # waiting for a step leaves that step's own capture held for the stream's next request.
+            # Ask until the color of the label's capture arrives, without stepping.
+            label_id = pending[0].result().header.sequence_id
+            for _ in range(3):
+                if max(colors, default=-1) >= label_id:
+                    break
+                try:
+                    color = await asyncio.wait_for(color_stream.__anext__(), timeout=10.0)
+                except asyncio.TimeoutError:
+                    break
+                colors[color.header.sequence_id] = color
             return before, pending[0].result(), pending[1].result(), colors
         finally:
             await _close(color_stream, *pending)
