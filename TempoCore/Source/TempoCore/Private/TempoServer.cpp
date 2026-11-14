@@ -294,6 +294,13 @@ void FTempoServer::Deinitialize()
 	checkf(Server.Get(), TEXT("Server was unexpectedly null"));
 	checkf(CompletionQueue.Get(), TEXT("CompletionQueue was unexpectedly null"));
 
+	// Closed first, so no response delegate, on whatever thread, writes to a call once the server and queue
+	// are shutting down, and none holds a manager the server is about to destroy.
+	for (const auto& RequestManager : RequestManagers)
+	{
+		RequestManager.Value->Close();
+	}
+
 	static constexpr int32 MaxShutdownTimeNanoSeconds = 5e7; // 0.05s
 	static constexpr gpr_timespec MaxShutdownWaitTime {0, MaxShutdownTimeNanoSeconds, GPR_TIMESPAN};
 	Server->Shutdown(MaxShutdownWaitTime);
@@ -605,52 +612,69 @@ void FTempoServer::HandleEventForTag(int32 Tag, bool bOk)
 	// Its write completed (or failed): it is waited on like any other request from here on.
 	StalledTags.Remove(Tag);
 
-	if (TSharedPtr<FRequestManager>* RequestManager = RequestManagers.Find(Tag))
+	// A reference of its own, not a pointer into RequestManagers: the REQUESTED case adds to the map before it
+	// handles the request, and an add can reallocate the map's storage, which left the call after it reading
+	// its manager from freed memory. It also keeps the manager alive through its handler, whatever that does
+	// to the map. Like the map's, it is released on the game thread.
+	const TSharedPtr<FRequestManager>* Found = RequestManagers.Find(Tag);
+	if (!Found)
 	{
-		if (!bOk)
+		return;
+	}
+	const TSharedPtr<FRequestManager> RequestManager = *Found;
+
+	if (!bOk)
+	{
+		RemoveRequestManager(Tag);
+		return;
+	}
+
+	switch (RequestManager->GetState())
+	{
+	case FRequestManager::UNINITIALIZED: // Shouldn't happen.
 		{
-			RequestManagers.Remove(Tag);
-			return;
+			checkf(false, TEXT("Got event for uninitialized request manager."))
+			break;
 		}
-
-		switch ((*RequestManager)->GetState())
+	case FRequestManager::REQUESTED: // A request has been received.
 		{
-		case FRequestManager::UNINITIALIZED: // Shouldn't happen.
+			if (RequestManager->IsGameFrameOnly() && ShouldHoldGameFrameOnlyRequests())
 			{
-				checkf(false, TEXT("Got event for uninitialized request manager."))
+				HeldRequestTags.Add(Tag);
 				break;
 			}
-		case FRequestManager::REQUESTED: // A request has been received.
-			{
-				if ((*RequestManager)->IsGameFrameOnly() && ShouldHoldGameFrameOnlyRequests())
-				{
-					HeldRequestTags.Add(Tag);
-					break;
-				}
 
-				// Immediately prepare to receive another request.
-				const int32 NewTag = TagAllocator++;
-				RequestManagers.Emplace(NewTag, (*RequestManager)->Duplicate(NewTag))->Init(CompletionQueue.Get());
+			// Immediately prepare to receive another request.
+			const int32 NewTag = TagAllocator++;
+			RequestManagers.Emplace(NewTag, RequestManager->Duplicate(NewTag))->Init(CompletionQueue.Get());
 
-				(*RequestManager)->HandleAndRespond();
-				break;
-			}
-		case FRequestManager::HANDLING: // Shouldn't happen.
-			{
-				checkf(false, TEXT("Got event for request manager while it was handling another request."))
-				break;
-			}
-		case FRequestManager::RESPONDING: // A response has been sent, and there are more to come.
-			{
-				(*RequestManager)->HandleAndRespond();
-				break;
-			}
-		case FRequestManager::FINISHING: // The rpc has finished.
-			{
-				RequestManagers.Remove(Tag);
-				break;
-			}
+			RequestManager->HandleAndRespond();
+			break;
 		}
+	case FRequestManager::HANDLING: // Shouldn't happen.
+		{
+			checkf(false, TEXT("Got event for request manager while it was handling another request."))
+			break;
+		}
+	case FRequestManager::RESPONDING: // A response has been sent, and there are more to come.
+		{
+			RequestManager->HandleAndRespond();
+			break;
+		}
+	case FRequestManager::FINISHING: // The rpc has finished.
+		{
+			RemoveRequestManager(Tag);
+			break;
+		}
+	}
+}
+
+void FTempoServer::RemoveRequestManager(int32 Tag)
+{
+	if (const TSharedPtr<FRequestManager>* RequestManager = RequestManagers.Find(Tag))
+	{
+		(*RequestManager)->Close();
+		RequestManagers.Remove(Tag);
 	}
 }
 

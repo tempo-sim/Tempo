@@ -3,6 +3,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Misc/ScopeLock.h"
+
+#include <atomic>
 #include "TempoServiceProvider.h"
 
 // gRPC's port_platform.h includes <windows.h> directly. Route it through Unreal's MinWindows.h
@@ -171,6 +174,10 @@ struct FRequestManager : TSharedFromThis<FRequestManager>
 	virtual void Activate(UObject* Object) = 0;
 	virtual void Deactivate() = 0;
 	virtual const FWeakObjectPtr& GetActiveObject() const = 0;
+	// Ends the manager's responses: its delegate does nothing from here on, and takes no further reference to
+	// it. Once this returns, nothing but the server holds the manager, so the server calls this before it
+	// releases one, and the manager is destroyed on the game thread. See TRequestManagerBase::BindResponseDelegate.
+	virtual void Close() = 0;
 };
 
 template <class HandlerType>
@@ -223,8 +230,52 @@ public:
 		return Handler->GetActiveObject();
 	}
 
+	virtual void Close() override
+	{
+		FScopeLock Lock(&Gate->Mutex);
+		Gate->bClosed = true;
+	}
+
 protected:
-	EState State;
+	using ResponseType = typename HandlerType::HandlerResponseType;
+
+	// What the manager and its response delegate share. A delegate may run on any thread (a sensor's decode
+	// task responds from a worker) and may outlive the manager, so the lock it takes lives here, not in the
+	// manager: a manager destroyed while a worker held a lock of its own freed that lock under it, and on Mac
+	// under 5.8, where FCriticalSection's Unlock does not check its owner, the lock rebuilt in that memory then
+	// read held for good. A sensors run hung on it.
+	struct FResponseGate
+	{
+		FCriticalSection Mutex;
+		bool bClosed = false; // Under Mutex.
+	};
+
+	// Binds ResponseDelegate to call OnResponse under the gate's lock, with the manager pinned, unless it is
+	// closed. The pin is taken only under the lock and only while the manager is open, and the server keeps
+	// its own reference until it closes it, so a pin is never the manager's last reference and none outlasts
+	// Close. Not CreateSP/CreateSPLambda: their check that the manager is alive is not made under this lock,
+	// and CreateSPLambda's ExecuteIfSafe does not even pin it for the call.
+	void BindResponseDelegate()
+	{
+		ResponseDelegate = TResponseDelegate<ResponseType>::CreateLambda([Gate = Gate, WeakThis = this->AsWeak()](const ResponseType& Response, grpc::Status Result)
+		{
+			FScopeLock Lock(&Gate->Mutex);
+			if (Gate->bClosed)
+			{
+				return;
+			}
+			if (const TSharedPtr<FRequestManager> PinnedThis = WeakThis.Pin())
+			{
+				static_cast<TRequestManagerBase*>(PinnedThis.Get())->OnResponse(Response, Result);
+			}
+		});
+	}
+
+	// A response, with the gate's lock held and the manager open.
+	virtual void OnResponse(const ResponseType& Response, grpc::Status Result) = 0;
+
+	// Read on the game thread while a delegate on a worker writes it.
+	std::atomic<EState> State;
 	int32 Tag;
 	const TSharedPtr<HandlerType> Handler;
 	const FName ServiceName;
@@ -233,6 +284,7 @@ protected:
 	grpc::ServerContext Context;
 	typename HandlerType::HandlerResponderType Responder;
 	TResponseDelegate<typename HandlerType::HandlerResponseType> ResponseDelegate;
+	const TSharedRef<FResponseGate> Gate = MakeShared<FResponseGate>();
 };
 
 template <class HandlerType>
@@ -252,11 +304,7 @@ public:
 	virtual void HandleAndRespond() override
 	{
 		check(Base::State == FRequestManager::EState::REQUESTED);
-		Base::ResponseDelegate = TResponseDelegate<ResponseType>::CreateSPLambda(static_cast<FRequestManager*>(this), [this](const ResponseType& Response, grpc::Status Result)
-		{
-			Base::State = FRequestManager::EState::FINISHING;
-			Base::Responder.Finish(Response, Result, &(Base::Tag));
-		});
+		Base::BindResponseDelegate();
 		Base::State = FRequestManager::EState::HANDLING;
 		Base::Handler->HandleRequest(Base::Request, Base::ResponseDelegate);
 	}
@@ -264,6 +312,13 @@ public:
 	virtual FRequestManager* Duplicate(int32 NewTag) const override
 	{
 		return new TRequestManager(NewTag, Base::ServiceName, Base::Service, Base::Handler);
+	}
+
+protected:
+	virtual void OnResponse(const ResponseType& Response, grpc::Status Result) override
+	{
+		Base::State = FRequestManager::EState::FINISHING;
+		Base::Responder.Finish(Response, Result, &(Base::Tag));
 	}
 };
 
@@ -277,7 +332,7 @@ class TRequestManager<TStreamingRequestHandler<ServiceType, RequestType, Respons
 public:
 	virtual bool HasUnflushedWork() const override
 	{
-		FScopeLock Lock(&ResponseMutex);
+		FScopeLock Lock(&Base::Gate->Mutex);
 		// Either a write/finish is in flight, or we have responses queued behind the in-flight write.
 		return Base::State == FRequestManager::EState::RESPONDING
 			|| Base::State == FRequestManager::EState::FINISHING
@@ -295,18 +350,7 @@ public:
 			// for the next write-completion event to drain.
 			// A sensor's decode task runs this from a worker thread while the game thread handles this
 			// stream's write completions below (see UTempoSensorServiceSubsystem::OnBetweenFramesPoll).
-			Base::ResponseDelegate = TResponseDelegate<ResponseType>::CreateSPLambda(static_cast<FRequestManager*>(this), [this](const ResponseType& Response, grpc::Status Result)
-			{
-				FScopeLock Lock(&ResponseMutex);
-				if (Base::State == FRequestManager::EState::HANDLING)
-				{
-					Respond(Response, Result);
-				}
-				else
-				{
-					ResponseQueue.Enqueue(TPair<ResponseType, grpc::Status>(Response, Result));
-				}
-			});
+			Base::BindResponseDelegate();
 			Base::State = FRequestManager::EState::HANDLING;
 			Base::Handler->HandleRequest(Base::Request, Base::ResponseDelegate);
 			return;
@@ -316,7 +360,7 @@ public:
 		// Otherwise ask the user handler for more.
 		bool bResponded;
 		{
-			FScopeLock Lock(&ResponseMutex);
+			FScopeLock Lock(&Base::Gate->Mutex);
 			TPair<ResponseType, grpc::Status> ResponseItem;
 			bResponded = ResponseQueue.Dequeue(ResponseItem);
 			if (bResponded)
@@ -339,6 +383,20 @@ public:
 		return new TRequestManager(NewTag, Base::ServiceName, Base::Service, Base::Handler);
 	}
 
+protected:
+	virtual void OnResponse(const ResponseType& Response, grpc::Status Result) override
+	{
+		if (Base::State == FRequestManager::EState::HANDLING)
+		{
+			Respond(Response, Result);
+		}
+		else
+		{
+			ResponseQueue.Enqueue(TPair<ResponseType, grpc::Status>(Response, Result));
+		}
+	}
+
+	// With the gate's lock held.
 	void Respond(const ResponseType& Response, grpc::Status Result)
 	{
 		if (!Result.ok())
@@ -352,8 +410,8 @@ public:
 		Base::Responder.Write(Response, &(Base::Tag));
 	}
 
+	// Under the gate's lock.
 	TQueue<TPair<ResponseType, grpc::Status>> ResponseQueue;
-	mutable FCriticalSection ResponseMutex;
 };
 
 /**
@@ -492,6 +550,9 @@ protected:
 	}
 
 	void HandleEventForTag(int32 Tag, bool bOk);
+
+	// Closes the manager for Tag and releases it, destroying it here (see FRequestManager::Close).
+	void RemoveRequestManager(int32 Tag);
 
 	bool bIsInitialized = false;
 
