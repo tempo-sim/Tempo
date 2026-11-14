@@ -35,7 +35,9 @@ $VsComponents = @(
     'Microsoft.VisualStudio.Workload.VCTools',
     'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
     'Microsoft.VisualStudio.Component.Windows11SDK.22621',
-    'Microsoft.Net.Component.4.6.2.TargetingPack'
+    'Microsoft.Net.Component.4.6.2.TargetingPack',
+    # The .NET Framework SDK: without it UBT fails at SwarmInterface ("Could not find NetFxSDK install dir").
+    'Microsoft.Net.Component.4.8.SDK'
 )
 # The jobs' tools from winget, machine-wide. Only missing ones are installed: upgrading one under a running
 # job is update.ps1's job, which waits for the runners to be idle.
