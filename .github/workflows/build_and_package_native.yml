@@ -358,7 +358,15 @@ jobs:
         TEMPO_GEN_RUST_API: ${{ inputs.gen_rust_api && '1' || '0' }}
         TEMPO_GEN_CPP_API: ${{ inputs.gen_cpp_api && '1' || '0' }}
       run: |
-        "$CI_BUILD/$TEMPO_ROOT/Scripts/Build.sh"
+        LOG_ARGS=()
+        if [ "$RUNNER_OS" = Windows ]; then
+          # Both engines' builds run at once as the same user, and with an installed engine UBT logs to that
+          # user's %LOCALAPPDATA%\UnrealBuildTool\Log.txt. Windows will not let the second build rotate a log
+          # the first has open (macOS and Linux will), so each engine logs in its own tree root.
+          mkdir -p "$CI_TREE_ROOT/logs"
+          LOG_ARGS=(-Log="$(cygpath -m "$CI_TREE_ROOT/logs/UnrealBuildTool.log")")
+        fi
+        "$CI_BUILD/$TEMPO_ROOT/Scripts/Build.sh" "${LOG_ARGS[@]}"
 
     - name: Run Automation Tests
       if: ${{ inputs.automation_test_filter != '' }}
