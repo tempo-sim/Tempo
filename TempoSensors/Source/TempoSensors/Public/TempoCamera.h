@@ -146,10 +146,11 @@ struct TTextureRead<FCameraPixelWithDepth> : TTextureReadBase<FCameraPixelWithDe
 {
 	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
 	   const FString& SensorNameIn, const FTransform& SensorTransformIn, float MinDepthIn, float MaxDepthIn,
-	   TMap<uint8, uint8>&& InstanceToSemanticMapIn, bool bLabelsRenderedIn = true)
+	   TMap<uint8, uint8>&& InstanceToSemanticMapIn, TSet<uint8>&& ClassInstanceIdsIn = TSet<uint8>(),
+	   bool bLabelsRenderedIn = true)
 	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
 	   MinDepth(MinDepthIn), MaxDepth(MaxDepthIn), InstanceToSemanticMap(MoveTemp(InstanceToSemanticMapIn)),
-	   bLabelsRendered(bLabelsRenderedIn)
+	   ClassInstanceIds(MoveTemp(ClassInstanceIdsIn)), bLabelsRendered(bLabelsRenderedIn)
 	{
 	}
 
@@ -165,6 +166,8 @@ struct TTextureRead<FCameraPixelWithDepth> : TTextureReadBase<FCameraPixelWithDe
 	float MinDepth;
 	float MaxDepth;
 	TMap<uint8, uint8> InstanceToSemanticMap;
+	// Instance IDs that stand for a whole class (UTempoActorLabeler::GetClassInstanceIds), which get no bounding boxes.
+	TSet<uint8> ClassInstanceIds;
 	// Whether the capture rendered its custom depth pass. Without it the label channel is zero,
 	// so label and bounding box requests stay pending for the next read that has it.
 	bool bLabelsRendered;
@@ -175,9 +178,10 @@ struct TTextureRead<FCameraPixelNoDepth> : TTextureReadBase<FCameraPixelNoDepth>
 {
 	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
 	   const FString& SensorNameIn, const FTransform& SensorTransformIn, TMap<uint8, uint8>&& InstanceToSemanticMapIn,
-	   bool bLabelsRenderedIn = true)
+	   TSet<uint8>&& ClassInstanceIdsIn = TSet<uint8>(), bool bLabelsRenderedIn = true)
 	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
-	   InstanceToSemanticMap(MoveTemp(InstanceToSemanticMapIn)), bLabelsRendered(bLabelsRenderedIn)
+	   InstanceToSemanticMap(MoveTemp(InstanceToSemanticMapIn)), ClassInstanceIds(MoveTemp(ClassInstanceIdsIn)),
+	   bLabelsRendered(bLabelsRenderedIn)
 	{
 	}
 
@@ -192,6 +196,8 @@ struct TTextureRead<FCameraPixelNoDepth> : TTextureReadBase<FCameraPixelNoDepth>
 		float TransmissionTime) const;
 
 	TMap<uint8, uint8> InstanceToSemanticMap;
+	// Instance IDs that stand for a whole class (UTempoActorLabeler::GetClassInstanceIds), which get no bounding boxes.
+	TSet<uint8> ClassInstanceIds;
 	bool bLabelsRendered;
 };
 
