@@ -179,14 +179,33 @@ namespace
 		return Params;
 	}
 
-	// Top/bottom tiles of a tall fisheye split vertically, as UTempoCamera::SyncTiles lays them out.
-	TArray<FFisheyeTileLayout> ComputeVerticalSplit(const FTempoLensParameters& Params, const FIntPoint& SizeXY,
-		double FOutput, int32 Feather)
+	// A fisheye's tiles as UTempoCamera::SyncTiles lays them out for the given initial split.
+	TArray<FFisheyeTileLayout> ComputeSplit(const FTempoLensParameters& Params, const FIntPoint& SizeXY,
+		double FOutput, int32 Feather, bool bSplitHorizontal, bool bSplitVertical)
 	{
 		const TUniquePtr<FLensModel> Model = CreateLensModel(Params, 0.0, 0.0);
 		FIntPoint AtlasSize;
 		return ComputeFisheyeTileLayouts(*Model, FOutput, SizeXY, Params.GetClampedPrincipalPoint(), Feather,
-			/*bSplitHorizontal=*/ false, /*bSplitVertical=*/ true, AtlasSize);
+			bSplitHorizontal, bSplitVertical, AtlasSize);
+	}
+
+	// Top/bottom tiles of a tall fisheye split vertically.
+	TArray<FFisheyeTileLayout> ComputeVerticalSplit(const FTempoLensParameters& Params, const FIntPoint& SizeXY,
+		double FOutput, int32 Feather)
+	{
+		return ComputeSplit(Params, SizeXY, FOutput, Feather, /*bSplitHorizontal=*/ false, /*bSplitVertical=*/ true);
+	}
+
+	FDistortionRenderConfig TileRenderConfig(const FTempoLensParameters& Params, const FFisheyeTileLayout& Layout, double FOutput)
+	{
+		const FFisheyeTileAim& Aim = Layout.Aim;
+		const TUniquePtr<FLensModel> TileModel = CreateLensModel(Params, Aim.YawDeg, Aim.PitchDeg, Aim.AxisShiftXRd, Aim.AxisShiftYRd);
+		return TileModel->ComputeRenderConfig(Layout.CoveredSizeXY, FOutput, FVector2D::ZeroVector);
+	}
+
+	double MaxTan(const FDistortionRenderConfig& Config)
+	{
+		return FMath::Max(FMath::Max(-Config.TanLeft, Config.TanRight), FMath::Max(-Config.TanTop, Config.TanBottom));
 	}
 }
 
@@ -251,48 +270,67 @@ bool FTempoLensKannalaBrandtDomainTest::RunTest(const FString& Parameters)
 	constexpr int32 Feather = 16;
 	const double MaxTanBound = FMath::Tan(FMath::DegreesToRadians(85.0));
 
-	// A top/bottom split would leave each tile's outer corners behind its camera (~93 degrees from
-	// its aim). No frustum covers the pixels approaching them, so a tile in that state opens those
-	// sides to the cap...
-	{
-		const TUniquePtr<FLensModel> Model = CreateLensModel(Seed, 0.0, 0.0);
-		const int32 TopCoveredH = SizeXY.Y / 2 + Feather;
-		const double TopPCDy = TopCoveredH * 0.5 - SizeXY.Y * 0.5;
-		const FFisheyeTileAim Aim = ComputeFisheyeTileAim(*Model, FOutput,
-			-SizeXY.X * 0.5, SizeXY.X * 0.5, -SizeXY.Y * 0.5, TopCoveredH - SizeXY.Y * 0.5, 0.0, TopPCDy);
-		const TUniquePtr<FLensModel> TileModel = CreateLensModel(Seed, Aim.YawDeg, Aim.PitchDeg, Aim.AxisShiftXRd, Aim.AxisShiftYRd);
-		const FDistortionRenderConfig Config = TileModel->ComputeRenderConfig(FIntPoint(SizeXY.X, TopCoveredH), FOutput, FVector2D::ZeroVector);
-		Near(TEXT("KB seed half tile opens left to the cap"), Config.TanLeft, -MaxTanBound, 1e-9);
-		Near(TEXT("KB seed half tile opens right to the cap"), Config.TanRight, MaxTanBound, 1e-9);
-		Near(TEXT("KB seed half tile opens top to the cap"), Config.TanTop, -MaxTanBound, 1e-9);
-		TestTrue(TEXT("KB seed half tile bottom stays tight"), Config.TanBottom < 1.0);
-	}
-
-	// ...which is why the layout promotes it to quadrants, each with its corners in front.
+	// A top/bottom split keeps two tiles. Centering the corners' yaw and pitch extents with yaw as
+	// the outer angle would leave each tile's outer corners ~93 degrees from its aim (yaw swings
+	// toward +-90 near the top of the image) and force quadrants; with pitch as the outer angle every
+	// corner stays ~71 degrees from the aim, as in the same lens rotated into a left/right split.
 	const TArray<FFisheyeTileLayout> Centered = ComputeVerticalSplit(Seed, SizeXY, FOutput, Feather);
-	if (!TestEqual(TEXT("KB seed vertical split promoted to quadrants"), Centered.Num(), 4))
+	if (!TestEqual(TEXT("KB seed vertical split keeps two tiles"), Centered.Num(), 2))
 	{
 		return false;
 	}
-	TestEqual(TEXT("KB seed TL quadrant covers from the image origin"), Centered[0].CoveredOffset, FIntPoint::ZeroValue);
-	TestEqual(TEXT("KB seed BR quadrant covers to the image corner"), Centered[3].CoveredOffset + Centered[3].CoveredSizeXY, SizeXY);
-	Near(TEXT("KB seed quadrant yaws mirror"), Centered[0].Aim.YawDeg, -Centered[1].Aim.YawDeg, 1e-9);
-	Near(TEXT("KB seed quadrant pitches mirror"), Centered[0].Aim.PitchDeg, -Centered[2].Aim.PitchDeg, 1e-9);
-	Near(TEXT("KB seed top quadrants share pitch"), Centered[0].Aim.PitchDeg, Centered[1].Aim.PitchDeg, 1e-9);
-	TestTrue(TEXT("KB seed TL quadrant aims up and left"), Centered[0].Aim.PitchDeg > 10.0 && Centered[0].Aim.YawDeg < -10.0);
-	TArray<FDistortionRenderConfig> Configs;
-	for (const FFisheyeTileLayout& Layout : Centered)
+	TestEqual(TEXT("KB seed top tile covers from the image origin"), Centered[0].CoveredOffset, FIntPoint::ZeroValue);
+	TestEqual(TEXT("KB seed bottom tile covers to the image corner"), Centered[1].CoveredOffset + Centered[1].CoveredSizeXY, SizeXY);
+	Near(TEXT("KB seed top tile aims straight up the image"), Centered[0].Aim.YawDeg, 0.0, 1e-9);
+	Near(TEXT("KB seed bottom tile aims straight down the image"), Centered[1].Aim.YawDeg, 0.0, 1e-9);
+	Near(TEXT("KB seed top/bottom pitches mirror"), Centered[0].Aim.PitchDeg, -Centered[1].Aim.PitchDeg, 1e-9);
+	TestTrue(TEXT("KB seed top tile aims up"), Centered[0].Aim.PitchDeg > 10.0);
+	const FDistortionRenderConfig TopConfig = TileRenderConfig(Seed, Centered[0], FOutput);
+	const FDistortionRenderConfig BottomConfig = TileRenderConfig(Seed, Centered[1], FOutput);
+	TestTrue(TEXT("KB seed top tile frustum stays clear of the cap"), MaxTan(TopConfig) < 0.5 * MaxTanBound);
+	TestTrue(TEXT("KB seed bottom tile frustum stays clear of the cap"), MaxTan(BottomConfig) < 0.5 * MaxTanBound);
+	Near(TEXT("KB seed top/bottom frustums mirror"), TopConfig.TanTop, -BottomConfig.TanBottom, 1e-9);
+
+	// The same lens rotated into a wide image splits left/right into the transposed layout.
 	{
-		const FFisheyeTileAim& Aim = Layout.Aim;
-		const TUniquePtr<FLensModel> TileModel = CreateLensModel(Seed, Aim.YawDeg, Aim.PitchDeg, Aim.AxisShiftXRd, Aim.AxisShiftYRd);
-		const FDistortionRenderConfig& Config = Configs.Add_GetRef(TileModel->ComputeRenderConfig(Layout.CoveredSizeXY, FOutput, FVector2D::ZeroVector));
-		TestTrue(TEXT("KB seed quadrant frustum stays clear of the cap"),
-			FMath::Max(FMath::Max(-Config.TanLeft, Config.TanRight), FMath::Max(-Config.TanTop, Config.TanBottom)) < 0.5 * MaxTanBound);
+		const FIntPoint WideSizeXY(SizeXY.Y, SizeXY.X);
+		const TArray<FFisheyeTileLayout> Wide = ComputeSplit(Seed, WideSizeXY, FOutput, Feather,
+			/*bSplitHorizontal=*/ true, /*bSplitVertical=*/ false);
+		if (TestEqual(TEXT("KB seed horizontal split keeps two tiles"), Wide.Num(), 2))
+		{
+			Near(TEXT("KB seed left tile aim transposes the top tile's"), Wide[0].Aim.YawDeg, -Centered[0].Aim.PitchDeg, 1e-6);
+			Near(TEXT("KB seed left tile stays level"), Wide[0].Aim.PitchDeg, 0.0, 1e-9);
+			const FDistortionRenderConfig LeftConfig = TileRenderConfig(Seed, Wide[0], FOutput);
+			Near(TEXT("KB seed left tile width transposes the top tile's height"),
+				LeftConfig.TanRight - LeftConfig.TanLeft, TopConfig.TanBottom - TopConfig.TanTop, 1e-6);
+			Near(TEXT("KB seed left tile height transposes the top tile's width"),
+				LeftConfig.TanBottom - LeftConfig.TanTop, TopConfig.TanRight - TopConfig.TanLeft, 1e-6);
+		}
+	}
+
+	// Quadrants, which wider lenses still need, each keep their corners in front.
+	const TArray<FFisheyeTileLayout> Quadrants = ComputeSplit(Seed, SizeXY, FOutput, Feather,
+		/*bSplitHorizontal=*/ true, /*bSplitVertical=*/ true);
+	if (!TestEqual(TEXT("KB seed quadrant split"), Quadrants.Num(), 4))
+	{
+		return false;
+	}
+	TestEqual(TEXT("KB seed TL quadrant covers from the image origin"), Quadrants[0].CoveredOffset, FIntPoint::ZeroValue);
+	TestEqual(TEXT("KB seed BR quadrant covers to the image corner"), Quadrants[3].CoveredOffset + Quadrants[3].CoveredSizeXY, SizeXY);
+	Near(TEXT("KB seed quadrant yaws mirror"), Quadrants[0].Aim.YawDeg, -Quadrants[1].Aim.YawDeg, 1e-9);
+	Near(TEXT("KB seed quadrant pitches mirror"), Quadrants[0].Aim.PitchDeg, -Quadrants[2].Aim.PitchDeg, 1e-9);
+	Near(TEXT("KB seed top quadrants share pitch"), Quadrants[0].Aim.PitchDeg, Quadrants[1].Aim.PitchDeg, 1e-9);
+	TestTrue(TEXT("KB seed TL quadrant aims up and left"), Quadrants[0].Aim.PitchDeg > 10.0 && Quadrants[0].Aim.YawDeg < -10.0);
+	TArray<FDistortionRenderConfig> Configs;
+	for (const FFisheyeTileLayout& Layout : Quadrants)
+	{
+		const FDistortionRenderConfig& Config = Configs.Add_GetRef(TileRenderConfig(Seed, Layout, FOutput));
+		TestTrue(TEXT("KB seed quadrant frustum stays clear of the cap"), MaxTan(Config) < 0.5 * MaxTanBound);
 	}
 	Near(TEXT("KB seed TL/TR frustums mirror"), Configs[0].TanLeft, -Configs[1].TanRight, 1e-9);
 	Near(TEXT("KB seed TL/BL frustums mirror"), Configs[0].TanTop, -Configs[2].TanBottom, 1e-9);
 
-	// A milder lens keeps the top/bottom split: equidistant at 100 degrees HFOV on the same image
+	// A milder lens keeps the top/bottom split too: equidistant at 100 degrees HFOV on the same image
 	// reaches ~78 degrees from each tile's aim.
 	{
 		FTempoLensParameters Mild = MakeSeedFisheyeLens(FVector2D::ZeroVector);
@@ -311,9 +349,9 @@ bool FTempoLensKannalaBrandtDomainTest::RunTest(const FString& Parameters)
 
 	// The seed's real principal point; a 1e-9 relative change in FOutput (as float FOV round-off
 	// produces) must barely move the aims. An unguarded Newton solve at these corners jumps between
-	// spurious roots and moves the aims by tens of degrees. The quadrants' inner corners sit just
-	// inside the peak, where the inverse is steep, so the aims do drift smoothly (~1e-4 degrees per
-	// 1e-7 of FOutput) — far below a jump.
+	// spurious roots and moves the aims by tens of degrees. Corners just inside the peak, where the
+	// inverse is steep, can still drift the aims smoothly (~1e-4 degrees per 1e-7 of FOutput) — far
+	// below a jump.
 	const FTempoLensParameters SeedOffCenter = MakeSeedFisheyeLens(
 		FVector2D((1060.8 - 1080.0) / 2160.0, (1923.54 - 1920.0) / 3840.0));
 	const TArray<FFisheyeTileLayout> Base = ComputeVerticalSplit(SeedOffCenter, SizeXY, FOutput, Feather);
@@ -330,10 +368,9 @@ bool FTempoLensKannalaBrandtDomainTest::RunTest(const FString& Parameters)
 			Near(*FString::Printf(TEXT("KB seed tile %d pitch stable (scale %.9f)"), I, Scale), Perturbed[I].Aim.PitchDeg, Base[I].Aim.PitchDeg, 1e-2);
 		}
 	}
-	if (TestEqual(TEXT("KB seed off-center split promoted to quadrants"), Base.Num(), 4))
+	if (TestEqual(TEXT("KB seed off-center split keeps two tiles"), Base.Num(), 2))
 	{
-		Near(TEXT("KB seed off-center top yaws near mirror"), Base[0].Aim.YawDeg, -Base[1].Aim.YawDeg, 1.0);
-		Near(TEXT("KB seed off-center left pitches near mirror"), Base[0].Aim.PitchDeg, -Base[2].Aim.PitchDeg, 1.0);
+		Near(TEXT("KB seed off-center pitches near mirror"), Base[0].Aim.PitchDeg, -Base[1].Aim.PitchDeg, 1.0);
 	}
 
 	return true;
