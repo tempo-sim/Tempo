@@ -231,10 +231,18 @@ jobs:
         CLEAN: ${{ inputs.clean }}
       run: |
         # Copy-on-write where the filesystem allows it: instant, and no extra disk until files change.
+        # Windows: robocopy, multithreaded (3-4x Git Bash's cp -a on a build tree's many small files), with
+        # timestamps, which UBT's incremental build goes by. MSYS must not rewrite its /switches as paths;
+        # exit codes below 8 are success.
         clone_tree() {
           case "$RUNNER_OS" in
             macOS) cp -cR "$1" "$2" ;;
             Linux) cp -a --reflink=auto "$1" "$2" ;;
+            Windows)
+              local rc=0
+              MSYS2_ARG_CONV_EXCL='*' robocopy "$(cygpath -w "$1")" "$(cygpath -w "$2")" \
+                /E /COPY:DAT /DCOPY:DAT /SL /MT:16 /R:2 /W:5 /NFL /NDL /NP /NJH || rc=$?
+              [ "$rc" -lt 8 ] ;;
             *)     cp -a "$1" "$2" ;;
           esac
         }
@@ -429,14 +437,22 @@ jobs:
     - name: Update Golden Tree
       if: ${{ github.event_name != 'pull_request_target' && github.ref == format('refs/heads/{0}', inputs.cache_branch) && steps.package.outcome == 'success' }}
       run: |
-        case "$RUNNER_OS" in
-          macOS) CLONE=(cp -cR) ;;
-          Linux) CLONE=(cp -a --reflink=auto) ;;
-          *)     CLONE=(cp -a) ;;
-        esac
+        # The same clone as Prepare Build Tree's clone_tree (see there for Windows' robocopy).
+        clone_tree() {
+          case "$RUNNER_OS" in
+            macOS) cp -cR "$1" "$2" ;;
+            Linux) cp -a --reflink=auto "$1" "$2" ;;
+            Windows)
+              local rc=0
+              MSYS2_ARG_CONV_EXCL='*' robocopy "$(cygpath -w "$1")" "$(cygpath -w "$2")" \
+                /E /COPY:DAT /DCOPY:DAT /SL /MT:16 /R:2 /W:5 /NFL /NDL /NP /NJH || rc=$?
+              [ "$rc" -lt 8 ] ;;
+            *)     cp -a "$1" "$2" ;;
+          esac
+        }
         : "${CI_BUILD:?}" "${CI_GOLDEN:?}"   # never rm -rf an empty path
         rm -rf "$CI_GOLDEN.new" "$CI_GOLDEN.old"
-        "${CLONE[@]}" "$CI_BUILD" "$CI_GOLDEN.new"
+        clone_tree "$CI_BUILD" "$CI_GOLDEN.new"
         [ -d "$CI_GOLDEN" ] && mv "$CI_GOLDEN" "$CI_GOLDEN.old"
         mv "$CI_GOLDEN.new" "$CI_GOLDEN"
         rm -rf "$CI_GOLDEN.old"
