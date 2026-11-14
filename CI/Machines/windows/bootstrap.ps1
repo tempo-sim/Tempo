@@ -315,12 +315,15 @@ function Housekeeping {
 function Runners {
     $ciHome = Get-CiHome
     Step '7. Runners: environment, PATH and service settings for each registered runner'
+    $path = (Get-JobPath $ciHome) -join ';'
+    # PATH goes in .env too: on Windows the service does not read .path (runsvc.sh does that, on Linux and
+    # Mac), but the runner loads .env into its own environment, which every job inherits.
     $runnerEnv = @(
+        "PATH=$path",
         'TEMPO_CI_MACHINE_ENV=' + ("$ciHome\tempo-ci\machine.env" -replace '\\', '/'),
         "RUSTUP_HOME=$Tools\rustup",
         'PYTHONUTF8=1'
     ) -join "`n"
-    $path = (Get-JobPath $ciHome) -join ';'
     $found = $false
     foreach ($dir in Get-ChildItem "$ciHome\actions-runner*" -Directory -ErrorAction SilentlyContinue) {
         if (-not (Test-Path "$($dir.FullName)\.runner")) { continue }
