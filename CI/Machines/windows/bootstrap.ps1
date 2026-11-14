@@ -318,9 +318,11 @@ function Runners {
     $path = (Get-JobPath $ciHome) -join ';'
     # PATH goes in .env too: on Windows the service does not read .path (runsvc.sh does that, on Linux and
     # Mac), but the runner loads .env into its own environment, which every job inherits.
+    # Built first: in an array literal "a" + (b), "c" is "a" + (b, "c"), the comma binding tighter.
+    $machineEnv = "$ciHome\tempo-ci\machine.env" -replace '\\', '/'
     $runnerEnv = @(
         "PATH=$path",
-        'TEMPO_CI_MACHINE_ENV=' + ("$ciHome\tempo-ci\machine.env" -replace '\\', '/'),
+        "TEMPO_CI_MACHINE_ENV=$machineEnv",
         "RUSTUP_HOME=$Tools\rustup",
         'PYTHONUTF8=1'
     ) -join "`r`n"   # CRLF: the Windows runner splits .env on CRLF, so with LF it is all one PATH= line
