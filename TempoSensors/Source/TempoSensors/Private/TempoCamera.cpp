@@ -1052,6 +1052,7 @@ void UTempoCamera::RequestMeasurement(const TempoSensors::ColorImageRequest& Req
 {
 	FScopeLock RequestsLock(&RequestsMutex);
 	PendingColorImageRequests.Add({ Request, ResponseContinuation});
+	bRequestedSinceCapture = true;
 }
 
 void UTempoCamera::RequestMeasurement(const TempoSensors::LabelImageRequest& Request, const TResponseDelegate<TempoSensors::LabelImage>& ResponseContinuation)
@@ -1059,12 +1060,14 @@ void UTempoCamera::RequestMeasurement(const TempoSensors::LabelImageRequest& Req
 	FScopeLock RequestsLock(&RequestsMutex);
 	PendingLabelImageRequests.Add({ Request, ResponseContinuation});
 	LastLabelRequestFrame = GFrameCounter;
+	bRequestedSinceCapture = true;
 }
 
 void UTempoCamera::RequestMeasurement(const TempoSensors::DepthImageRequest& Request, const TResponseDelegate<TempoSensors::DepthImage>& ResponseContinuation)
 {
 	FScopeLock RequestsLock(&RequestsMutex);
 	PendingDepthImageRequests.Add({ Request, ResponseContinuation});
+	bRequestedSinceCapture = true;
 }
 
 void UTempoCamera::RequestMeasurement(const TempoSensors::BoundingBoxesRequest& Request, const TResponseDelegate<TempoSensors::BoundingBoxes>& ResponseContinuation)
@@ -1072,6 +1075,7 @@ void UTempoCamera::RequestMeasurement(const TempoSensors::BoundingBoxesRequest& 
 	FScopeLock RequestsLock(&RequestsMutex);
 	PendingBoundingBoxesRequests.Add({ Request, ResponseContinuation});
 	LastLabelRequestFrame = GFrameCounter;
+	bRequestedSinceCapture = true;
 }
 
 void UTempoCamera::RequestMeasurement(const TempoSensors::VideoRequest& Request, const TResponseDelegate<TempoSensors::VideoFrame>& ResponseContinuation)
@@ -1947,6 +1951,11 @@ void UTempoCamera::RenderCapture()
 	NewRead->StagingTexture = AcquireNextStagingTexture();
 
 	SequenceId++;
+	{
+		// A request still waiting counts toward the next capture too, even if a decode takes it first.
+		FScopeLock RequestsLock(&RequestsMutex);
+		bRequestedSinceCapture = GetPendingRequestKinds_Locked() != 0;
+	}
 
 	if (!bSingleTileFastPath)
 	{
