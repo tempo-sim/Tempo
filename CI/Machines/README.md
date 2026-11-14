@@ -11,7 +11,7 @@ A machine should need a human only when it says so, in Slack.
 
 | What | Where | When | Tells you |
 |---|---|---|---|
-| `heartbeat.sh` | CI user's LaunchAgent | every 5 min | healthchecks.io alerts when a runner service is down, or when pings stop (machine off, hung, offline, CI user logged out) |
+| `heartbeat.sh` | CI user's LaunchAgent (Windows: scheduled task) | every 5 min | healthchecks.io alerts when a runner service is down, or when pings stop (machine off, hung, offline, CI user logged out) |
 | `daily.sh` | CI user's LaunchAgent | 07:00 | cleans up logs and temp files; checks the machine contract (disk, engines, Xcodes, Metal toolchain, tools); reports a new macOS or Xcode update once |
 | `macos/update.sh` | root LaunchDaemon | Sun 03:00 | waits for the runners to be idle, stops them, upgrades the jobs' Homebrew tools and Rust, restarts them; reports only failures |
 | Check Machine step | every native job | each job | runs `TEMPO_CI_ALERT_COMMAND` (`notify.sh`) when the job finds the machine in trouble |
@@ -70,8 +70,41 @@ safe while jobs run, and does not restart a runner that is busy.
 - **macOS update:** when no job is running (`pgrep -f Runner.Worker` prints nothing), install it and
   restart. The runners come back on their own after automatic login.
 
-## Windows and Linux
+## Setting up a new Windows machine
 
-Not yet: `NEW_MACHINE.md` is the guide for adding one. The workflow is OS-agnostic and the contract is the same; what is macOS-only is the service
-manager (launchd here; systemd and a Windows service there), `runner_problems` in `lib.sh`, and the
-`macos/` directory.
+The same scripts, scheduled by Task Scheduler instead of launchd, under `\TempoCI\`: `Heartbeat` (every
+5 min) and `Daily` (07:00) run Git Bash as `ci` whether or not anyone is logged on (they store `ci`'s
+password, as the runner services do: Windows does not let an admin create a no-password task for another
+user; change the password and both must be re-registered, by re-running the bootstrap), and
+`Update` (`windows/update.ps1`, Sun 03:00) runs as SYSTEM. The runners are Windows services running as
+`ci`, so they start at boot without anyone logging on: no automatic login is needed.
+
+```text
+C:\Users\ci\tempo-ci\           machine.env, slack-webhook, healthchecks-url, bin\, logs\, state\, path
+C:\Users\ci\actions-runner-<v>\ one runner (a Windows service) per Unreal version
+C:\ci\                          TEMPO_CI_ROOT, the build trees (short: Unreal's paths get long)
+C:\ci-tools\                    python3 (uv's) and Rust's toolchains; admin-owned, read-only to ci
+C:\Program Files\TempoCI\       update.ps1, admin-owned
+C:\ProgramData\TempoCI\         update.log, update-status (read by daily.sh), bootstrap.log
+```
+
+1. Install the engines with the Epic Games Launcher (to `C:\Program Files\Epic Games`), and set the
+   firmware to power on after a power failure.
+2. From an elevated PowerShell in a Tempo checkout:
+   `powershell -ExecutionPolicy Bypass -File CI\Machines\windows\bootstrap.ps1`. It creates `ci` (asking
+   for its password), installs Visual Studio 2022 Build Tools and the jobs' tools, and writes
+   `C:\Users\ci\tempo-ci\machine.env` from `windows/machine.env.example`: check it.
+3. Put the Slack webhook and healthchecks.io ping URL in `C:\Users\ci\tempo-ci\slack-webhook` and
+   `healthchecks-url`. The next bootstrap run restricts them to `ci`.
+4. Register the runners: `powershell -ExecutionPolicy Bypass -File CI\Machines\windows\register-runner.ps1 5.7,5.8`.
+   It asks for a registration token and `ci`'s password, and keeps neither.
+5. Run the bootstrap once more. Its checks at the end should say `OK`.
+
+Windows updates download on their own and are never installed automatically: the daily check reports each
+one once. Install it when no job is running (`tasklist | findstr Runner.Worker` prints nothing) and restart;
+the runner services come back at boot.
+
+## Linux
+
+Not yet: `NEW_MACHINE.md` is the guide for adding one. The workflow is OS-agnostic and the contract is the
+same; what differs is the service manager (systemd), `runner_problems` in `lib.sh`, and a `linux/` directory.

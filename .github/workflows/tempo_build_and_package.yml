@@ -62,6 +62,7 @@ jobs:
       matrix:
         machine:
           - { name: macos, runner: '["self-hosted","tempo-ci","macOS"]' }
+          - { name: windows, runner: '["self-hosted","tempo-ci","Windows"]' }
         unreal_version: [ "5.7", "5.8" ]
     with:
       runner: ${{ matrix.machine.runner }}
@@ -84,7 +85,7 @@ jobs:
         python-core: Scripts/TestPythonAPI.sh core
         python-world: Scripts/TestPythonAPI.sh world
         python-movement: Scripts/TestPythonAPI.sh movement
-        python-core-socket: TEMPO_SERVER_SOCKET=$TEMPO_CI_SOCKET Scripts/TestPythonAPI.sh core
+        python-core-socket: if [ "$RUNNER_OS" = Windows ]; then echo "Skipped: Tempo has no Unix socket transport on Windows."; else TEMPO_SERVER_SOCKET=$TEMPO_CI_SOCKET Scripts/TestPythonAPI.sh core; fi
         rust-contract: Scripts/TestRustAPI.sh contract
         rust-integration: Scripts/TestRustAPI.sh integration
         rust-typed: Scripts/TestRustAPI.sh typed
