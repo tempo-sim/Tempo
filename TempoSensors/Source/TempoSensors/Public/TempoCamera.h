@@ -381,7 +381,9 @@ public:
 	static void AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector);
 
 protected:
-	virtual bool HasPendingRequests() const override { return HasPendingCameraRequests(); }
+	// Whether to capture this frame: a request is waiting, or one has been since the last capture. See
+	// bRequestedSinceCapture.
+	virtual bool HasPendingRequests() const override { return bRequestedSinceCapture || HasPendingCameraRequests(); }
 	virtual int32 GetNumActiveTiles() const override;
 	virtual void RenderCapture() override;
 
@@ -546,6 +548,15 @@ protected:
 	TArray<FBoundingBoxesRequest> PendingBoundingBoxesRequests;
 	mutable FCriticalSection RequestsMutex;
 	bool bDepthRequestedSinceSend = false;
+	// Whether an image request has been waiting at some point since the last capture: set as one
+	// arrives, and by a capture that leaves one waiting. Game thread only. The server takes a stream's
+	// next request early in the frame, before the capture timer, but the render thread decodes an
+	// earlier capture's read as soon as it completes, and with pipelined rendering it does so while
+	// the game thread runs the next frame. A decode launched between the server's tick and the
+	// capture timer takes the request waiting for this frame, and the stream asks again only next
+	// frame, so with nothing waiting the capture would be skipped: the stream loses that step. The
+	// read captured for it instead waits for the stream's next request.
+	bool bRequestedSinceCapture = false;
 	// The image request kinds (ERequestKind bits) with a request waiting, and those the last decode
 	// launched answered, under RequestsMutex. Every stream asks for its next image only once its last
 	// response is written, and a depth image takes longer to write than a color one, so between frames
