@@ -48,8 +48,13 @@ check() {
   else
     problem "TEMPO_CI_ROOT is not set in $TEMPO_CI_MACHINE_ENV"
   fi
+  # Run, not just found: on Windows a tool can be on the PATH and still not run for the CI user.
   for cmd in git python3 uv cargo cmake curl jq; do
-    command -v "$cmd" > /dev/null || problem "$cmd is not on the PATH"
+    if ! command -v "$cmd" > /dev/null; then
+      problem "$cmd is not on the PATH"
+    elif ! "$cmd" --version > /dev/null 2>&1; then
+      problem "$cmd is on the PATH ($(command -v "$cmd")) but does not run"
+    fi
   done
   for var in $(compgen -v | grep '^TEMPO_CI_UE_[0-9]*_[0-9]*_ENGINE$'); do
     engine=${!var}

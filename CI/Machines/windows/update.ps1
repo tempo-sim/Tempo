@@ -54,6 +54,13 @@ try {
             if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1978335189) { $failures += "$id ($LASTEXITCODE)" }
         }
     }
+    # The jobs run copies of winget's portable tools (see bootstrap.ps1's Sync-PortableTools): refresh them.
+    foreach ($link in Get-ChildItem 'C:\Program Files\WinGet\Links' -Filter '*.exe' -ErrorAction SilentlyContinue) {
+        if ($link.Name -notmatch '^(uv|uvx|uvw|jq)\.exe$') { continue }
+        $target = if ($link.LinkType) { @($link.Target)[0] } else { $link.FullName }
+        try { Copy-Item -LiteralPath $target -Destination "$Tools\bin\$($link.Name)" -Force -ErrorAction Stop }
+        catch { $failures += "copy $($link.Name)" }
+    }
     if (Test-Path "$Tools\cargo\bin\rustup.exe") {
         Log 'update: rustup update stable'
         $env:RUSTUP_HOME = "$Tools\rustup"; $env:CARGO_HOME = "$Tools\cargo"

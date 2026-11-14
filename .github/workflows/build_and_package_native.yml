@@ -186,6 +186,10 @@ jobs:
         if [ -n "$NEED_PYTHON" ]; then
           command -v uv >/dev/null || trouble "uv is not on the runner's PATH (it provides Python $NEED_PYTHON for the tests)."
         fi
+        # Run, not just found: a tool on the PATH can still fail to run for the runner's user.
+        for tool in git python3 jq ${NEED_PYTHON:+uv}; do
+          "$tool" --version > /dev/null 2>&1 || trouble "$tool does not run on this runner ($(command -v "$tool" || echo 'not on the PATH'))."
+        done
         CHANGELIST=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["Changelist"])' "$ENGINE/Engine/Build/Build.version")
         STAMP="engine=$ENGINE changelist=$CHANGELIST"
 

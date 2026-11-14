@@ -143,7 +143,7 @@ function Get-JobPath($ciHome) {
     @(
         "$Tools\bin", "$Tools\cargo\bin", "$ciHome\.local\bin",
         "$GitDir\cmd", "$GitDir\bin", "$GitDir\usr\bin",
-        'C:\Program Files\CMake\bin', 'C:\Program Files\GitHub CLI', 'C:\Program Files\WinGet\Links',
+        'C:\Program Files\CMake\bin', 'C:\Program Files\GitHub CLI',
         'C:\Windows\system32', 'C:\Windows', 'C:\Windows\System32\Wbem',
         'C:\Windows\System32\WindowsPowerShell\v1.0', 'C:\Windows\System32\OpenSSH'
     )
@@ -245,7 +245,19 @@ function Tools {
         Remove-Item $init
         Remove-Item Env:\CARGO_HOME
     }
+    Sync-PortableTools $Tools
     Protect-Dir $Tools   # again: re-apply to what the installers just wrote
+}
+
+# winget's portable packages (uv, jq) keep the ACL of the file it downloaded, which only the installing
+# admin, Administrators and SYSTEM can read: the CI user gets "Permission denied" through WinGet\Links.
+# Copies in $Tools\bin take that folder's ACL instead. update.ps1 re-copies them after each upgrade.
+function Sync-PortableTools($tools) {
+    foreach ($link in Get-ChildItem 'C:\Program Files\WinGet\Links' -Filter '*.exe' -ErrorAction SilentlyContinue) {
+        if ($link.Name -notmatch '^(uv|uvx|uvw|jq)\.exe$') { continue }
+        $target = if ($link.LinkType) { @($link.Target)[0] } else { $link.FullName }
+        Copy-Item -LiteralPath $target -Destination "$tools\bin\$($link.Name)" -Force
+    }
 }
 
 function Ci-Files {

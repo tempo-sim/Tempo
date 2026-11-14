@@ -83,7 +83,8 @@ user; change the password and both must be re-registered, by re-running the boot
 C:\Users\ci\tempo-ci\           machine.env, slack-webhook, healthchecks-url, bin\, logs\, state\, path
 C:\Users\ci\actions-runner-<v>\ one runner (a Windows service) per Unreal version
 C:\ci\                          TEMPO_CI_ROOT, the build trees (short: Unreal's paths get long)
-C:\ci-tools\                    python3 (uv's) and Rust's toolchains; admin-owned, read-only to ci
+C:\ci-tools\                    python3 (uv's), Rust's toolchains, and copies of winget's uv and jq
+                                (its own copies are readable only by admins); admin-owned, read-only to ci
 C:\Program Files\TempoCI\       update.ps1, admin-owned
 C:\ProgramData\TempoCI\         update.log, update-status (read by daily.sh), bootstrap.log
 ```
