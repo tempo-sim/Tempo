@@ -358,6 +358,17 @@ function Runners {
         # boot: config.cmd's delayed auto-start, so the network is up first.
         & sc.exe failure $svc reset= 86400 actions= restart/60000/restart/60000/restart/60000 | Out-Null
         & sc.exe config $svc start= delayed-auto | Out-Null
+        # Let the CI user query (only query) this service: heartbeat.sh and daily.sh run as a batch
+        # logon, which the default service ACL does not allow even that. CC LC RC: query config, query
+        # status, read the ACL.
+        $sid = Get-CiSid
+        $sddl = ((& sc.exe sdshow $svc) -join '').Trim()
+        if ($sddl -notmatch [regex]::Escape(";;;$sid)")) {
+            $ace = "(A;;CCLCRC;;;$sid)"
+            $sddl = if ($sddl -match 'S:') { $sddl -replace 'S:', "${ace}S:" } else { "$sddl$ace" }
+            & sc.exe sdset $svc $sddl | Out-Null
+            if ($LASTEXITCODE -ne 0) { Write-Host "  ! could not let $CiUser query $svc" }
+        }
         $busy = Get-CimInstance Win32_Process -Filter "Name = 'Runner.Worker.exe'" |
             Where-Object { $_.ExecutablePath -like "$($dir.FullName)\*" }
         $state = (Get-Service $svc).Status

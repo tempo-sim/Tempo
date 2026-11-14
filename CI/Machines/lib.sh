@@ -67,18 +67,16 @@ runner_problems() {
       ;;
     MINGW*|MSYS*|CYGWIN*)
       # Every runner directory with a .service file (config.cmd --runasservice writes the service name
-      # there) must have its Runner.Listener running. The process, not the service: a scheduled task logs
-      # on as a batch user, whom Windows' default service ACL does not let query a service, while the
-      # runner's processes are the CI user's own.
-      local dir svc win found=0 listeners
-      listeners=$(powershell.exe -NoProfile -NonInteractive -Command \
-        "Get-CimInstance Win32_Process -Filter \"Name = 'Runner.Listener.exe'\" | ForEach-Object { \$_.ExecutablePath }" 2>/dev/null | tr -d '\r')
+      # there) must have its service running. The scheduled tasks log on as a batch user, whom Windows'
+      # default service ACL does not let query a service: windows/bootstrap.ps1 grants the CI user query
+      # rights on its runners' services, so "not queryable" means the bootstrap has not run since.
+      local dir svc state found=0
       for dir in "$HOME"/actions-runner*/; do
         [ -f "$dir/.service" ] || continue
         found=1
         svc=$(tr -d '\r\n' < "$dir/.service")
-        win=$(cygpath -w "${dir%/}")
-        printf '%s\n' "$listeners" | grep -qiF "$win\\bin\\Runner.Listener.exe" || echo "$svc: not running"
+        state=$(sc.exe query "$svc" 2>/dev/null | awk '/STATE/ {print $4; exit}')
+        [ "$state" = RUNNING ] || echo "$svc: ${state:-not installed, or not queryable by $(whoami)}"
       done
       [ "$found" = 1 ] || echo "no runner services in $HOME/actions-runner*"
       ;;
