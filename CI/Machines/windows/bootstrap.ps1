@@ -323,7 +323,7 @@ function Runners {
         'TEMPO_CI_MACHINE_ENV=' + ("$ciHome\tempo-ci\machine.env" -replace '\\', '/'),
         "RUSTUP_HOME=$Tools\rustup",
         'PYTHONUTF8=1'
-    ) -join "`n"
+    ) -join "`r`n"   # CRLF: the Windows runner splits .env on CRLF, so with LF it is all one PATH= line
     $found = $false
     foreach ($dir in Get-ChildItem "$ciHome\actions-runner*" -Directory -ErrorAction SilentlyContinue) {
         if (-not (Test-Path "$($dir.FullName)\.runner")) { continue }
