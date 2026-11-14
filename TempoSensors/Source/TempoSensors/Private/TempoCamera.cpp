@@ -1951,7 +1951,11 @@ void UTempoCamera::RenderCapture()
 	NewRead->StagingTexture = AcquireNextStagingTexture();
 
 	SequenceId++;
-	bRequestedSinceCapture = false;
+	{
+		// A request still waiting counts toward the next capture too, even if a decode takes it first.
+		FScopeLock RequestsLock(&RequestsMutex);
+		bRequestedSinceCapture = GetPendingRequestKinds_Locked() != 0;
+	}
 
 	if (!bSingleTileFastPath)
 	{
