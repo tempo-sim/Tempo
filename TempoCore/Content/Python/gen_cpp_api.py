@@ -812,6 +812,7 @@ class CppApiGenerator:
             "-S", str(self.source_dir),
             "-B", str(self.cmake_build_dir),
             f"-DTEMPO_GRPC_DIR={self.grpc_third_party}",
+            f"-DTEMPO_BUILD_JOBS={build_jobs()}",
             "-DCMAKE_BUILD_TYPE=Release",
         ] + cpp_compiler_args()
         # Prefer Ninja on Windows when available so we get a single-config build

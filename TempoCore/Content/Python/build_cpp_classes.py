@@ -28,7 +28,8 @@ def build(generated, api_dir, grpc_dir):
     if os.path.exists(build_dir):
         shutil.rmtree(build_dir)
     configure = ["cmake", "-S", generated, "-B", build_dir, "-DCMAKE_BUILD_TYPE=Release",
-                 "-DTEMPO_API_DIR=" + api_dir, "-DTEMPO_GRPC_DIR=" + grpc_dir] + cpp_compiler_args()
+                 "-DTEMPO_API_DIR=" + api_dir, "-DTEMPO_GRPC_DIR=" + grpc_dir,
+                 "-DTEMPO_BUILD_JOBS=" + str(build_jobs())] + cpp_compiler_args()
     if platform.system() == "Windows" and shutil.which("ninja"):
         configure += ["-G", "Ninja"]
     subprocess.run(configure, check=True)

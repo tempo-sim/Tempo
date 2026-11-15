@@ -111,28 +111,34 @@ private:
 	uint32 U5 = 0;
 };
 
+// MinSequenceId on each image request is the oldest capture that may answer it (see
+// UTempoCamera::GetMinSequenceId_Locked).
 struct FColorImageRequest
 {
 	TempoSensors::ColorImageRequest Request;
 	TResponseDelegate<TempoSensors::ColorImage> ResponseContinuation;
+	int32 MinSequenceId = 0;
 };
 
 struct FLabelImageRequest
 {
 	TempoSensors::LabelImageRequest Request;
 	TResponseDelegate<TempoSensors::LabelImage> ResponseContinuation;
+	int32 MinSequenceId = 0;
 };
 
 struct FDepthImageRequest
 {
 	TempoSensors::DepthImageRequest Request;
 	TResponseDelegate<TempoSensors::DepthImage> ResponseContinuation;
+	int32 MinSequenceId = 0;
 };
 
 struct FBoundingBoxesRequest
 {
 	TempoSensors::BoundingBoxesRequest Request;
 	TResponseDelegate<TempoSensors::BoundingBoxes> ResponseContinuation;
+	int32 MinSequenceId = 0;
 };
 
 struct FVideoRequest
@@ -564,8 +570,24 @@ protected:
 	// HasPendingMeasurementRequests.
 	enum ERequestKind : uint8 { RK_Color = 1, RK_Label = 2, RK_Depth = 4, RK_BoundingBoxes = 8 };
 	uint8 GetPendingRequestKinds_Locked() const;
-	static uint8 GetAnsweredRequestKindsMask(bool bReadHasDepth, bool bReadHasLabels);
+	static uint8 GetRequestKinds(const TArray<FColorImageRequest>& ColorRequests, const TArray<FLabelImageRequest>& LabelRequests,
+		const TArray<FDepthImageRequest>& DepthRequests, const TArray<FBoundingBoxesRequest>& BoundingBoxRequests);
 	uint8 LastAnsweredRequestKinds = 0;
+	// No image stream is answered with a capture older than it asked for. A stream's first request
+	// may only be answered by a capture taken after the request arrived. Without this rule, a read
+	// that was captured before the client asked (left in the queue, or completing between the
+	// request's arrival and the next capture) answers it, and the image predates whatever the client
+	// did just before asking, such as moving the camera. Kinds the read can't serve (labels, when it
+	// rendered none) wait for the next capture, so one client's streams split across two captures.
+	// A later request only needs a capture newer than its stream's last response. That is what lets
+	// pipelined rendering answer a request with the capture taken for the one before it (see
+	// bRequestedSinceCapture). Streams are told apart by their response delegate, which the server
+	// binds once per stream. Under RequestsMutex.
+	TMap<FDelegateHandle, int32> StreamLastSequenceIds;
+	// A stream not answered for this many captures is forgotten, and its next request counts as a
+	// first one. Closed streams leave entries behind; this is what clears them.
+	static constexpr int32 StreamForgetCaptures = 100;
+	int32 GetMinSequenceId_Locked(const FDelegateHandle& Stream) const;
 	// The world time at the game thread's latest send: the transmission time of a decode the render
 	// thread launches before the next one.
 	double LastSendTimeSeconds = 0.0;

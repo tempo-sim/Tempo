@@ -4,13 +4,26 @@
 # "${arr[@]}" of an empty array under set -u.
 
 TEMPO_CI_HOME=${TEMPO_CI_HOME:-$HOME/tempo-ci}
-# launchd starts jobs with a bare PATH. This is the same PATH the runners get (their .path file).
-export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+TEMPO_CI_OS=$(uname -s)
+case "$TEMPO_CI_OS" in
+  MINGW*|MSYS*|CYGWIN*)
+    TEMPO_CI_OS=Windows
+    # Task Scheduler starts the scripts with the system PATH. Use the runners' (written by
+    # windows/bootstrap.ps1 to $TEMPO_CI_HOME/path, in Git Bash form), so both see the same tools.
+    [ -f "$TEMPO_CI_HOME/path" ] && PATH=$(cat "$TEMPO_CI_HOME/path")
+    export PATH RUSTUP_HOME=/c/ci-tools/rustup
+    ;;
+  *)
+    # launchd starts jobs with a bare PATH. This is the same PATH the runners get (their .path file).
+    export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    ;;
+esac
 
 TEMPO_CI_MACHINE_ENV=${TEMPO_CI_MACHINE_ENV:-$TEMPO_CI_HOME/machine.env}
 # shellcheck source=/dev/null
 [ -f "$TEMPO_CI_MACHINE_ENV" ] && . "$TEMPO_CI_MACHINE_ENV"
-MACHINE_NAME=${TEMPO_CI_MACHINE_NAME:-$(hostname -s)}
+# Not `hostname -s`: Windows' hostname has no -s.
+MACHINE_NAME=${TEMPO_CI_MACHINE_NAME:-$(hostname | cut -d. -f1)}
 
 STATE_DIR=$TEMPO_CI_HOME/state
 mkdir -p "$STATE_DIR"
@@ -52,6 +65,21 @@ runner_problems() {
       done
       [ "$found" = 1 ] || echo "no runner LaunchAgents in $HOME/Library/LaunchAgents"
       ;;
+    MINGW*|MSYS*|CYGWIN*)
+      # Every runner directory with a .service file (config.cmd --runasservice writes the service name
+      # there) must have its service running. The scheduled tasks log on as a batch user, whom Windows'
+      # default service ACL does not let query a service: windows/bootstrap.ps1 grants the CI user query
+      # rights on its runners' services, so "not queryable" means the bootstrap has not run since.
+      local dir svc state found=0
+      for dir in "$HOME"/actions-runner*/; do
+        [ -f "$dir/.service" ] || continue
+        found=1
+        svc=$(tr -d '\r\n' < "$dir/.service")
+        state=$(sc.exe query "$svc" 2>/dev/null | awk '/STATE/ {print $4; exit}')
+        [ "$state" = RUNNING ] || echo "$svc: ${state:-not installed, or not queryable by $(whoami)}"
+      done
+      [ "$found" = 1 ] || echo "no runner services in $HOME/actions-runner*"
+      ;;
     *)
       echo "runner_problems: $(uname -s) is not supported yet"
       ;;
@@ -59,4 +87,10 @@ runner_problems() {
 }
 
 # runners_idle: true when no runner on this machine is running a job.
-runners_idle() { ! pgrep -f 'Runner.Worker' > /dev/null; }
+runners_idle() {
+  if [ "$TEMPO_CI_OS" = Windows ]; then
+    ! tasklist.exe //FI "IMAGENAME eq Runner.Worker.exe" //NH 2>/dev/null | grep -qi 'Runner.Worker'
+  else
+    ! pgrep -f 'Runner.Worker' > /dev/null
+  fi
+}
