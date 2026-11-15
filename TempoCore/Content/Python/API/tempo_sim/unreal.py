@@ -487,7 +487,7 @@ class _Package:
         self._hashes = None
 
     def _load(self, *parts):
-        with open(os.path.join(self.directory, *parts)) as f:
+        with open(os.path.join(self.directory, *parts), encoding="utf-8") as f:
             return json.load(f)
 
     @property
@@ -539,7 +539,7 @@ class _Package:
             for candidate in candidates:
                 path = os.path.join(self.directory, candidate)
                 if os.path.exists(path):
-                    with open(path) as f:
+                    with open(path, encoding="utf-8") as f:
                         self._modules[module] = json.load(f)
                     break
             else:
@@ -953,6 +953,14 @@ def _read_struct(source):
 def _to_value(variant, value):
     """Build a Value carrying `value` in `variant`."""
     message = _value_type()()
+
+    # A message-typed variant is only selected in the oneof once something touches it. An empty
+    # array, set or struct touches nothing, so without this it would travel as a Value with no
+    # variant at all -- "Value has no value set" -- and `actor.Tags = []` could not clear anything.
+    if variant in ("struct_value", "struct_array_value", "native_transform_value") \
+            or variant in _COMPONENT_VARIANTS \
+            or variant.endswith("_array_value") or variant.endswith("_set_value"):
+        getattr(message, variant).SetInParent()
 
     if variant == "struct_value":
         _fill_struct(message.struct_value, value)

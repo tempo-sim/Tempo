@@ -6,6 +6,8 @@
 
 #include "TempoCoreUtils.generated.h"
 
+class UPrimitiveComponent;
+
 UCLASS()
 class TEMPOCORE_API UTempoCoreUtils : public UBlueprintFunctionLibrary
 {
@@ -34,10 +36,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category="TempoCoreUtils",  meta=(WorldContext="WorldContextObject"))
 	static bool IsGameWorld(const UObject* WorldContextObject);
 
-	// Calculates a tight bounding box of all the Actor's components,
-	// axis-aligned with the Actor's local coordinates.
+	// Calculates a tight bounding box of the Actor's mesh components, axis-aligned with the Actor's local
+	// coordinates (unscaled). Only the meshes that are drawn count (see IsComponentDrawn) unless
+	// bIncludeHiddenComponents. Skeletal meshes are bounded by their posed physics bodies, other meshes by
+	// their own geometry; an empty mesh component counts for nothing. An actor with no mesh to bound gets
+	// an invalid (empty) box.
 	UFUNCTION(BlueprintCallable, Category="TempoCoreUtils")
 	static FBox GetActorLocalBounds(const AActor* Actor, bool bIncludeHiddenComponents);
+
+	// Whether a component is drawn in the game's view: visible, not hidden in game, and rendered in the
+	// main pass (not only into custom depth, say).
+	static bool IsComponentDrawn(const UPrimitiveComponent* PrimitiveComponent);
 
 	// Returns a stable, round-trippable name for an actor, suitable for handing to an external
 	// client and using later to look the same actor back up (e.g. via GetActorWithName).

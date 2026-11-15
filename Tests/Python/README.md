@@ -15,11 +15,12 @@ Each marker is also a CI fan-out group — see `.github/workflows/test_packaged.
 | `core` | yes | TempoCore time control (level name, sim time, fixed-step determinism) |
 | `world` | yes | TempoWorld spawn/query/move/destroy + meters/right-handed coordinate round trips, and the reflected API (`tempo_sim.world` handles, property reads and writes, batching, `check_schema`) through the project's generated classes |
 | `movement` | yes | TempoMovement commandable-pawn listing + velocity command moves a pawn (skips if the map has no commandable pawns) |
-| `sensors` | yes + **GPU** | TempoSensors data APIs (stream a camera frame). Needs `TEMPO_SIM_RENDER=1` and a GPU; **excluded from the default CI matrix.** |
+| `sensors` | yes + **GPU** | TempoSensors data APIs: a camera frame, and the readback and delivery path end to end (frames match their headers, no capture dropped or out of order while a client steps, lidar sweeps whole, streams opened late, cancelled and torn down with the level). Needs `TEMPO_SIM_RENDER=1` and a GPU; **in CI it runs only in the native job, on machines that have one.** |
 
 > The `sensors` group renders, so it only runs when explicitly selected (`-m sensors`) with
-> `TEMPO_SIM_RENDER=1` on a GPU-capable machine. To turn it on in CI, add `sensors` to the matrix
-> in `tempo_build_and_package.yml` with a GPU `runner` and `render: true`.
+> `TEMPO_SIM_RENDER=1` on a GPU-capable machine. In CI that is the native job's `python-sensors`
+> entry in `tempo_build_and_package.yml`; the Linux fan-out jobs run on GPU-less runners and would
+> need a GPU `runner` and `render: true` to run it too.
 
 > The `codegen` group tests the working tree, not a shipped client. **Run it through
 > `Scripts/TestPythonAPI.sh codegen`, never `pytest` directly:** the runner reinstalls the in-tree

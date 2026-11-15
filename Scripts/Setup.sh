@@ -127,20 +127,23 @@ bash "$SYNC_DEPS" "${EXTRA_ARGS[@]}"
 
 # TempoROS is a separate repository, added to the project alongside Tempo rather than inside it, so
 # a project only has one if it asked for ROS. If this one does, set it up as well: it manages its
-# own third party dependencies and Unreal builds it like any other project plugin. Pass the same
-# arguments on: without them, `Setup.sh -force` would stop being forced at the plugin boundary, and
-# a plugin whose dependencies need updating drops back to an interactive prompt - which is exactly
-# what the caller used -force to avoid.
+# own third party dependencies and Unreal builds it like any other project plugin.
 TEMPOROS_DIR=$("$SCRIPT_DIR"/FindTempoROS.sh 2>/dev/null) || TEMPOROS_DIR=""
 
 if [ -n "$TEMPOROS_DIR" ] && [ -f "$TEMPOROS_DIR/Setup.sh" ]; then
-  echo -e "\nSetting up TempoROS\n"
-  if [ "$SKIP_HOOKS" -eq 1 ] && [ -f "$TEMPOROS_DIR/Scripts/SyncDeps.sh" ]; then
-    # TempoROS's Setup.sh is its git hook installation plus its SyncDeps.sh, and it needs a git
-    # context for the former. -skip-hooks runs where there may be none (CI containers, chiefly),
-    # so go straight to the part that is wanted.
-    bash "$TEMPOROS_DIR/Scripts/SyncDeps.sh" "${EXTRA_ARGS[@]}"
+  if [ -f "$TEMPOROS_DIR/Scripts/SyncDeps.sh" ]; then
+    # SyncDeps.sh above has already synced TempoROS's dependencies, with the same arguments. What
+    # is left of TempoROS's Setup.sh is its git hooks, and its SyncDeps.sh again, which finds them
+    # in place - but only without -force, which downloads unconditionally. -skip-hooks runs where
+    # there may be no git context (CI containers, chiefly), so it has nothing left to do.
+    if [ "$SKIP_HOOKS" -ne 1 ]; then
+      echo -e "\nSetting up TempoROS\n"
+      bash "$TEMPOROS_DIR/Setup.sh"
+    fi
   else
+    # A TempoROS whose dependencies SyncDeps.sh cannot reach: its Setup.sh is what syncs them. Pass
+    # the same arguments on, or `Setup.sh -force` would drop back to an interactive prompt there.
+    echo -e "\nSetting up TempoROS\n"
     bash "$TEMPOROS_DIR/Setup.sh" "${EXTRA_ARGS[@]}"
   fi
 elif [ -z "$TEMPOROS_DIR" ]; then

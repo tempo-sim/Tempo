@@ -2,29 +2,29 @@
   "5.8": {
     "artifact": "gRPC",
     "release": {
-      "Linux": "v0.18",
-      "Mac": "v0.18",
-      "Windows": "v0.18"
+      "Linux": "v0.21",
+      "Mac": "v0.21",
+      "Windows": "v0.21"
     },
     "md5_hashes": {
       "Linux": "dd9f63e829deb1e12e5df032f96436db",
       "Mac": "1c30b60696cc51b801864ad2628f0f69",
-      "Windows": "cbc2ecde878f5055c903f25dcf4948b3",
-      "Windows+Linux": "5b3ab4eaf71be142f983f1d9efe03f4a"
+      "Windows": "1a1ef3a5cd20400434daf0364161cb3b",
+      "Windows+Linux": "e601f3ea80d27b7eb7c00a5086ed48aa"
     }
   },
   "5.7": {
     "artifact": "gRPC",
     "release": {
-      "Linux": "v0.18",
-      "Mac": "v0.18",
-      "Windows": "v0.18"
+      "Linux": "v0.21",
+      "Mac": "v0.21",
+      "Windows": "v0.21"
     },
     "md5_hashes": {
       "Linux": "dd9f63e829deb1e12e5df032f96436db",
       "Mac": "1c30b60696cc51b801864ad2628f0f69",
-      "Windows": "cbc2ecde878f5055c903f25dcf4948b3",
-      "Windows+Linux": "5b3ab4eaf71be142f983f1d9efe03f4a"
+      "Windows": "1a1ef3a5cd20400434daf0364161cb3b",
+      "Windows+Linux": "e601f3ea80d27b7eb7c00a5086ed48aa"
     }
   }
 }

@@ -619,4 +619,14 @@ bool GetRenderedViewSceneTextures(const FSceneView& View, FRDGTextureRef& OutVel
 	return OutVelocity != nullptr && OutSceneDepth != nullptr;
 }
 
+void SkipCustomDepthPass(FSceneView& View)
+{
+	check(IsInRenderingThread());
+
+	// Visibility sets this from the relevance of the primitives the view saw (SceneVisibility.cpp);
+	// the custom depth pass renders only the views that have it (CustomDepthRendering.cpp). See
+	// GetRenderedViewSceneTextures for why the downcast holds.
+	static_cast<FViewInfo&>(View).bHasCustomDepthPrimitives = false;
+}
+
 } // namespace TempoMultiViewCapture

@@ -304,7 +304,7 @@ def main(argv):
         return 1
 
     reported["classes"] = sorted(reported["classes"])
-    with open(out_path, "w") as f:
+    with open(out_path, "w", encoding="utf-8") as f:
         json.dump(reported, f, indent=1)
         f.write("\n")
     print("  the packaged build reports {} classes".format(len(reported["classes"])))

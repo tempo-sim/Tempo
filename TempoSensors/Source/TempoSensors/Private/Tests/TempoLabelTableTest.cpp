@@ -1,6 +1,7 @@
 // Copyright Tempo Simulation, LLC. All Rights Reserved
 
 #include "TempoLabelTypes.h"
+#include "TempoSensorsSettings.h"
 #include "TempoSensorsUtils.h"
 
 #include "Engine/DataTable.h"
@@ -141,6 +142,18 @@ bool FTempoLabelTableValidationTest::RunTest(const FString& Parameters)
 			{ "Name": "Vehicle", "Label": 255 }
 		])")).Num() > 0);
 
+	// The boundary: 251 is the last label the camera's alpha packing can hold (TempoSensorsConstants.h).
+	TestEqual(TEXT("The largest encodable label ID is not a problem"),
+		ValidateJson(TEXT("Label 251"), TEXT(R"([
+			{ "Name": "NoLabel", "Label": 0 },
+			{ "Name": "Vehicle", "Label": 251 }
+		])")).Num(), 0);
+	TestTrue(TEXT("One past the largest encodable label ID is a problem"),
+		ValidateJson(TEXT("Label 252"), TEXT(R"([
+			{ "Name": "NoLabel", "Label": 0 },
+			{ "Name": "Vehicle", "Label": 252 }
+		])")).Num() > 0);
+
 	TestTrue(TEXT("A missing NoLabel row is a problem"),
 		ValidateJson(TEXT("No NoLabel row"), TEXT(R"([
 			{ "Name": "Vehicle", "Label": 14 }
@@ -236,6 +249,33 @@ bool FTempoLabelTableRoundTripTest::RunTest(const FString& Parameters)
 	// A second export of the same content must be byte-identical, or a client diffing two fetches
 	// would see spurious changes from TSet and row map iteration order.
 	TestEqual(TEXT("Export is stable across tables built separately"), ExportSemanticLabelTableToJson(Reimported), ExportedJson);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoLabelTableRuntimeRootingTest,
+	"Tempo.Sensors.LabelTable.RuntimeTableRooted", TempoLabelTableTestFlags)
+bool FTempoLabelTableRuntimeRootingTest::RunTest(const FString& Parameters)
+{
+	// A table loaded over the API is held only by the settings CDO, which a cooked build puts in the
+	// GC's disregard set: its references keep nothing alive, and GC verification fatals the game on
+	// one that points at an unrooted object. So the settings must root an installed runtime table
+	// and release it when it is replaced or cleared. A fresh settings object stands in for the CDO,
+	// so the test leaves the real one untouched.
+	UTempoSensorsSettings* Settings = NewObject<UTempoSensorsSettings>(GetTransientPackage(), NAME_None, RF_Transient);
+	TArray<FString> Problems;
+	UDataTable* First = ImportLabelTable(TEXT(R"([ { "Name": "NoLabel", "Label": 0 } ])"), Problems);
+	UDataTable* Second = ImportLabelTable(TEXT(R"([ { "Name": "NoLabel", "Label": 0 } ])"), Problems);
+
+	Settings->SetRuntimeSemanticLabelTable(First);
+	TestTrue(TEXT("An installed runtime table is rooted"), First->IsRooted());
+
+	Settings->SetRuntimeSemanticLabelTable(Second);
+	TestFalse(TEXT("A replaced runtime table is released"), First->IsRooted());
+	TestTrue(TEXT("Its replacement is rooted"), Second->IsRooted());
+
+	Settings->SetRuntimeSemanticLabelTable(nullptr);
+	TestFalse(TEXT("A cleared runtime table is released"), Second->IsRooted());
 
 	return true;
 }

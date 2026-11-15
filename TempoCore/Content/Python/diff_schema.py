@@ -205,9 +205,9 @@ def main(argv):
         print("usage: diff_schema.py <old_schema.json> <new_schema.json> [--json]", file=sys.stderr)
         return 2
 
-    with open(argv[1]) as f:
+    with open(argv[1], encoding="utf-8") as f:
         old = json.load(f)
-    with open(argv[2]) as f:
+    with open(argv[2], encoding="utf-8") as f:
         new = json.load(f)
 
     breaking, additions = compare(old, new)

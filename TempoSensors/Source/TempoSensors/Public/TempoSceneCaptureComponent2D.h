@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <atomic>
+
 #include "CoreMinimal.h"
 #include "TempoConversion.h"
 #include "TempoSensors.h"
@@ -10,6 +12,7 @@
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/Texture2D.h"
 #include "TempoLensModels.h"
+#include "TempoReadbackWatcher.h"
 
 #include "TempoSceneCaptureComponent2D.generated.h"
 
@@ -43,7 +46,7 @@ inline int32 ComputeRowBands(int32 MaxBands, int32 NumRows, int64 WorkPerRow, in
 	return NumBands;
 }
 
-struct FTextureRead
+struct FTextureRead : public TSharedFromThis<FTextureRead>
 {
 	enum class State : uint8
 	{
@@ -62,7 +65,8 @@ struct FTextureRead
 	virtual FName GetType() const = 0;
 
 	// Map this read's staging texture and copy it to the CPU. Only reads what
-	// CopyToStaging_RenderThread already put there.
+	// CopyToStaging_RenderThread already put there. Render thread, or the readback watcher's thread
+	// once the fence has signalled; the first of the two to get here does the read.
 	virtual void Read() = 0;
 
 	// Copy the render target into StagingTexture and write RenderFence behind the copy. The only
@@ -89,8 +93,11 @@ struct FTextureRead
 	// the rest here, so a consumer never sees the read complete with part of it missing.
 	virtual void ReadAdditional_RenderThread(FRHICommandListImmediate& RHICmdList) {}
 
-	// The GPU fence behind the staging copy; signals once that copy has completed on the GPU.
+	// The GPU fence behind the staging copy; signals once that copy has completed on the GPU. Written
+	// once, by CopyToStaging_RenderThread, and kept: the readback watcher polls it from its thread.
 	FGPUFenceRHIRef RenderFence;
+	// Set by whoever launches this read's decode, render thread or game thread, so the other does not.
+	std::atomic<bool> bDecodeLaunched{false};
 
 	// The staging texture assigned to this read for GPU->CPU copy.
 	FTextureRHIRef StagingTexture;
@@ -127,10 +134,16 @@ struct TTextureReadBase : FTextureRead
 	virtual void Read() override
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsTextureRead);
-		check(IsInRenderingThread());
+		check(IsInRenderingThread() || FTempoReadbackWatcher::IsInWatcherThread());
 		check(StagingTexture.IsValid() && StagingTexture->IsValid());
 
-		State = State::EReading;
+		// The render thread's polls and the readback watcher may both find the fence signalled; the
+		// second one to get here is done.
+		enum FTextureRead::State Expected = FTextureRead::State::EAwaitingRender;
+		if (!State.CompareExchange(Expected, FTextureRead::State::EReading))
+		{
+			return;
+		}
 
 		// Backstop against a staging texture whose per-pixel size or extent doesn't match this read.
 		// AcquireNextStagingTexture waits on the init fence to prevent the known producer of such a
@@ -159,12 +172,11 @@ struct TTextureReadBase : FTextureRead
 			return;
 		}
 
-		FRHICommandListImmediate& RHICmdList = FRHICommandListImmediate::Get();
+		// On the watcher's thread the list is only read (its GPU mask), never recorded into.
+		FRHICommandListImmediate& RHICmdList = FRHICommandListExecutor::GetImmediateCommandList();
 		CopyStagingSurface(RHICmdList, StagingTexture, RenderFence, reinterpret_cast<uint8*>(Image.GetData()), ImageSize, sizeof(PixelType));
 
 		ReadAdditional_RenderThread(RHICmdList);
-
-		RenderFence.SafeRelease();
 
 		State = State::EReadComplete;
 	}
@@ -259,6 +271,11 @@ struct FTextureReadQueue
 				continue;
 			}
 			TextureRead->Read();
+			if (bBlock)
+			{
+				// The readback watcher may have claimed it; a blocking caller is promised a completed read.
+				TextureRead->BlockUntilReadComplete();
+			}
 			bAnyRead = true;
 		}
 		return bAnyRead;
@@ -285,6 +302,16 @@ struct FTextureReadQueue
 				continue;
 			}
 			TextureRead->Read();
+		}
+
+		// A read the readback watcher claimed first completes on its thread; this returns once every
+		// read is complete, as its callers expect.
+		for (const TSharedPtr<FTextureRead>& TextureRead : PendingTextureReads)
+		{
+			if (TextureRead->State == FTextureRead::State::EReading)
+			{
+				TextureRead->BlockUntilReadComplete();
+			}
 		}
 	}
 
@@ -323,9 +350,54 @@ struct FTextureReadQueue
 			ReadLock.ReleaseReadOnlyLockAndAcquireWriteLock();
 			TSharedPtr<FTextureRead> TextureRead = MoveTemp(PendingTextureReads[0]);
 			PendingTextureReads.RemoveAt(0);
+			// The render thread may have launched this read's decode after the read lock above: then
+			// it is theirs, and the caller has nothing to decode.
+			if (TextureRead->bDecodeLaunched.exchange(true))
+			{
+				return nullptr;
+			}
 			return TextureRead;
 		}
 		return nullptr;
+	}
+
+	// Game thread. Drops the reads at the head of the queue whose decode the render thread launched.
+	void PopLaunchedReads()
+	{
+		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
+		if (PendingTextureReads.IsEmpty() || !PendingTextureReads[0]->bDecodeLaunched.load())
+		{
+			return;
+		}
+		ReadLock.ReleaseReadOnlyLockAndAcquireWriteLock();
+		while (!PendingTextureReads.IsEmpty() && PendingTextureReads[0]->bDecodeLaunched.load())
+		{
+			PendingTextureReads.RemoveAt(0);
+		}
+	}
+
+	// Render thread. The head of the queue if its data is on the CPU and nobody has launched its
+	// decode: marks it launched and returns it. Reads respond in capture order, so only the head.
+	TSharedPtr<FTextureRead> ClaimHeadForDecode()
+	{
+		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
+		if (!PendingTextureReads.IsEmpty() && PendingTextureReads[0]->State == FTextureRead::State::EReadComplete
+			&& !PendingTextureReads[0]->bDecodeLaunched.load())
+		{
+			if (!PendingTextureReads[0]->bDecodeLaunched.exchange(true))
+			{
+				return PendingTextureReads[0];
+			}
+		}
+		return nullptr;
+	}
+
+	// Render thread. Whether the head of the queue is read and still unclaimed, without claiming it.
+	bool HeadIsReadAndUnclaimed() const
+	{
+		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
+		return !PendingTextureReads.IsEmpty() && PendingTextureReads[0]->State == FTextureRead::State::EReadComplete
+			&& !PendingTextureReads[0]->bDecodeLaunched.load();
 	}
 
 	TOptional<int32> SequenceIdOfNextCompleteRead() const

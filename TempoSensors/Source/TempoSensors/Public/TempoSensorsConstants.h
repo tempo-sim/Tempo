@@ -5,28 +5,38 @@
 #include "HAL/Platform.h"
 
 // TempoCamera packs a label and a discretized depth into the 32 bits of a tile render target's
-// fp32 alpha channel, then recovers them with asuint() in the stitch aux pass. The layout keeps
-// the alpha a normal, finite float for every possible (label, depth) pair:
+// fp32 alpha channel, then recovers them with asuint() in the stitch aux pass. The alpha is the
+// post-process material's opacity output, which the engine saturate()s (GetMaterialOpacity), so
+// the packed float must lie in [0, 1); and it must be a normal float, since GPUs flush subnormals
+// to zero. The valid bit patterns are therefore 0x00800000..0x3F7FFFFF -- exactly 252 * 2^22 of
+// them -- and the layout is
 //
-//   bit 31     = depth bit 23
-//   bits 30:23 = label + 1      (exponent field, 1..254)
-//   bits 22:0  = depth bits 22:0
+//   bits = 0x00800000 + (label << 22) + depth22      (label 0..251, depth22 0..2^22-1)
 //
-// The +1 bias on the exponent field is load-bearing. The label used to occupy the raw top byte,
-// which left the exponent zero whenever the label's low 7 bits were zero (labels 0 and 128) --
-// a subnormal, which GPUs flush to zero, decoding to MaxDepth for every such pixel. Labels whose
-// low 7 bits were all ones (127 and 255) could reach exponent 255 and produce Inf/NaN instead.
-// Biasing the field into 1..254 makes both ends unreachable, at the cost of capping label IDs
-// (see GTempoCamera_Max_Label).
+// depth22 is logarithmic in depth: 0 at MaxDepth, GTempoCamera_Max_Depth_Code at MinDepth, so
+// each code step is the same fraction of the depth it encodes -- ln(MaxDepth / MinDepth) / 2^22,
+// 2.2e-6 for a 10 cm near plane and a 1 km MaxDepth (2.2 mm at 1 km, 22 um at 10 m). Inverse
+// depth, which the camera used before, puts half its codes between MinDepth and 2 * MinDepth;
+// at 22 bits it would resolve only 2.4 m at 1 km. A pixel with nothing rendered (alpha 0) decodes
+// as code 0, i.e. MaxDepth, as the sky should. The stitch pass widens depth22 to the 24-bit lane
+// (<< 2) that the merge pass and the readback carry, and the CPU decode shifts it back.
 //
-// Discretized depth is limited to 24 bits (2^24 = 16777216). Used as the MaxDiscreteDepth
-// parameter of the camera's distortion/label post-process material and as the divisor when
-// decoding depth on CPU. The lidar reuses this 24-bit limit for both pixel formats: the WithColor
-// format reserves the top 8 bits of each fp32 lane as a NaN/denormal-safety prefix, and the
-// no-color format gives up its top depth byte to carry a reflectivity estimate.
+// Two earlier layouts each broke a range of labels. The label used to occupy the raw top byte,
+// which left the exponent zero for labels 0 and 128 -- a subnormal, decoding to MaxDepth. Then it
+// rode in the exponent field biased by +1, with depth in the sign bit and mantissa: every label
+// from 126 up made the alpha >= 1, which the engine's saturate turned into exactly 1.0, so all of
+// them read back as label 126 at MaxDepth (and the sign bit, depth's top bit, was clamped to 0).
+// Semantic labels are small, so only instance labels showed it.
+//
+// Largest camera depth code (see above): 2^22 - 1, at MinDepth.
+constexpr uint32 GTempoCamera_Max_Depth_Code = (1u << 22) - 1u;
+
+// The lidar discretizes inverse depth to 24 bits (2^24 = 16777216), the divisor when decoding it
+// on CPU, for both pixel formats: the WithColor format reserves the top 8 bits of each fp32 lane
+// as a NaN/denormal-safety prefix, and the no-color format gives up its top depth byte to carry a
+// reflectivity estimate.
 constexpr float GTempoCamera_Max_Discrete_Depth = 16777216.0;
 
-// Largest label ID the camera's alpha encoding can represent. The label is stored biased by +1 in
-// the fp32 exponent field, so the usable field is 1..254 and label IDs run 0..253. A label outside
-// this range corrupts both the label and the depth of every pixel it covers.
-constexpr int32 GTempoCamera_Max_Label = 253;
+// Largest label ID the camera's alpha encoding can represent (see above): label IDs run 0..251.
+// The material clamps a larger one to this, so its pixels take the wrong label.
+constexpr int32 GTempoCamera_Max_Label = 251;

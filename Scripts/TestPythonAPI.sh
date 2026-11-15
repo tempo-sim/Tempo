@@ -65,7 +65,9 @@ if [ "$GROUP" = "codegen" ]; then
   else
     source "$VENV/Scripts/activate"
   fi
-  pip install --upgrade pip >/dev/null
+  # Through the interpreter, not the pip executable: Windows cannot replace a running pip.exe, so
+  # `pip install --upgrade pip` refuses there ("To modify pip, please run ... -m pip").
+  python -m pip install --upgrade pip >/dev/null
 
   # The repo-side tests still need the generated client: tempo_sim.world imports the proto modules,
   # and the typed runtime's tests build real WorldControl requests. Those modules -- the *_pb2 files
@@ -249,7 +251,8 @@ if [ -f "$VENV/bin/activate" ]; then
 else
   source "$VENV/Scripts/activate"
 fi
-pip install --upgrade pip >/dev/null
+# Through the interpreter: Windows cannot replace a running pip.exe (see the codegen branch above).
+python -m pip install --upgrade pip >/dev/null
 
 # Install every packaged wheel (tempo-sim plus any project-specific client). pip resolves the
 # inter-wheel dependencies when they're given together. Read into an array via -print0 so paths

@@ -105,6 +105,11 @@ namespace TempoMultiViewCapture
 	// checked here. Returns false if the view has no render scene.
 	TEMPOSENSORS_API bool GetViewTranslucentBatches(const FSceneView& View, TArray<FTempoLidarMediaTranslucentBatch>& OutBatches, const FScene*& OutScene, FSceneUniformBuffer*& OutSceneUniforms);
 
+	// Render thread, after visibility and before the base pass. Marks a view being rendered as
+	// having no custom depth primitives, so the renderer skips the view's custom depth pass and
+	// binds its cleared fallback wherever the custom depth or stencil is sampled.
+	TEMPOSENSORS_API void SkipCustomDepthPass(FSceneView& View);
+
 	// Game thread. Rescales the volumetric fog history blend for the renders issued while it lives.
 	//
 	// The engine blends each render's fog grid with the previous render's by a fixed weight

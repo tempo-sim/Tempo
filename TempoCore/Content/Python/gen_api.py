@@ -213,8 +213,15 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "        {{ field.name }}={{ field.name }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
         "    )\n" \
-        "    async for response in stub.{{ rpc.name }}(request):\n" \
-        "        yield response\n" \
+        "    # Cancel the call however this generator ends. grpc cancels an abandoned call only when it\n" \
+        "    # is freed, and a call and its response iterator form a cycle, so that waits for the garbage\n" \
+        "    # collector -- all the while the server goes on writing to a stream no one reads.\n" \
+        "    call = stub.{{ rpc.name }}(request)\n" \
+        "    try:\n" \
+        "        async for response in call:\n" \
+        "            yield response\n" \
+        "    finally:\n" \
+        "        call.cancel()\n" \
         "\n\n" \
         "def {{ name }}(\n" \
         "{% for field in request.fields %}" \
@@ -230,11 +237,14 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "        {{ field.name }}={{ field.name }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
         "    )\n" \
-        "    while True:\n" \
-        "        try:\n" \
-        "            yield run_async(async_gen.__anext__())\n" \
-        "        except StopAsyncIteration:\n" \
-        "            break\n" \
+        "    try:\n" \
+        "        while True:\n" \
+        "            try:\n" \
+        "                yield run_async(async_gen.__anext__())\n" \
+        "            except StopAsyncIteration:\n" \
+        "                break\n" \
+        "    finally:\n" \
+        "        run_async(async_gen.aclose())\n" \
         "\n\n" \
         "@awaitable({{ name }})\n" \
         "async def {{ name }}(\n" \
@@ -246,12 +256,17 @@ def generate_tempo_api(tempo_sim_dir, project_pkg_dir, project_import_name):
         "    \"\"\"{{ deprecated }}\"\"\"\n" \
         "    warnings.warn(\"{{ deprecated }}\", DeprecationWarning, stacklevel=2)\n" \
         "{% endif %}" \
-        "    async for response in _{{ name }}(\n" \
+        "    # async for doesn't close what it iterates when it is left early.\n" \
+        "    stream = _{{ name }}(\n" \
         "{% for field in request.fields %}" \
         "        {{ field.name }}={{ field.name }}{% if not loop.last %},{% endif %}\n" \
         "{% endfor %}" \
-        "    ):\n" \
-        "        yield response\n" \
+        "    )\n" \
+        "    try:\n" \
+        "        async for response in stream:\n" \
+        "            yield response\n" \
+        "    finally:\n" \
+        "        await stream.aclose()\n" \
         "\n\n" \
 
     # Template for a Batch class that wraps a oneof-of-Set*PropertyRequest into

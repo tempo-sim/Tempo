@@ -157,11 +157,19 @@ SYNC_THIRD_PARTY_DEPS () {
     
     echo -e "\nDownloading TempoThirdParty release $RELEASE_NAME for platform $TARGET_PLATFORM from $URL\n"
     
-    curl -L -J -O --output-dir "$TEMP" \
-    -H "Accept: application/octet-stream" \
-    -H "X-GitHub-Api-Version: 2022-11-28" \
-    "$URL"
-    
+    # Authenticated like the release query above: an anonymous asset request counts against the
+    # 60-an-hour limit of the caller's IP, which CI runners share, and is refused with a short JSON
+    # body. -f fails on that instead of saving it. curl drops the header on the redirect to the
+    # storage host.
+    if ! curl -fL -J -O --output-dir "$TEMP" \
+      "${AUTH_HEADER[@]}" \
+      -H "Accept: application/octet-stream" \
+      -H "X-GitHub-Api-Version: 2022-11-28" \
+      "$URL"; then
+      echo -e "\nFailed to download $URL (set GITHUB_TOKEN if GitHub is rate-limiting this machine)\n" >&2
+      exit 1
+    fi
+
     ARCHIVE="$TEMP/$ARCHIVE_NAME"
     if [ -f "$ARCHIVE" ]; then
       echo -e "\nSuccessfully downloaded archive to $ARCHIVE"

@@ -263,8 +263,42 @@ class TempoContext(object):
             # way to close it from here; drop those rather than hold one per run ever made.
             for loop in [loop for loop in connections if loop.is_closed()]:
                 del connections[loop]
+            _tolerate_closing(current_loop)
             connection = connections[current_loop] = _Connection(self._target)
         return connection
+
+
+def _tolerate_closing(loop):
+    """Have `loop` drop, rather than refuse, a gRPC completion that arrives after it has closed.
+
+    grpc.aio delivers every call's completions through one process-wide poller thread, which hands
+    each to its call's loop with call_soon_threadsafe. Where the loop cannot watch a file descriptor
+    -- the Proactor loop that is Windows' default -- the poller thread makes that call itself, and
+    nothing in grpc.aio catches what it raises. So a completion for a loop that has closed (a stream
+    an asyncio.run left open, cancelled as its channel is collected afterwards) raises "Event loop is
+    closed" in the poller thread and ends it, and from then on no call anywhere in the process
+    completes: every one waits forever on a server that has already answered.
+
+    Nothing can still be waiting on a closed loop, so the completion is dropped instead."""
+    if getattr(loop, "_tempo_tolerates_closing", False):
+        return
+    call_soon_threadsafe = loop.call_soon_threadsafe
+
+    def tolerant_call_soon_threadsafe(callback, *args, **kwargs):
+        try:
+            return call_soon_threadsafe(callback, *args, **kwargs)
+        except RuntimeError:
+            if loop.is_closed():
+                return None
+            raise
+
+    try:
+        loop.call_soon_threadsafe = tolerant_call_soon_threadsafe
+        loop._tempo_tolerates_closing = True
+    except AttributeError:
+        # A loop implemented natively (uvloop) takes no instance attributes. It watches file
+        # descriptors, so completions reach it from its own callbacks, not the poller thread.
+        pass
 
 
 # "Singleton Factory" https://stackoverflow.com/questions/12305142/issue-with-singleton-python-call-two-times-init

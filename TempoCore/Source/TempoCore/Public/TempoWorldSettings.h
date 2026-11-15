@@ -43,6 +43,17 @@ public:
 	int32 GetStepsIntoGameFrame() const { return StepsIntoGameFrame; }
 	int32 GetStepsUntilGameFrame() const;
 
+	// Steps per game frame in effect: UTempoCoreSettings::StepsPerGameFrame, or 1 if Chaos ticks
+	// asynchronously.
+	int32 GetStepsPerGameFrame() const;
+
+	// True part-way through a FixedStep game frame: during a step that is not the last of its frame, and
+	// between such steps (e.g. while RPCs are served there). The game frame will not tick until another
+	// step of it runs. False in WallClock, at a game frame boundary, and from the step that completes
+	// the frame until the frame ticks. Lets work only the game frame reads (render state, say) be done
+	// once, on the step that completes the frame, rather than on every step.
+	bool IsGameFrameIncomplete() const;
+
 	// FixedStep steps of sim time, counting those part-way through the current game frame. Sim time is
 	// this many steps of 1 / SimulatedStepsPerSecond (on the step grid, after the first step).
 	uint64 GetFixedStepsCount() const { return FixedStepsCount; }
@@ -96,6 +107,10 @@ protected:
 
 	void SetMainViewportRenderEnabled(bool bEnabled) const;
 
+	// Whether this is the persistent level's world settings, the one that speaks for the world. A level
+	// streamed in has world settings of its own, of this class too.
+	bool IsWorldsOwnSettings() const;
+
 	void TempoCoreRenderSettingsChanged() const;
 
 	UPROPERTY(EditAnywhere, Category="Lighting", DisplayName = "Default Exposure Compensation", meta = (UIMin = "-15.0", UIMax = "15.0", EditCondition = "bManualDefaultAutoExposureBias"))
@@ -123,9 +138,6 @@ private:
 	// Ends the Step in progress, if any: its completion fires with Result and its remaining steps are
 	// dropped. For a pause or unpause that takes the world over from the step.
 	void AbortStep(ETempoStepResult Result);
-
-	// UTempoCoreSettings::StepsPerGameFrame, or 1 if Chaos ticks asynchronously.
-	int32 GetStepsPerGameFrame() const;
 
 	// Warns when Chaos's own settings will integrate a game frame more coarsely than Tempo's steps,
 	// drop time, or tick on their own clock.

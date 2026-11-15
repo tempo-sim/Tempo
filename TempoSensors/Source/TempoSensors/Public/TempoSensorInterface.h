@@ -44,9 +44,15 @@ public:
 	// Respond to pending measurement requests. Returns a future, so these can be parallelized.
 	virtual TOptional<TFuture<void>> SendMeasurements() = 0;
 
+	// Game thread. Wait for the decodes this sensor launched itself (from the render thread, as a read
+	// completed) to have responded.
+	virtual void WaitForDecodes() {}
+
 	// Whether any request is waiting for a measurement. Between frames, a sensor with none isn't sent:
 	// a readback that completes then is kept until a request arrives, or until the next game frame
-	// sends it. A sensor that can't say returns true and is always sent.
+	// sends it. A sensor whose one readback answers several streams returns false until each of them
+	// has asked again, or the readback is lost to the one that hasn't. A sensor that can't say returns
+	// true and is always sent.
 	virtual bool HasPendingMeasurementRequests() const { return true; }
 
 	// Whether ExecutePendingCapture will render this frame.

@@ -360,7 +360,7 @@ struct TEMPOSENSORS_API FKannalaBrandtDistortion : FLensModel
 	// Re-aim correction: how far the optical axis sits from the tile's pixel-rect center, in
 	// parent-frame r_d (theta_d) units. Zero means the axis projects to the tile's pixel center
 	// (the original, no-re-aim contract). Non-zero means the axis is aimed at a different point
-	// inside the tile rect — typically the angular centroid of the tile's covered corners,
+	// inside the tile rect — typically the axis of the cone bounding the tile's covered rect,
 	// which lies closer to the inner-tile region for off-axis tiles. OutputToRender adds this
 	// shift internally so that tile-pixel-centered output coords still map to the right parent
 	// r_d, regardless of where the axis is.
@@ -512,16 +512,26 @@ struct TEMPOSENSORS_API FDoubleSphereDistortion : FLensModel
 	static double RadialProject(double Theta, double Xi, double Alpha);
 };
 
-// Aim for one tile of a multi-tile fisheye capture. (YawDeg, PitchDeg) is the midpoint of the
-// (yaw, pitch) extent of the tile's four covered-rect corners. AxisShift is where that aim lands
-// in the parent output plane, as a displacement from the tile's pixel-rect center in r_d units.
+// Aim for one tile of a multi-tile fisheye capture. (YawDeg, PitchDeg) is the axis of the narrowest
+// cone that holds the tile's covered-rect corners and edge midpoints, so the aim does not depend on
+// which way the image is turned about the optical axis: a top/bottom split aims as a left/right
+// split of the same lens does. FrustumHalfAngleDeg is how far a perspective frustum at that aim
+// opens to its widest side to hold those samples (90 if one lies on or behind the tile's horizon).
+// AxisShift is where the aim lands in the parent output plane, as a displacement from the tile's
+// pixel-rect center in r_d units.
 struct FFisheyeTileAim
 {
 	double YawDeg = 0.0;
 	double PitchDeg = 0.0;
+	double FrustumHalfAngleDeg = 0.0;
 	double AxisShiftXRd = 0.0;
 	double AxisShiftYRd = 0.0;
 };
+
+// The widest a fisheye tile's frustum may open to one side before its layout is promoted to
+// quadrants. The frustum's extent grows as the tangent of this angle (3.7 here, and doubling by 82
+// degrees), and with it the upsampling the tile needs to keep its center sampled.
+inline constexpr double MaxFisheyeTileFrustumHalfAngleDeg = 75.0;
 
 // Compute a tile's aim from its covered-rect edges (LDx/RDx/TDy/BDy) and pixel-rect center, all as
 // signed pixel offsets from the full image's optical center. Model is the full-image (unrotated)
@@ -545,12 +555,12 @@ struct FFisheyeTileLayout
 };
 
 // Split a SizeXY fisheye output into 1, 2 or 4 tiles: left/right when bSplitHorizontal, top/bottom
-// when bSplitVertical, quadrants when both. A layout that would leave any tile corner behind that
-// tile's camera (90 degrees or more from its aim) is promoted to quadrants. Tiles come back row-major (TL, TR, BL, BR; a top/bottom
-// split is [top, bottom]). Seams sit at the geometric center while aims are measured from the
-// optical center (PrincipalPoint, a normalized offset from the image center), so a large principal
-// point leaves the tiles' angular extents unequal. Model is the full-image (unrotated) lens model
-// and FOutput its global output focal length.
+// when bSplitVertical, quadrants when both. A layout with a tile whose frustum opens
+// MaxFisheyeTileFrustumHalfAngleDeg or wider is promoted to quadrants. Tiles come back row-major
+// (TL, TR, BL, BR; a top/bottom split is [top, bottom]). Seams sit at the geometric center while
+// aims are measured from the optical center (PrincipalPoint, a normalized offset from the image
+// center), so a large principal point leaves the tiles' angular extents unequal. Model is the
+// full-image (unrotated) lens model and FOutput its global output focal length.
 TEMPOSENSORS_API TArray<FFisheyeTileLayout> ComputeFisheyeTileLayouts(const FLensModel& Model, double FOutput,
 	const FIntPoint& SizeXY, const FVector2D& PrincipalPoint, int32 FeatherPixels,
 	bool bSplitHorizontal, bool bSplitVertical, FIntPoint& OutAtlasSize);
@@ -560,7 +570,7 @@ TEMPOSENSORS_API TArray<FFisheyeTileLayout> ComputeFisheyeTileLayouts(const FLen
 // yaw=right, positive pitch=up) and are only consulted by tile-aware (fisheye) models.
 // AxisShiftX/YRd is the re-aim correction in parent r_d units — zero means the optical axis lands
 // at the tile's pixel-rect center (default no-re-aim contract); non-zero shifts the axis toward
-// the tile's angular centroid for asymmetric (corner) tiles. Only consulted by fisheye models.
+// the tile's bounding-cone axis for off-axis tiles. Only consulted by fisheye models.
 TEMPOSENSORS_API TUniquePtr<FLensModel> CreateLensModel(
 	const FTempoLensParameters& LensParameters,
 	double YawDegrees,

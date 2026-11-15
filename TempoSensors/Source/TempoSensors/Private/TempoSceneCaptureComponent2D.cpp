@@ -57,6 +57,11 @@ void FTextureRead::CopyToStaging_RenderThread(FRHICommandListImmediate& RHICmdLi
 
 	RenderFence = RHICreateGPUFence(TEXT("TempoSensorsRenderFence"));
 	RHICmdList.WriteGPUFence(RenderFence);
+
+	if (FTempoReadbackWatcher::IsActive())
+	{
+		FTempoReadbackWatcher::Watch(AsShared());
+	}
 }
 
 void FTextureRead::EnqueueStagingCopy(TSharedPtr<FTextureRead> Read, FTextureRenderTargetResource* Source)
@@ -81,7 +86,7 @@ bool FTextureRead::StagingMatches(const FRHITexture* Staging, const FIntPoint& I
 
 void FTextureRead::CopyStagingSurface(FRHICommandListImmediate& RHICmdList, FRHITexture* Staging, FRHIGPUFence* Fence, uint8* Dst, const FIntPoint& ImageSize, int32 PixelBytes)
 {
-	check(IsInRenderingThread());
+	check(IsInRenderingThread() || FTempoReadbackWatcher::IsInWatcherThread());
 
 	// Note: SurfaceWidth may be larger than ImageSize.X due to GPU row alignment padding.
 	// We must copy row-by-row to account for this pitch difference.
@@ -95,7 +100,8 @@ void FTextureRead::CopyStagingSurface(FRHICommandListImmediate& RHICmdList, FRHI
 		// polled first, only on the copy having been dispatched: a polled fence means it has
 		// run, and ReadAllAwaitingBlocking flushes once for its whole batch. Traced separately
 		// from the copy below so a profile distinguishes time spent waiting for the GPU from
-		// time spent moving bytes — they respond to completely different fixes.
+		// time spent moving bytes — they respond to completely different fixes. On the readback
+		// watcher's thread the fence has signalled, so the map neither submits nor blocks.
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsTextureReadMap);
 
 		GDynamicRHI->RHIMapStagingSurface(Staging, Fence, OutBuffer, SurfaceWidth, SurfaceHeight, RHICmdList.GetGPUMask().ToIndex());
@@ -131,7 +137,15 @@ void FTextureRead::CopyStagingSurface(FRHICommandListImmediate& RHICmdList, FRHI
 			}
 		});
 	}
-	RHICmdList.UnmapStagingSurface(Staging);
+	if (IsInRenderingThread())
+	{
+		RHICmdList.UnmapStagingSurface(Staging);
+	}
+	else
+	{
+		// What the render-thread path does on the RHIs the watcher runs on.
+		GDynamicRHI->RHIUnmapStagingSurface(Staging, RHICmdList.GetGPUMask().ToIndex());
+	}
 }
 
 void FTextureRead::ExtractMeasurementHeader(float TransmissionTime, TempoSensors::MeasurementHeader* MeasurementHeaderOut) const

@@ -941,12 +941,12 @@ class Generator:
 
 def write_file(path, text):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write(text)
 
 
 def generate(schema_path, output_dir, docs=False, root="crate::reflected"):
-    with open(schema_path) as f:
+    with open(schema_path, encoding="utf-8") as f:
         schema = json.load(f)
 
     expected = "3"

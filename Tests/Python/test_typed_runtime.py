@@ -369,6 +369,21 @@ def test_scalar_and_container_values_round_trip(classes, variant, value):
     assert unreal._from_value(unreal._to_value(variant, value)) == value
 
 
+@pytest.mark.parametrize("variant", [
+    "string_array_value", "int_array_value", "float_array_value", "string_set_value",
+    "struct_array_value",
+])
+def test_empty_containers_still_select_their_variant(classes, variant):
+    """Clearing a property is assigning it an empty container. Proto3 only selects a message-typed
+    oneof member once something touches it, and an empty container touches nothing -- so this once
+    went out as a Value with no variant at all, which the server rejects ("Value has no value set"),
+    and `actor.Tags = []` or `lidar.BeamCalibration = []` could not be written."""
+    import tempo_sim.unreal as unreal
+    message = unreal._to_value(variant, [])
+    assert message.WhichOneof("value") == variant
+    assert unreal._from_value(message) in ([], set())
+
+
 def test_structured_values_round_trip(classes):
     import tempo_sim.unreal as unreal
 

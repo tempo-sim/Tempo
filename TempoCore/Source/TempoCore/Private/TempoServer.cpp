@@ -9,6 +9,7 @@
 #include "TempoWorldSettings.h"
 #include "TempoCore.h"
 
+#include "HAL/IConsoleManager.h"
 #include "HAL/PlatformMisc.h"
 #include "Misc/App.h"
 #include "Misc/CommandLine.h"
@@ -121,6 +122,13 @@ grpc_compression_level CompressionLevelTogRPC(EServerCompressionLevel TempoCompr
 
 namespace
 {
+	TAutoConsoleVariable<float> CVarWriteStallTimeoutMs(
+		TEXT("Tempo.WriteStallTimeoutMs"), 2000.0f,
+		TEXT("How long the server waits for a request's write or finish to complete before it stops waiting on that ")
+		TEXT("request. A write completes only once the client has room for it, so a client that never reads a stream ")
+		TEXT("again would otherwise hold the game thread forever. A stalled request is waited on again once its write ")
+		TEXT("completes."));
+
 	// sysexits.h's EX_CONFIG - the sim cannot start with the endpoint it was given. Distinct from 1
 	// so a harness can tell this apart from any other early exit.
 	constexpr uint8 ServerStartFailureExitCode = 78;
@@ -286,6 +294,13 @@ void FTempoServer::Deinitialize()
 	checkf(Server.Get(), TEXT("Server was unexpectedly null"));
 	checkf(CompletionQueue.Get(), TEXT("CompletionQueue was unexpectedly null"));
 
+	// Closed first, so no response delegate, on whatever thread, writes to a call once the server and queue
+	// are shutting down, and none holds a manager the server is about to destroy.
+	for (const auto& RequestManager : RequestManagers)
+	{
+		RequestManager.Value->Close();
+	}
+
 	static constexpr int32 MaxShutdownTimeNanoSeconds = 5e7; // 0.05s
 	static constexpr gpr_timespec MaxShutdownWaitTime {0, MaxShutdownTimeNanoSeconds, GPR_TIMESPAN};
 	Server->Shutdown(MaxShutdownWaitTime);
@@ -307,6 +322,7 @@ void FTempoServer::Deinitialize()
 	RequestManagers.Empty();
 	HeldRequestTags.Reset();
 	DeferredEvents.Reset();
+	StalledTags.Reset();
 
 	if (!BoundSocketPath.IsEmpty())
 	{
@@ -411,6 +427,11 @@ void FTempoServer::TickInternal()
 				if (TimeMode == ETimeMode::FixedStep)
 				{
 					bProcessedPendingEvents = !HasUnflushedWork();
+					if (!bProcessedPendingEvents && FPlatformTime::Seconds() - Start > GetWriteStallTimeoutSeconds())
+					{
+						MarkStalledWrites();
+						bProcessedPendingEvents = true;
+					}
 				}
 				else
 				{
@@ -491,12 +512,32 @@ bool FTempoServer::HasUnflushedWork() const
 {
 	for (const auto& Elem : RequestManagers)
 	{
-		if (Elem.Value->HasUnflushedWork())
+		if (Elem.Value->HasUnflushedWork() && !StalledTags.Contains(Elem.Key))
 		{
 			return true;
 		}
 	}
 	return false;
+}
+
+double FTempoServer::GetWriteStallTimeoutSeconds()
+{
+	return FMath::Max(0.0f, CVarWriteStallTimeoutMs.GetValueOnGameThread()) / 1000.0;
+}
+
+void FTempoServer::MarkStalledWrites()
+{
+	for (const auto& Elem : RequestManagers)
+	{
+		if (Elem.Value->HasUnflushedWork() && !StalledTags.Contains(Elem.Key))
+		{
+			StalledTags.Add(Elem.Key);
+			UE_LOG(LogTempoCore, Warning, TEXT("A %s request's response was not accepted by its client within %.0f ms. ")
+				TEXT("Not waiting on it again until it is (Tempo.WriteStallTimeoutMs). A client that stops reading a ")
+				TEXT("stream should cancel it."),
+				*Elem.Value->GetServiceName().ToString(), GetWriteStallTimeoutSeconds() * 1000.0);
+		}
+	}
 }
 
 void FTempoServer::FinishWrites()
@@ -510,8 +551,18 @@ void FTempoServer::FinishWrites()
 
 	const int32 MaxEventWaitTimeNanoSeconds = GetDefault<UTempoCoreSettings>()->GetMaxEventWaitTime();
 	const gpr_timespec MaxEventWaitTime {0, MaxEventWaitTimeNanoSeconds, GPR_TIMESPAN};
+	const double DeadlineSeconds = FPlatformTime::Seconds() + GetWriteStallTimeoutSeconds();
 	while (HasUnflushedWork())
 	{
+		// A write completes only once its client has room for it. One that never reads the stream again
+		// (it dropped the stream without cancelling it) would hold the game thread here forever, with
+		// the client's next Step among the events set aside: neither side could move.
+		if (FPlatformTime::Seconds() > DeadlineSeconds)
+		{
+			MarkStalledWrites();
+			return;
+		}
+
 		int32* Tag;
 		bool bOk;
 		switch (CompletionQueue->AsyncNext(reinterpret_cast<void**>(&Tag), &bOk, MaxEventWaitTime))
@@ -558,52 +609,72 @@ void FTempoServer::HandleDeferredEvents()
 
 void FTempoServer::HandleEventForTag(int32 Tag, bool bOk)
 {
-	if (TSharedPtr<FRequestManager>* RequestManager = RequestManagers.Find(Tag))
+	// Its write completed (or failed): it is waited on like any other request from here on.
+	StalledTags.Remove(Tag);
+
+	// A reference of its own, not a pointer into RequestManagers: the REQUESTED case adds to the map before it
+	// handles the request, and an add can reallocate the map's storage, which left the call after it reading
+	// its manager from freed memory. It also keeps the manager alive through its handler, whatever that does
+	// to the map. Like the map's, it is released on the game thread.
+	const TSharedPtr<FRequestManager>* Found = RequestManagers.Find(Tag);
+	if (!Found)
 	{
-		if (!bOk)
+		return;
+	}
+	const TSharedPtr<FRequestManager> RequestManager = *Found;
+
+	if (!bOk)
+	{
+		RemoveRequestManager(Tag);
+		return;
+	}
+
+	switch (RequestManager->GetState())
+	{
+	case FRequestManager::UNINITIALIZED: // Shouldn't happen.
 		{
-			RequestManagers.Remove(Tag);
-			return;
+			checkf(false, TEXT("Got event for uninitialized request manager."))
+			break;
 		}
-
-		switch ((*RequestManager)->GetState())
+	case FRequestManager::REQUESTED: // A request has been received.
 		{
-		case FRequestManager::UNINITIALIZED: // Shouldn't happen.
+			if (RequestManager->IsGameFrameOnly() && ShouldHoldGameFrameOnlyRequests())
 			{
-				checkf(false, TEXT("Got event for uninitialized request manager."))
+				HeldRequestTags.Add(Tag);
 				break;
 			}
-		case FRequestManager::REQUESTED: // A request has been received.
-			{
-				if ((*RequestManager)->IsGameFrameOnly() && ShouldHoldGameFrameOnlyRequests())
-				{
-					HeldRequestTags.Add(Tag);
-					break;
-				}
 
-				// Immediately prepare to receive another request.
-				const int32 NewTag = TagAllocator++;
-				RequestManagers.Emplace(NewTag, (*RequestManager)->Duplicate(NewTag))->Init(CompletionQueue.Get());
+			// Immediately prepare to receive another request.
+			const int32 NewTag = TagAllocator++;
+			RequestManagers.Emplace(NewTag, RequestManager->Duplicate(NewTag))->Init(CompletionQueue.Get());
 
-				(*RequestManager)->HandleAndRespond();
-				break;
-			}
-		case FRequestManager::HANDLING: // Shouldn't happen.
-			{
-				checkf(false, TEXT("Got event for request manager while it was handling another request."))
-				break;
-			}
-		case FRequestManager::RESPONDING: // A response has been sent, and there are more to come.
-			{
-				(*RequestManager)->HandleAndRespond();
-				break;
-			}
-		case FRequestManager::FINISHING: // The rpc has finished.
-			{
-				RequestManagers.Remove(Tag);
-				break;
-			}
+			RequestManager->HandleAndRespond();
+			break;
 		}
+	case FRequestManager::HANDLING: // Shouldn't happen.
+		{
+			checkf(false, TEXT("Got event for request manager while it was handling another request."))
+			break;
+		}
+	case FRequestManager::RESPONDING: // A response has been sent, and there are more to come.
+		{
+			RequestManager->HandleAndRespond();
+			break;
+		}
+	case FRequestManager::FINISHING: // The rpc has finished.
+		{
+			RemoveRequestManager(Tag);
+			break;
+		}
+	}
+}
+
+void FTempoServer::RemoveRequestManager(int32 Tag)
+{
+	if (const TSharedPtr<FRequestManager>* RequestManager = RequestManagers.Find(Tag))
+	{
+		(*RequestManager)->Close();
+		RequestManagers.Remove(Tag);
 	}
 }
 

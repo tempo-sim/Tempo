@@ -2,9 +2,12 @@
 
 #pragma once
 
+#include <atomic>
+
 #include "TempoSensors/Camera.pb.h"
 #include "TempoTiledSceneCaptureComponent.h"
 #include "TempoServer.h"
+#include "TempoSensorsConstants.h"
 
 #include "CoreMinimal.h"
 #include "HAL/CriticalSection.h"
@@ -16,6 +19,7 @@
 #include "TempoCamera.generated.h"
 
 class FTempoMotionVectorRewarpViewExtension;
+class FTempoCustomDepthSkipViewExtension;
 struct FLensModel;
 struct FDistortionRenderConfig;
 
@@ -49,6 +53,41 @@ private:
 	uint8 U4 = 0;
 };
 
+// Turns the camera's depth code back into a depth in cm. The code is logarithmic: 0 at MaxDepth,
+// GTempoCamera_Max_Depth_Code at MinDepth (see TempoSensorsConstants.h), and arrives in the top 22
+// bits of the 24-bit depth lane, so the depth is MaxDepth * 2^(Code * K). An exp2 per pixel made
+// the decode ten times slower than the inverse-depth one it replaced, so the code is split into
+// 11-bit halves, 2^(Hi + Lo) = 2^Hi * 2^Lo, and each half is a table lookup: two loads and a
+// multiply per pixel. The float tables are built in double and are within 1.5e-7 of the exact
+// depth for every code, a fifteenth of a code step. Build one per decode, not per row or pixel:
+// that is 4096 exp2s and 16 KB.
+struct FCameraDepthDecoder
+{
+	FCameraDepthDecoder(float MinDepth, float MaxDepth)
+	{
+		const double Log2RatioPerCode = FMath::Log2(static_cast<double>(MinDepth) / MaxDepth) / GTempoCamera_Max_Depth_Code;
+		for (uint32 Index = 0; Index < TableSize; ++Index)
+		{
+			High[Index] = static_cast<float>(MaxDepth * FMath::Exp2(static_cast<double>(Index << LowBits) * Log2RatioPerCode));
+			Low[Index] = static_cast<float>(FMath::Exp2(static_cast<double>(Index) * Log2RatioPerCode));
+		}
+	}
+
+	float operator()(uint32 DepthLane) const
+	{
+		const uint32 Code = (DepthLane >> 2) & GTempoCamera_Max_Depth_Code;
+		return High[Code >> LowBits] * Low[Code & (TableSize - 1)];
+	}
+
+private:
+	static constexpr uint32 LowBits = 11;
+	static constexpr uint32 TableSize = 1u << LowBits;
+	static_assert(GTempoCamera_Max_Depth_Code == (1u << (2 * LowBits)) - 1u, "The two tables must cover the depth code exactly");
+
+	float High[TableSize];
+	float Low[TableSize];
+};
+
 // 8-byte pixel format where first 3 bytes are color, 4th byte is label.
 // 5th-8th bytes are a uint32 representing discrete depth.
 struct FCameraPixelWithDepth
@@ -61,13 +100,8 @@ struct FCameraPixelWithDepth
 
 	uint8 Label() const { return U4; }
 
-	float Depth(float MinDepth, float MaxDepth, float MaxDiscretizedDepth) const
-	{
-	   // We discretize inverse depth to give more consistent precision vs depth.
-		const float InverseDepthFraction = static_cast<float>(U5) / MaxDiscretizedDepth;
-		const float InverseDepth = InverseDepthFraction * (1.0 / MinDepth - 1.0 / MaxDepth) + 1.0 / MaxDepth;
-		return 1.0 / InverseDepth;
-	}
+	// The 24-bit depth lane, whose top 22 bits are the camera's depth code (see FCameraDepthDecoder).
+	uint32 DepthLane() const { return U5; }
 
 private:
 	uint8 U1 = 0;
@@ -112,9 +146,10 @@ struct TTextureRead<FCameraPixelWithDepth> : TTextureReadBase<FCameraPixelWithDe
 {
 	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
 	   const FString& SensorNameIn, const FTransform& SensorTransformIn, float MinDepthIn, float MaxDepthIn,
-	   TMap<uint8, uint8>&& InstanceToSemanticMapIn)
+	   TMap<uint8, uint8>&& InstanceToSemanticMapIn, bool bLabelsRenderedIn = true)
 	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
-	   MinDepth(MinDepthIn), MaxDepth(MaxDepthIn), InstanceToSemanticMap(MoveTemp(InstanceToSemanticMapIn))
+	   MinDepth(MinDepthIn), MaxDepth(MaxDepthIn), InstanceToSemanticMap(MoveTemp(InstanceToSemanticMapIn)),
+	   bLabelsRendered(bLabelsRenderedIn)
 	{
 	}
 
@@ -130,15 +165,19 @@ struct TTextureRead<FCameraPixelWithDepth> : TTextureReadBase<FCameraPixelWithDe
 	float MinDepth;
 	float MaxDepth;
 	TMap<uint8, uint8> InstanceToSemanticMap;
+	// Whether the capture rendered its custom depth pass. Without it the label channel is zero,
+	// so label and bounding box requests stay pending for the next read that has it.
+	bool bLabelsRendered;
 };
 
 template <>
 struct TTextureRead<FCameraPixelNoDepth> : TTextureReadBase<FCameraPixelNoDepth>
 {
 	TTextureRead(const FIntPoint& ImageSizeIn, int32 SequenceIdIn, double CaptureTimeIn, const FString& OwnerNameIn,
-	   const FString& SensorNameIn, const FTransform& SensorTransformIn, TMap<uint8, uint8>&& InstanceToSemanticMapIn)
+	   const FString& SensorNameIn, const FTransform& SensorTransformIn, TMap<uint8, uint8>&& InstanceToSemanticMapIn,
+	   bool bLabelsRenderedIn = true)
 	   : TTextureReadBase(ImageSizeIn, SequenceIdIn, CaptureTimeIn, OwnerNameIn, SensorNameIn, SensorTransformIn),
-	   InstanceToSemanticMap(MoveTemp(InstanceToSemanticMapIn))
+	   InstanceToSemanticMap(MoveTemp(InstanceToSemanticMapIn)), bLabelsRendered(bLabelsRenderedIn)
 	{
 	}
 
@@ -153,6 +192,7 @@ struct TTextureRead<FCameraPixelNoDepth> : TTextureReadBase<FCameraPixelNoDepth>
 		float TransmissionTime) const;
 
 	TMap<uint8, uint8> InstanceToSemanticMap;
+	bool bLabelsRendered;
 };
 
 struct TEMPOSENSORS_API FTempoCameraIntrinsics
@@ -239,7 +279,7 @@ struct FTempoCameraTile
 
 	// Re-aim correction in parent r_d units: how far the optical axis sits from the tile's
 	// pixel-rect center. Zero for radial/single-capture tiles and for centered fisheye tiles;
-	// non-zero for fisheye corner tiles where the angular centroid lies inside the tile rect.
+	// non-zero for off-axis fisheye tiles, whose aim is the axis of the cone bounding the tile rect.
 	double AxisShiftXRd = 0.0;
 	double AxisShiftYRd = 0.0;
 
@@ -319,6 +359,7 @@ public:
 
 	// Begin ITempoSensorInterface
 	virtual TOptional<TFuture<void>> SendMeasurements() override;
+	virtual bool HasPendingMeasurementRequests() const override;
 	// End ITempoSensorInterface
 
 	bool HasPendingCameraRequests() const;
@@ -340,11 +381,20 @@ public:
 	static void AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector);
 
 protected:
-	virtual bool HasPendingRequests() const override { return HasPendingCameraRequests(); }
+	// Whether to capture this frame: a request is waiting, or one has been since the last capture. See
+	// bRequestedSinceCapture.
+	virtual bool HasPendingRequests() const override { return bRequestedSinceCapture || HasPendingCameraRequests(); }
 	virtual int32 GetNumActiveTiles() const override;
 	virtual void RenderCapture() override;
 
-	TFuture<void> DecodeAndRespond(TSharedPtr<FTextureRead> TextureRead);
+	TFuture<void> DecodeAndRespond(TSharedPtr<FTextureRead> TextureRead,
+		TArray<FColorImageRequest> ColorRequests, TArray<FLabelImageRequest> LabelRequests,
+		TArray<FDepthImageRequest> DepthRequests, TArray<FBoundingBoxesRequest> BoundingBoxRequests, double TransmissionTime);
+
+	// Render thread, after a read completed: launch its decode now, with the requests waiting for it,
+	// instead of at the game thread's next poll (which is the next step's end while a client steps).
+	void LaunchDecodeForCompletedRead_RenderThread();
+	virtual void WaitForDecodes() override;
 
 	// Begin UTempoTiledSceneCaptureComponent tile interface
 	virtual void SyncTiles() override;
@@ -471,6 +521,13 @@ protected:
 	uint64 LastFrameWithoutDepth = MAX_uint64;
 	static constexpr int32 DepthOffDebounceFrames = 30;
 
+	// The engine frame of the last label or bounding box request. A capture renders the custom
+	// depth pass the label channel is packed from only while one is pending or arrived within
+	// LabelOffDebounceFrames, the same allowance as depth for a streaming client's gap between a
+	// response and its next request.
+	uint64 LastLabelRequestFrame = 0;
+	static constexpr int32 LabelOffDebounceFrames = 30;
+
 	// The minimum depth this camera can measure (if depth is enabled). Will be set to the global near clip plane.
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Tempo")
 	float MinDepth = 10.0;
@@ -481,10 +538,42 @@ protected:
 
 	int32 NumResponded = 0;
 
+	// The image requests waiting for a frame. Added by the game thread, taken by whichever thread
+	// launches a decode (the render thread as a read completes, or the game thread's send): all under
+	// RequestsMutex. bDepthRequestedSinceSend carries a taken depth request into the next send's
+	// depth toggle.
 	TArray<FColorImageRequest> PendingColorImageRequests;
 	TArray<FLabelImageRequest> PendingLabelImageRequests;
 	TArray<FDepthImageRequest> PendingDepthImageRequests;
 	TArray<FBoundingBoxesRequest> PendingBoundingBoxesRequests;
+	mutable FCriticalSection RequestsMutex;
+	bool bDepthRequestedSinceSend = false;
+	// Whether an image request has been waiting at some point since the last capture: set as one
+	// arrives, and by a capture that leaves one waiting. Game thread only. The server takes a stream's
+	// next request early in the frame, before the capture timer, but the render thread decodes an
+	// earlier capture's read as soon as it completes, and with pipelined rendering it does so while
+	// the game thread runs the next frame. A decode launched between the server's tick and the
+	// capture timer takes the request waiting for this frame, and the stream asks again only next
+	// frame, so with nothing waiting the capture would be skipped: the stream loses that step. The
+	// read captured for it instead waits for the stream's next request.
+	bool bRequestedSinceCapture = false;
+	// The image request kinds (ERequestKind bits) with a request waiting, and those the last decode
+	// launched answered, under RequestsMutex. Every stream asks for its next image only once its last
+	// response is written, and a depth image takes longer to write than a color one, so between frames
+	// a read can complete with one of a camera's streams back and another not yet. See
+	// HasPendingMeasurementRequests.
+	enum ERequestKind : uint8 { RK_Color = 1, RK_Label = 2, RK_Depth = 4, RK_BoundingBoxes = 8 };
+	uint8 GetPendingRequestKinds_Locked() const;
+	static uint8 GetAnsweredRequestKindsMask(bool bReadHasDepth, bool bReadHasLabels);
+	uint8 LastAnsweredRequestKinds = 0;
+	// The world time at the game thread's latest send: the transmission time of a decode the render
+	// thread launches before the next one.
+	double LastSendTimeSeconds = 0.0;
+	// Decodes launched from the render thread, waited on by the game thread at the frame's send.
+	TArray<TFuture<void>> RenderThreadDecodes;
+	// Decodes of this camera in flight, from either thread: a stream's responses stay in capture
+	// order because the next decode is launched only when this is zero.
+	TSharedRef<std::atomic<int32>> DecodesInFlight = MakeShared<std::atomic<int32>>(0);
 	TArray<FVideoRequest> PendingVideoRequests;
 
 	// Guards the video state shared between the game and render threads: PendingVideoRequests (Add
@@ -656,6 +745,13 @@ protected:
 
 	// Returns the extension, creating it if the world has a scene; nullptr otherwise.
 	FTempoMotionVectorRewarpViewExtension* GetOrCreateMotionVectorRewarpExtension();
+
+	// Custom depth skip extension, created by the first capture that needs it and released in
+	// OnUnregister. Gathered only into this camera's families, and only while active.
+	TSharedPtr<FTempoCustomDepthSkipViewExtension, ESPMode::ThreadSafe> CustomDepthSkipExtension;
+
+	// Returns the extension, creating it if the world has a scene; nullptr otherwise.
+	FTempoCustomDepthSkipViewExtension* GetOrCreateCustomDepthSkipExtension();
 
 	// Retention list for distortion textures that have been replaced but may still be referenced
 	// by in-flight render commands.
