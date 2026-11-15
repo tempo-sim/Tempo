@@ -136,6 +136,11 @@ function Refresh-Path {
     $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
 }
 
+function Get-EngineRedist { Get-ChildItem 'C:\Program Files\Epic Games\UE_*\Engine\Extras\Redist\en-us\vc_redist.x64.exe' -ErrorAction SilentlyContinue }
+function Get-VcRuntimeVersion {
+    $v = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64' -ErrorAction SilentlyContinue).Version
+    if ($v) { [version]($v.TrimStart('v')) } else { [version]'0.0' }
+}
 function Get-CiSid { (New-Object Security.Principal.NTAccount($CiUser)).Translate([Security.Principal.SecurityIdentifier]).Value }
 function Get-CiHome { (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$(Get-CiSid)").ProfileImagePath }
 
@@ -225,6 +230,15 @@ function Tools {
     }
     & git.exe config --system core.longpaths true
     Refresh-Path
+
+    # The Visual C++ runtime each engine wants (5.8: 14.50 or later). An older one is logged as an error,
+    # which fails every cook. Each engine ships its own installer; the newest serves them all.
+    $redist = Get-EngineRedist | Sort-Object { [version]$_.VersionInfo.FileVersion } | Select-Object -Last 1
+    if ($redist -and (Get-VcRuntimeVersion) -lt [version]$redist.VersionInfo.FileVersion) {
+        Write-Host "Installing the Visual C++ runtime $($redist.VersionInfo.FileVersion) from $($redist.FullName)"
+        $p = Start-Process -FilePath $redist.FullName -ArgumentList '/install /quiet /norestart' -Wait -PassThru
+        if ($p.ExitCode -notin 0, 1638, 3010) { throw "vc_redist failed ($($p.ExitCode))." }
+    }
 
     Protect-Dir $Tools
     # python3 for the jobs (the Check Machine step, Tempo's scripts). uv's own, not python.org's, which has
@@ -393,6 +407,9 @@ function Checks {
         ForEach-Object { $_.VersionInfo.ProductVersion -replace '\.0$', '' })
     if (-not ($msvc | Where-Object { $_ -like '14.44.*' -and [int]($_.Split('.')[2]) -ge 35211 })) { $issues.Add("no usable MSVC 14.44 (>= 14.44.35211): have $($msvc -join ', ')") }
     if (-not (Test-Path 'C:\Program Files (x86)\Windows Kits\10\Include\10.0.22621.0')) { $issues.Add('no Windows 11 SDK 10.0.22621') }
+    foreach ($r in Get-EngineRedist) {
+        if ((Get-VcRuntimeVersion) -lt [version]$r.VersionInfo.FileVersion) { $issues.Add("Visual C++ runtime $(Get-VcRuntimeVersion) is older than $($r.FullName)'s $($r.VersionInfo.FileVersion)") }
+    }
     foreach ($i in $issues) { Write-Host "  ! $i" -ForegroundColor Yellow }
     $ok = $issues.Count -eq 0
     Write-Host "  MSVC: $($msvc -join ', ')"

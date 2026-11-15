@@ -101,8 +101,9 @@ TEMPO_TEST(a_wrapper_takes_its_requests_fields_by_name) {
 	CHECK(unset.actor.empty());
 	tempo::tempo_world::SetActorTransformArgs move{.actor = "A"};
 	CHECK(!move.transform.has_value());
-	tempo::tempo_world::ActorStatesNearArgs near{.near_actor = "A", .search_radius_m = 5};
-	CHECK(near.search_radius_m == 5 && !near.include_static);
+	// Not "near": <windows.h> defines near (and far) as nothing.
+	tempo::tempo_world::ActorStatesNearArgs nearby{.near_actor = "A", .search_radius_m = 5};
+	CHECK(nearby.search_radius_m == 5 && !nearby.include_static);
 }
 
 TEMPO_TEST(a_handle_compares_by_identity_not_class) {

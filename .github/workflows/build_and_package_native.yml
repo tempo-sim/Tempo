@@ -247,6 +247,9 @@ jobs:
           echo "UNREAL_ENGINE_PATH=$ENGINE"
           echo "CI_TREE_ROOT=$ROOT"
           echo "CI_BUILD=$ROOT/build"
+          # The same path for the actions, which take a Windows one there: upload-artifact reads Git
+          # Bash's /c/ci/... as C:\c\ci\... and then can't find a root common to its paths.
+          if [ "$RUNNER_OS" = Windows ]; then echo "CI_BUILD_NATIVE=$(cygpath -m "$ROOT/build")"; else echo "CI_BUILD_NATIVE=$ROOT/build"; fi
           echo "CI_GOLDEN=$ROOT/golden"
           echo "CI_STAMP=$STAMP"
         } >> "$GITHUB_ENV"
@@ -522,7 +525,7 @@ jobs:
         name: ${{ format('native-test-reports-{0}-{1}', runner.os, inputs.unreal_version) }}
         path: |
           ${{ runner.temp }}/test-reports
-          ${{ env.CI_BUILD }}/${{ inputs.project_root }}/Saved/TempoTestReport
+          ${{ env.CI_BUILD_NATIVE }}/${{ inputs.project_root }}/Saved/TempoTestReport
         if-no-files-found: warn
 
     # Only cache_branch builds that got all the way through packaging update the golden tree, so it
