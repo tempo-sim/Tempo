@@ -69,6 +69,14 @@ if(MSVC)
     # rebadged "protobuf_tempo" base classes don't ship typeinfo, so any TU
     # that compiles against their headers must do the same.
     target_compile_options(tempo PRIVATE /GR- /W3 /wd4146 /wd4244 /wd4251 /wd4267 /wd4800)
+    # The Visual Studio generator builds a project's files one at a time unless cl is given /MP;
+    # --parallel only runs projects side by side, and this is one project. TEMPO_BUILD_JOBS is
+    # gen_naming.build_jobs(), so the count is capped by memory as every other Tempo C++ build is.
+    if(TEMPO_BUILD_JOBS)
+        target_compile_options(tempo PRIVATE /MP${TEMPO_BUILD_JOBS})
+    else()
+        target_compile_options(tempo PRIVATE /MP)
+    endif()
 else()
     target_compile_options(tempo PRIVATE
         -fno-rtti

@@ -1057,6 +1057,14 @@ endif()
 
 if(MSVC)
     target_compile_options(tempo_reflected PRIVATE /GR- /W3 /bigobj /utf-8 /wd4146 /wd4244 /wd4251 /wd4267 /wd4800)
+    # The Visual Studio generator builds a project's files one at a time unless cl is given /MP;
+    # --parallel only runs projects side by side, and this is one project. TEMPO_BUILD_JOBS is
+    # gen_naming.build_jobs(), so the count is capped by memory as every other Tempo C++ build is.
+    if(TEMPO_BUILD_JOBS)
+        target_compile_options(tempo_reflected PRIVATE /MP${TEMPO_BUILD_JOBS})
+    else()
+        target_compile_options(tempo_reflected PRIVATE /MP)
+    endif()
 else()
     target_compile_options(tempo_reflected PRIVATE -fno-rtti -Wno-deprecated-declarations -Wno-unused-parameter)
 endif()
