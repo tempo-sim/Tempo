@@ -247,9 +247,6 @@ jobs:
           echo "UNREAL_ENGINE_PATH=$ENGINE"
           echo "CI_TREE_ROOT=$ROOT"
           echo "CI_BUILD=$ROOT/build"
-          # The same path for the actions, which take a Windows one there: upload-artifact reads Git
-          # Bash's /c/ci/... as C:\c\ci\... and then can't find a root common to its paths.
-          if [ "$RUNNER_OS" = Windows ]; then echo "CI_BUILD_NATIVE=$(cygpath -m "$ROOT/build")"; else echo "CI_BUILD_NATIVE=$ROOT/build"; fi
           echo "CI_GOLDEN=$ROOT/golden"
           echo "CI_STAMP=$STAMP"
         } >> "$GITHUB_ENV"
@@ -518,14 +515,23 @@ jobs:
           exit 1
         fi
 
+    # Into one directory, so the upload has one path. Given two on different trees, upload-artifact
+    # takes their common ancestor as its root, and on Windows that is the bare drive ("C:"), which
+    # it then resolves against the workspace and refuses every file.
+    - name: Gather Test Reports
+      if: always()
+      run: |
+        REPORT="${CI_BUILD:-}/${{ inputs.project_root }}/Saved/TempoTestReport"
+        [ -n "${CI_BUILD:-}" ] && [ -d "$REPORT" ] || exit 0
+        mkdir -p "$RUNNER_TEMP/test-reports/automation"
+        cp -R "$REPORT/." "$RUNNER_TEMP/test-reports/automation/"
+
     - name: Upload Test Reports
       if: always()
       uses: actions/upload-artifact@v7
       with:
         name: ${{ format('native-test-reports-{0}-{1}', runner.os, inputs.unreal_version) }}
-        path: |
-          ${{ runner.temp }}/test-reports
-          ${{ env.CI_BUILD_NATIVE }}/${{ inputs.project_root }}/Saved/TempoTestReport
+        path: ${{ runner.temp }}/test-reports
         if-no-files-found: warn
 
     # Only cache_branch builds that got all the way through packaging update the golden tree, so it
