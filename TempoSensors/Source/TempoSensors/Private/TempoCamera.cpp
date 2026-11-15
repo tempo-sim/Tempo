@@ -872,10 +872,51 @@ uint8 UTempoCamera::GetPendingRequestKinds_Locked() const
 		| (PendingBoundingBoxesRequests.IsEmpty() ? 0 : RK_BoundingBoxes));
 }
 
-uint8 UTempoCamera::GetAnsweredRequestKindsMask(bool bReadHasDepth, bool bReadHasLabels)
+uint8 UTempoCamera::GetRequestKinds(const TArray<FColorImageRequest>& ColorRequests, const TArray<FLabelImageRequest>& LabelRequests,
+	const TArray<FDepthImageRequest>& DepthRequests, const TArray<FBoundingBoxesRequest>& BoundingBoxRequests)
 {
-	// A read without depth, or without labels, leaves those requests pending: it answers the rest.
-	return static_cast<uint8>(RK_Color | (bReadHasDepth ? RK_Depth : 0) | (bReadHasLabels ? RK_Label | RK_BoundingBoxes : 0));
+	// The kinds a decode answers: a read without depth or labels leaves those pending, and so does a
+	// read too old for a request (see StreamLastSequenceIds).
+	return static_cast<uint8>((ColorRequests.IsEmpty() ? 0 : RK_Color)
+		| (LabelRequests.IsEmpty() ? 0 : RK_Label)
+		| (DepthRequests.IsEmpty() ? 0 : RK_Depth)
+		| (BoundingBoxRequests.IsEmpty() ? 0 : RK_BoundingBoxes));
+}
+
+int32 UTempoCamera::GetMinSequenceId_Locked(const FDelegateHandle& Stream) const
+{
+	// A stream already being answered may take any capture newer than its last one. A new stream
+	// may take only a capture that hasn't been taken yet: SequenceId is the id the next capture gets.
+	if (const int32* LastSequenceId = StreamLastSequenceIds.Find(Stream))
+	{
+		return *LastSequenceId + 1;
+	}
+	return SequenceId;
+}
+
+namespace
+{
+	// Take from Pending the requests that a read with ReadSequenceId may answer, in order, and record
+	// it as the last capture their streams were answered with. The rest stay pending, for a newer capture.
+	template <typename ImageRequestType>
+	TArray<ImageRequestType> TakeRequestsAnsweredBy(TArray<ImageRequestType>& Pending, int32 ReadSequenceId, TMap<FDelegateHandle, int32>& StreamLastSequenceIds)
+	{
+		TArray<ImageRequestType> Taken;
+		for (int32 Index = 0; Index < Pending.Num();)
+		{
+			if (Pending[Index].MinSequenceId <= ReadSequenceId)
+			{
+				StreamLastSequenceIds.Add(Pending[Index].ResponseContinuation.GetHandle(), ReadSequenceId);
+				Taken.Add(MoveTemp(Pending[Index]));
+				Pending.RemoveAt(Index, EAllowShrinking::No);
+			}
+			else
+			{
+				++Index;
+			}
+		}
+		return Taken;
+	}
 }
 
 bool UTempoCamera::HasPendingMeasurementRequests() const
@@ -934,8 +975,10 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 			const bool bReadHasLabels = bReadHasDepth
 				? static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->bLabelsRendered
 				: static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->bLabelsRendered;
-			LastAnsweredRequestKinds = static_cast<uint8>(GetPendingRequestKinds_Locked() & GetAnsweredRequestKindsMask(bReadHasDepth, bReadHasLabels));
-			TArray<FColorImageRequest> ColorRequests = MoveTemp(PendingColorImageRequests);
+			// Only requests this capture is new enough for (see StreamLastSequenceIds). A read too old
+			// for every request is still decoded, for nobody, so it doesn't hold up the newer ones.
+			const int32 ReadSequenceId = TextureRead->SequenceId;
+			TArray<FColorImageRequest> ColorRequests = TakeRequestsAnsweredBy(PendingColorImageRequests, ReadSequenceId, StreamLastSequenceIds);
 			TArray<FLabelImageRequest> LabelRequests;
 			TArray<FDepthImageRequest> DepthRequests;
 			TArray<FBoundingBoxesRequest> BoundingBoxRequests;
@@ -943,15 +986,21 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 			// first read that does (RenderCapture renders it while any is pending).
 			if (bReadHasLabels)
 			{
-				LabelRequests = MoveTemp(PendingLabelImageRequests);
-				BoundingBoxRequests = MoveTemp(PendingBoundingBoxesRequests);
+				LabelRequests = TakeRequestsAnsweredBy(PendingLabelImageRequests, ReadSequenceId, StreamLastSequenceIds);
+				BoundingBoxRequests = TakeRequestsAnsweredBy(PendingBoundingBoxesRequests, ReadSequenceId, StreamLastSequenceIds);
 			}
 			// A NoDepth read that completes while bDepthEnabled has since flipped to true (or vice
 			// versa) cannot satisfy depth requests. Key off the read's type rather than the current
 			// bDepthEnabled so stale requests aren't dropped across a toggle boundary.
 			if (bReadHasDepth)
 			{
-				DepthRequests = MoveTemp(PendingDepthImageRequests);
+				DepthRequests = TakeRequestsAnsweredBy(PendingDepthImageRequests, ReadSequenceId, StreamLastSequenceIds);
+			}
+			// A decode that answers nobody leaves the last answered kinds standing: their streams may still be
+			// writing, and the next read waits for them as before.
+			if (const uint8 AnsweredKinds = GetRequestKinds(ColorRequests, LabelRequests, DepthRequests, BoundingBoxRequests))
+			{
+				LastAnsweredRequestKinds = AnsweredKinds;
 			}
 			Future = DecodeAndRespond(MoveTemp(TextureRead), MoveTemp(ColorRequests), MoveTemp(LabelRequests),
 				MoveTemp(DepthRequests), MoveTemp(BoundingBoxRequests), GetWorld()->GetTimeSeconds());
@@ -1051,14 +1100,14 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 void UTempoCamera::RequestMeasurement(const TempoSensors::ColorImageRequest& Request, const TResponseDelegate<TempoSensors::ColorImage>& ResponseContinuation)
 {
 	FScopeLock RequestsLock(&RequestsMutex);
-	PendingColorImageRequests.Add({ Request, ResponseContinuation});
+	PendingColorImageRequests.Add({ Request, ResponseContinuation, GetMinSequenceId_Locked(ResponseContinuation.GetHandle()) });
 	bRequestedSinceCapture = true;
 }
 
 void UTempoCamera::RequestMeasurement(const TempoSensors::LabelImageRequest& Request, const TResponseDelegate<TempoSensors::LabelImage>& ResponseContinuation)
 {
 	FScopeLock RequestsLock(&RequestsMutex);
-	PendingLabelImageRequests.Add({ Request, ResponseContinuation});
+	PendingLabelImageRequests.Add({ Request, ResponseContinuation, GetMinSequenceId_Locked(ResponseContinuation.GetHandle()) });
 	LastLabelRequestFrame = GFrameCounter;
 	bRequestedSinceCapture = true;
 }
@@ -1067,7 +1116,7 @@ void UTempoCamera::RequestMeasurement(const TempoSensors::DepthImageRequest& Req
 {
 	{
 		FScopeLock RequestsLock(&RequestsMutex);
-		PendingDepthImageRequests.Add({ Request, ResponseContinuation});
+		PendingDepthImageRequests.Add({ Request, ResponseContinuation, GetMinSequenceId_Locked(ResponseContinuation.GetHandle()) });
 		bRequestedSinceCapture = true;
 	}
 
@@ -1085,7 +1134,7 @@ void UTempoCamera::RequestMeasurement(const TempoSensors::DepthImageRequest& Req
 void UTempoCamera::RequestMeasurement(const TempoSensors::BoundingBoxesRequest& Request, const TResponseDelegate<TempoSensors::BoundingBoxes>& ResponseContinuation)
 {
 	FScopeLock RequestsLock(&RequestsMutex);
-	PendingBoundingBoxesRequests.Add({ Request, ResponseContinuation});
+	PendingBoundingBoxesRequests.Add({ Request, ResponseContinuation, GetMinSequenceId_Locked(ResponseContinuation.GetHandle()) });
 	LastLabelRequestFrame = GFrameCounter;
 	bRequestedSinceCapture = true;
 }
@@ -1293,17 +1342,24 @@ void UTempoCamera::LaunchDecodeForCompletedRead_RenderThread()
 		const bool bReadHasLabels = bReadHasDepth
 			? static_cast<TTextureRead<FCameraPixelWithDepth>*>(TextureRead.Get())->bLabelsRendered
 			: static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->bLabelsRendered;
-		LastAnsweredRequestKinds = static_cast<uint8>(PendingKinds & GetAnsweredRequestKindsMask(bReadHasDepth, bReadHasLabels));
-		ColorRequests = MoveTemp(PendingColorImageRequests);
+		// Only requests this capture is new enough for, as at the game thread's send.
+		const int32 ReadSequenceId = TextureRead->SequenceId;
+		ColorRequests = TakeRequestsAnsweredBy(PendingColorImageRequests, ReadSequenceId, StreamLastSequenceIds);
 		if (bReadHasLabels)
 		{
-			LabelRequests = MoveTemp(PendingLabelImageRequests);
-			BoundingBoxRequests = MoveTemp(PendingBoundingBoxesRequests);
+			LabelRequests = TakeRequestsAnsweredBy(PendingLabelImageRequests, ReadSequenceId, StreamLastSequenceIds);
+			BoundingBoxRequests = TakeRequestsAnsweredBy(PendingBoundingBoxesRequests, ReadSequenceId, StreamLastSequenceIds);
 		}
 		if (bReadHasDepth)
 		{
-			DepthRequests = MoveTemp(PendingDepthImageRequests);
+			DepthRequests = TakeRequestsAnsweredBy(PendingDepthImageRequests, ReadSequenceId, StreamLastSequenceIds);
 			bDepthRequestedSinceSend |= !DepthRequests.IsEmpty();
+		}
+		// A decode that answers nobody leaves the last answered kinds standing: their streams may still be
+		// writing, and the next read waits for them as before.
+		if (const uint8 AnsweredKinds = GetRequestKinds(ColorRequests, LabelRequests, DepthRequests, BoundingBoxRequests))
+		{
+			LastAnsweredRequestKinds = AnsweredKinds;
 		}
 		RenderThreadDecodes.Add(DecodeAndRespond(MoveTemp(TextureRead), MoveTemp(ColorRequests), MoveTemp(LabelRequests),
 			MoveTemp(DepthRequests), MoveTemp(BoundingBoxRequests), LastSendTimeSeconds));
@@ -1967,6 +2023,14 @@ void UTempoCamera::RenderCapture()
 		// A request still waiting counts toward the next capture too, even if a decode takes it first.
 		FScopeLock RequestsLock(&RequestsMutex);
 		bRequestedSinceCapture = GetPendingRequestKinds_Locked() != 0;
+		const int32 ForgetBefore = SequenceId - StreamForgetCaptures;
+		for (auto It = StreamLastSequenceIds.CreateIterator(); It; ++It)
+		{
+			if (It.Value() < ForgetBefore)
+			{
+				It.RemoveCurrent();
+			}
+		}
 	}
 
 	if (!bSingleTileFastPath)

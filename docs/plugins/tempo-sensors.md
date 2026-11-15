@@ -433,6 +433,12 @@ continue while game / render / readback run in parallel — higher throughput at
 frames of latency. Each measurement carries the correct `capture_time_s` and `sequence_id`
 regardless, so a client always knows which simulation frame it is looking at.
 
+A camera stream never receives a frame older than it asked for. Its first image is captured after
+the stream opened, so it reflects whatever the client did before opening it, such as moving the
+camera. Each later image is newer than the one before it. Streams of different types opened
+together before a step (color, depth, labels and bounding boxes, say) are answered by that step's
+capture, as long as their requests reach the sim before it.
+
 `set_pipelined_rendering_enabled` flips the same switch at runtime. The barrier reads it fresh
 every frame, so the change lands on the next one — no sensor teardown, no reconfigure. Useful for
 running a scene fast and then dropping into lockstep for the frames you actually want to capture.
