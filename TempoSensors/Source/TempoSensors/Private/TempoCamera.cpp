@@ -3,6 +3,7 @@
 #include "TempoCamera.h"
 
 #include "TempoActorLabeler.h"
+#include "TempoCameraStreamRequests.h"
 #include "TempoCameraVideoEncoder.h"
 #include "TempoCoreUtils.h"
 #include "TempoCustomDepthSkipViewExtension.h"
@@ -885,38 +886,7 @@ uint8 UTempoCamera::GetRequestKinds(const TArray<FColorImageRequest>& ColorReque
 
 int32 UTempoCamera::GetMinSequenceId_Locked(const FDelegateHandle& Stream) const
 {
-	// A stream already being answered may take any capture newer than its last one. A new stream
-	// may take only a capture that hasn't been taken yet: SequenceId is the id the next capture gets.
-	if (const int32* LastSequenceId = StreamLastSequenceIds.Find(Stream))
-	{
-		return *LastSequenceId + 1;
-	}
-	return SequenceId;
-}
-
-namespace
-{
-	// Take from Pending the requests that a read with ReadSequenceId may answer, in order, and record
-	// it as the last capture their streams were answered with. The rest stay pending, for a newer capture.
-	template <typename ImageRequestType>
-	TArray<ImageRequestType> TakeRequestsAnsweredBy(TArray<ImageRequestType>& Pending, int32 ReadSequenceId, TMap<FDelegateHandle, int32>& StreamLastSequenceIds)
-	{
-		TArray<ImageRequestType> Taken;
-		for (int32 Index = 0; Index < Pending.Num();)
-		{
-			if (Pending[Index].MinSequenceId <= ReadSequenceId)
-			{
-				StreamLastSequenceIds.Add(Pending[Index].ResponseContinuation.GetHandle(), ReadSequenceId);
-				Taken.Add(MoveTemp(Pending[Index]));
-				Pending.RemoveAt(Index, EAllowShrinking::No);
-			}
-			else
-			{
-				++Index;
-			}
-		}
-		return Taken;
-	}
+	return TempoCameraStreamRequests::GetMinSequenceId(StreamLastSequenceIds, Stream, SequenceId);
 }
 
 bool UTempoCamera::HasPendingMeasurementRequests() const
@@ -978,7 +948,7 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 			// Only requests this capture is new enough for (see StreamLastSequenceIds). A read too old
 			// for every request is still decoded, for nobody, so it doesn't hold up the newer ones.
 			const int32 ReadSequenceId = TextureRead->SequenceId;
-			TArray<FColorImageRequest> ColorRequests = TakeRequestsAnsweredBy(PendingColorImageRequests, ReadSequenceId, StreamLastSequenceIds);
+			TArray<FColorImageRequest> ColorRequests = TempoCameraStreamRequests::TakeRequestsAnsweredBy(PendingColorImageRequests, ReadSequenceId, StreamLastSequenceIds);
 			TArray<FLabelImageRequest> LabelRequests;
 			TArray<FDepthImageRequest> DepthRequests;
 			TArray<FBoundingBoxesRequest> BoundingBoxRequests;
@@ -986,15 +956,15 @@ TOptional<TFuture<void>> UTempoCamera::SendMeasurements()
 			// first read that does (RenderCapture renders it while any is pending).
 			if (bReadHasLabels)
 			{
-				LabelRequests = TakeRequestsAnsweredBy(PendingLabelImageRequests, ReadSequenceId, StreamLastSequenceIds);
-				BoundingBoxRequests = TakeRequestsAnsweredBy(PendingBoundingBoxesRequests, ReadSequenceId, StreamLastSequenceIds);
+				LabelRequests = TempoCameraStreamRequests::TakeRequestsAnsweredBy(PendingLabelImageRequests, ReadSequenceId, StreamLastSequenceIds);
+				BoundingBoxRequests = TempoCameraStreamRequests::TakeRequestsAnsweredBy(PendingBoundingBoxesRequests, ReadSequenceId, StreamLastSequenceIds);
 			}
 			// A NoDepth read that completes while bDepthEnabled has since flipped to true (or vice
 			// versa) cannot satisfy depth requests. Key off the read's type rather than the current
 			// bDepthEnabled so stale requests aren't dropped across a toggle boundary.
 			if (bReadHasDepth)
 			{
-				DepthRequests = TakeRequestsAnsweredBy(PendingDepthImageRequests, ReadSequenceId, StreamLastSequenceIds);
+				DepthRequests = TempoCameraStreamRequests::TakeRequestsAnsweredBy(PendingDepthImageRequests, ReadSequenceId, StreamLastSequenceIds);
 			}
 			// A decode that answers nobody leaves the last answered kinds standing: their streams may still be
 			// writing, and the next read waits for them as before.
@@ -1344,15 +1314,15 @@ void UTempoCamera::LaunchDecodeForCompletedRead_RenderThread()
 			: static_cast<TTextureRead<FCameraPixelNoDepth>*>(TextureRead.Get())->bLabelsRendered;
 		// Only requests this capture is new enough for, as at the game thread's send.
 		const int32 ReadSequenceId = TextureRead->SequenceId;
-		ColorRequests = TakeRequestsAnsweredBy(PendingColorImageRequests, ReadSequenceId, StreamLastSequenceIds);
+		ColorRequests = TempoCameraStreamRequests::TakeRequestsAnsweredBy(PendingColorImageRequests, ReadSequenceId, StreamLastSequenceIds);
 		if (bReadHasLabels)
 		{
-			LabelRequests = TakeRequestsAnsweredBy(PendingLabelImageRequests, ReadSequenceId, StreamLastSequenceIds);
-			BoundingBoxRequests = TakeRequestsAnsweredBy(PendingBoundingBoxesRequests, ReadSequenceId, StreamLastSequenceIds);
+			LabelRequests = TempoCameraStreamRequests::TakeRequestsAnsweredBy(PendingLabelImageRequests, ReadSequenceId, StreamLastSequenceIds);
+			BoundingBoxRequests = TempoCameraStreamRequests::TakeRequestsAnsweredBy(PendingBoundingBoxesRequests, ReadSequenceId, StreamLastSequenceIds);
 		}
 		if (bReadHasDepth)
 		{
-			DepthRequests = TakeRequestsAnsweredBy(PendingDepthImageRequests, ReadSequenceId, StreamLastSequenceIds);
+			DepthRequests = TempoCameraStreamRequests::TakeRequestsAnsweredBy(PendingDepthImageRequests, ReadSequenceId, StreamLastSequenceIds);
 			bDepthRequestedSinceSend |= !DepthRequests.IsEmpty();
 		}
 		// A decode that answers nobody leaves the last answered kinds standing: their streams may still be
@@ -2018,10 +1988,12 @@ void UTempoCamera::RenderCapture()
 
 	NewRead->StagingTexture = AcquireNextStagingTexture();
 
-	SequenceId++;
 	{
-		// A request still waiting counts toward the next capture too, even if a decode takes it first.
+		// SequenceId under the lock: a request can arrive off the game thread (the ROS bridge asks again
+		// from a decode task), and reads it there to learn which capture is next.
 		FScopeLock RequestsLock(&RequestsMutex);
+		SequenceId++;
+		// A request still waiting counts toward the next capture too, even if a decode takes it first.
 		bRequestedSinceCapture = GetPendingRequestKinds_Locked() != 0;
 		const int32 ForgetBefore = SequenceId - StreamForgetCaptures;
 		for (auto It = StreamLastSequenceIds.CreateIterator(); It; ++It)

@@ -99,51 +99,54 @@ template <class...>
 struct False : std::bool_constant<false> { };
 
 template <typename MeasurementType>
-void UTempoSensorsROSBridgeSubsystem::RequestMeasurement(const FString& Topic, const TResponseDelegate<MeasurementType>& ResponseContinuation)
+TResponseDelegate<MeasurementType> UTempoSensorsROSBridgeSubsystem::GetResponseDelegate(const FString& Topic)
+{
+	FScopeLock Lock(&MeasurementReceivedMutex);
+	TResponseDelegate<MeasurementType>& ResponseDelegate = TopicResponseDelegates.Get<TTopicResponseDelegates<MeasurementType>>().FindOrAdd(Topic);
+	if (!ResponseDelegate.IsBound())
+	{
+		ResponseDelegate.BindUObject(this, &UTempoSensorsROSBridgeSubsystem::OnMeasurementReceived<MeasurementType>, Topic);
+	}
+	return ResponseDelegate;
+}
+
+template <typename MeasurementType>
+void UTempoSensorsROSBridgeSubsystem::RequestMeasurement(const FString& Topic)
 {
 	static_assert(False<MeasurementType>{}, "RequestMeasurement called with unsupported image type");
 }
 
 template <>
-void UTempoSensorsROSBridgeSubsystem::RequestMeasurement<TempoSensors::ColorImage>(const FString& Topic, const TResponseDelegate<TempoSensors::ColorImage>& ResponseContinuation)
+void UTempoSensorsROSBridgeSubsystem::RequestMeasurement<TempoSensors::ColorImage>(const FString& Topic)
 {
 	TempoSensors::ColorImageRequest ImageRequest;
 	const FString SensorName = SensorNameFromTopic(Topic);
 	const FString OwnerName = OwnerNameFromTopic(Topic);
 	ImageRequest.set_sensor(TCHAR_TO_UTF8(*SensorName));
 	ImageRequest.set_owner(TCHAR_TO_UTF8(*OwnerName));
-	StreamColorImages(
-		ImageRequest,
-		TResponseDelegate<TempoSensors::ColorImage>::CreateUObject(
-			this, &UTempoSensorsROSBridgeSubsystem::OnMeasurementReceived, Topic));
+	StreamColorImages(ImageRequest, GetResponseDelegate<TempoSensors::ColorImage>(Topic));
 }
 
 template <>
-void UTempoSensorsROSBridgeSubsystem::RequestMeasurement<TempoSensors::DepthImage>(const FString& Topic, const TResponseDelegate<TempoSensors::DepthImage>& ResponseContinuation)
+void UTempoSensorsROSBridgeSubsystem::RequestMeasurement<TempoSensors::DepthImage>(const FString& Topic)
 {
 	TempoSensors::DepthImageRequest ImageRequest;
 	const FString SensorName = SensorNameFromTopic(Topic);
 	const FString OwnerName = OwnerNameFromTopic(Topic);
 	ImageRequest.set_sensor(TCHAR_TO_UTF8(*SensorName));
 	ImageRequest.set_owner(TCHAR_TO_UTF8(*OwnerName));
-	StreamDepthImages(
-		ImageRequest,
-		TResponseDelegate<TempoSensors::DepthImage>::CreateUObject(
-			this, &UTempoSensorsROSBridgeSubsystem::OnMeasurementReceived, Topic));
+	StreamDepthImages(ImageRequest, GetResponseDelegate<TempoSensors::DepthImage>(Topic));
 }
 
 template <>
-void UTempoSensorsROSBridgeSubsystem::RequestMeasurement<TempoSensors::LabelImage>(const FString& Topic, const TResponseDelegate<TempoSensors::LabelImage>& ResponseContinuation)
+void UTempoSensorsROSBridgeSubsystem::RequestMeasurement<TempoSensors::LabelImage>(const FString& Topic)
 {
 	TempoSensors::LabelImageRequest ImageRequest;
 	const FString SensorName = SensorNameFromTopic(Topic);
 	const FString OwnerName = OwnerNameFromTopic(Topic);
 	ImageRequest.set_sensor(TCHAR_TO_UTF8(*SensorName));
 	ImageRequest.set_owner(TCHAR_TO_UTF8(*OwnerName));
-	StreamLabelImages(
-		ImageRequest,
-		TResponseDelegate<TempoSensors::LabelImage>::CreateUObject(
-			this, &UTempoSensorsROSBridgeSubsystem::OnMeasurementReceived, Topic));
+	StreamLabelImages(ImageRequest, GetResponseDelegate<TempoSensors::LabelImage>(Topic));
 }
 
 void UTempoSensorsROSBridgeSubsystem::UpdatePublishers()
@@ -242,24 +245,15 @@ void UTempoSensorsROSBridgeSubsystem::UpdatePublishers()
 			const FString MeasurementType = MeasurementTypeFromTopic(Topic);
 			if (MeasurementType == TEXT("color"))
 			{
-				RequestMeasurement<TempoSensors::ColorImage>(
-					Topic,
-					TResponseDelegate<TempoSensors::ColorImage>::CreateUObject(
-						this, &UTempoSensorsROSBridgeSubsystem::OnMeasurementReceived, Topic));
+				RequestMeasurement<TempoSensors::ColorImage>(Topic);
 			}
 			else if (MeasurementType == TEXT("depth"))
 			{
-				RequestMeasurement<TempoSensors::DepthImage>(
-					Topic,
-					TResponseDelegate<TempoSensors::DepthImage>::CreateUObject(
-						this, &UTempoSensorsROSBridgeSubsystem::OnMeasurementReceived, Topic));
+				RequestMeasurement<TempoSensors::DepthImage>(Topic);
 			}
 			else if (MeasurementType == TEXT("label"))
 			{
-				RequestMeasurement<TempoSensors::LabelImage>(
-					Topic,
-					TResponseDelegate<TempoSensors::LabelImage>::CreateUObject(
-						this, &UTempoSensorsROSBridgeSubsystem::OnMeasurementReceived, Topic));
+				RequestMeasurement<TempoSensors::LabelImage>(Topic);
 			}
 
 			TopicsWithPendingRequests.Add(Topic);
@@ -282,10 +276,7 @@ void UTempoSensorsROSBridgeSubsystem::OnMeasurementReceived(const MeasurementTyp
 	const TMap<FString, TUniquePtr<FTempoROSPublisher>>& Publishers = ROSNode->GetPublishers();
 	if (const TUniquePtr<FTempoROSPublisher>* Publisher = Publishers.Find(Topic); (*Publisher)->HasSubscriptions())
 	{
-		RequestMeasurement<MeasurementType>(
-			Topic,
-			TResponseDelegate<MeasurementType>::CreateUObject(
-				this, &UTempoSensorsROSBridgeSubsystem::OnMeasurementReceived, Topic));
+		RequestMeasurement<MeasurementType>(Topic);
 		TopicsWithPendingRequests.Add(Topic);
 	}
 }
