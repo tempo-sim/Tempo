@@ -195,7 +195,7 @@ reflinks_in() {
 
 runners() {
   step "8. Runners: environment, PATH and systemd service for each registered runner"
-  local dir name unit tmp found=0 changed root
+  local dir name unit tmp found=0 changed root sim_args
   root=$(ci_env TEMPO_CI_ROOT)
   tmp=$(mktemp -d)
   # Listed as the CI user: its home is 750, so a glob here would match nothing.
@@ -212,6 +212,9 @@ runners() {
     case "${name##*-}" in
       [0-9]*.[0-9]*) echo "uebp_EngineSavedFolder=/home/$CI_USER/tempo-ci/uat/${name##*-}" >> "$tmp/env" ;;
     esac
+    # The machine's own sim arguments (machine.env.example says why there might be some).
+    sim_args=$(ci_env TEMPO_CI_SIM_EXTRA_ARGS)
+    [ -z "$sim_args" ] || echo "TEMPO_SIM_EXTRA_ARGS=$sim_args" >> "$tmp/env"
     as_ci cmp -s "$dir/.env" - < "$tmp/env" || { put_ci "$tmp/env" "$dir/.env"; changed=1; }
     # config.sh writes the PATH of whoever ran it into .path. Every job gets this one instead.
     echo "/home/$CI_USER/.cargo/bin:$CI_PATH_TAIL" > "$tmp/path"
