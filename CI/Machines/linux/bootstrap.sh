@@ -112,6 +112,10 @@ ci_files() {
   step "4. /home/$CI_USER/tempo-ci: scripts and machine contract"
   local home=/home/$CI_USER/tempo-ci f
   as_ci mkdir -p "$home/bin" "$home/logs" "$home/state"
+  # The XDG directories a desktop login would have made. .NET's Environment.GetFolderPath returns "" for
+  # one that does not exist, and UnrealBuildTool then creates its Epic/ settings directory relative to
+  # its working directory - the engine, which the CI user cannot write.
+  as_ci mkdir -p "/home/$CI_USER/.local/share" "/home/$CI_USER/.config" "/home/$CI_USER/.cache"
   for f in lib.sh notify.sh heartbeat.sh daily.sh; do
     put_ci "$MACHINES/$f" "$home/bin/$f" 755
   done
