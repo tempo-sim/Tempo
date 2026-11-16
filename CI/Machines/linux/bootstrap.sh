@@ -92,12 +92,13 @@ engines() {
   local engine dir
   while IFS= read -r engine <&3; do
     [ -f "$engine/Engine/Build/Build.version" ] || { echo "  $engine: not installed yet"; continue; }
-    # Each directory above it must let the CI user through. Add only that (x, not r) to the ones that
-    # don't: a home directory is 750 on Ubuntu, and the CI user has no business listing it.
+    # The CI user must be able to list every directory above it, not just pass through: Unreal looks up a
+    # path whose case is wrong (the engine has a few) by reading each directory from / down
+    # (UnixPlatformFile.cpp's MapFileRecursively), and fails a shader compile when it cannot. A home
+    # directory is 750 on Ubuntu: put the engines somewhere shared, such as /opt/UnrealEngine.
     dir=$(dirname "$engine")
     while [ "$dir" != / ]; do
-      # cd, not test -x: Ubuntu's (Rust) coreutils test reads only the mode bits, not ACLs.
-      as_ci bash -c 'cd "$1"' _ "$dir" 2> /dev/null || { echo "  letting $CI_USER through $dir"; sudo setfacl -m "u:$CI_USER:x" "$dir"; }
+      as_ci ls "$dir" > /dev/null 2>&1 || { echo "  ! $CI_USER cannot list $dir, above $engine: move the engine somewhere shared (machine.env.example)"; break; }
       dir=$(dirname "$dir")
     done
     if [ -n "$(as_ci find "$engine" ! -readable -print -quit 2>/dev/null)" ]; then

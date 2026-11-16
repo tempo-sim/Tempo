@@ -121,9 +121,10 @@ so they start at boot without anyone logging on: no automatic login is needed.
 /var/log/tempo-ci-update.log    the weekly update's log
 ```
 
-1. Unzip Epic's Linux binary build of each engine where `ci` can read it (the bootstrap grants `ci` read
-   access, and traversal of the directories above it), and set the firmware to power on after a power
-   failure.
+1. Unzip Epic's Linux binary build of each engine to `/opt/UnrealEngine/UE_<version>`, and set the
+   firmware to power on after a power failure. Not in a home directory: `ci` must be able to list every
+   directory above an engine, because Unreal resolves a path whose case is wrong by reading each directory
+   from `/` down (the bootstrap grants `ci` read access to the engine itself, and says when it can't).
 2. From an admin account, in a Tempo checkout: `CI/Machines/linux/bootstrap.sh`. It creates `ci`, installs
    the jobs' tools, makes `/ci` (an XFS image if the disk has no reflinks) and writes
    `/home/ci/tempo-ci/machine.env` from `linux/machine.env.example`: check it, then run the bootstrap again.
