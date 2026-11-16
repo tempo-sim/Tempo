@@ -42,8 +42,8 @@ inline void fail(const char* file, int line, const std::string& what) {
 	failures().push_back(std::string(file) + ":" + std::to_string(line) + ": " + what);
 }
 
-/// Point the client where the runner put the sim, and wait for it to answer.
-inline bool connect() {
+/// Point the client where the runner put the sim.
+inline void point_at_sim() {
 	const char* socket = std::getenv("TEMPO_SERVER_SOCKET");
 	const char* port = std::getenv("TEMPO_SERVER_PORT");
 	if (socket != nullptr && *socket != '\0') {
@@ -51,9 +51,15 @@ inline bool connect() {
 	} else {
 		tempo::set_server("localhost", static_cast<uint16_t>(port ? std::atoi(port) : 10001));
 	}
+}
+
+/// Point the client where the runner put the sim, and wait for it to answer.
+inline bool connect() {
+	point_at_sim();
 	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(120);
 	while (std::chrono::steady_clock::now() < deadline) {
-		if (tempo::tempo_core::get_current_level_name()) return true;
+		// A game-world service, not a game-instance one: those answer before the startup map has loaded.
+		if (tempo::tempo_core::get_sim_time()) return true;
 		std::this_thread::sleep_for(std::chrono::milliseconds(500));
 	}
 	return false;
@@ -61,6 +67,13 @@ inline bool connect() {
 
 inline int run(int argc, char** argv) {
 	const std::string filter = argc > 1 ? argv[1] : "";
+	if (filter == "--quit") {
+		// TestCppAPI.sh's teardown: ask the sim to exit, as the Python harness does, before it is
+		// signalled. On Windows a signal is TerminateProcess, and a sim terminated mid-load once stayed
+		// stuck in its termination, holding the build tree until a reboot.
+		point_at_sim();
+		return tempo::tempo_core::quit() ? 0 : 1;
+	}
 	int ran = 0, failed = 0;
 	for (const Case& test : cases()) {
 		if (!filter.empty() && std::string(test.name).find(filter) == std::string::npos) continue;

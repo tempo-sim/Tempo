@@ -31,7 +31,8 @@ fn connect() {
 
     let deadline = Instant::now() + Duration::from_secs(120);
     loop {
-        match tempo_sim::tempo_core::get_current_level_name() {
+        // A game-world service, not a game-instance one: those answer before the startup map has loaded.
+        match tempo_sim::tempo_core::get_sim_time() {
             Ok(_) => return,
             Err(e) => {
                 if Instant::now() >= deadline {

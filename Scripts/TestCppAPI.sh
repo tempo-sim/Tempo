@@ -98,9 +98,28 @@ SIM_PID=""
 # The sim is launched under job control (set -m), which makes it the leader of a process group of
 # its own, so this signals the group: what a package calls its binary is a launcher script on
 # Linux, and signalling the launcher alone stops the script and orphans the game, which keeps the
-# port. Terminated first, killed if the group is still there after a grace period.
+# port. Asked to quit over gRPC first, as the Python harness does, because on Windows a signal is
+# TerminateProcess, and a sim terminated mid-load once stayed stuck in its termination, holding the
+# build tree until a reboot. Then terminated, and killed if the group is still there after a grace
+# period.
+sim_alive() { kill -0 -- -"$SIM_PID" 2>/dev/null || kill -0 "$SIM_PID" 2>/dev/null; }
 cleanup() {
   [ -n "$SIM_PID" ] || return 0
+  if sim_alive && [ -n "${EXECUTABLE:-}" ]; then
+    # In the background, so a wedged sim that never answers can't hold the teardown.
+    TEMPO_SERVER_PORT="$PORT" TEMPO_SERVER_SOCKET="$SOCKET" "$EXECUTABLE" --quit > /dev/null 2>&1 &
+    QUIT_PID=$!
+    QUIT_SENT=""
+    for _ in $(seq 1 30); do
+      sim_alive || break
+      if [ -z "$QUIT_SENT" ] && ! kill -0 "$QUIT_PID" 2>/dev/null; then
+        wait "$QUIT_PID" || break  # the request failed, so no exit is coming
+        QUIT_SENT=1
+      fi
+      sleep 1
+    done
+    kill "$QUIT_PID" 2>/dev/null || true
+  fi
   kill -TERM -- -"$SIM_PID" 2>/dev/null || kill -TERM "$SIM_PID" 2>/dev/null || true
   for _ in $(seq 1 30); do
     kill -0 -- -"$SIM_PID" 2>/dev/null || break

@@ -15,6 +15,11 @@ publish = false
 tempo-sim = { path = "vendor/tempo-sim" }
 project = { path = "vendor/project" }
 
+# TestRustAPI.sh's teardown, shared with the parent crate.
+[[example]]
+name = "quit"
+path = "../examples/quit.rs"
+
 # The project crate depends on tempo-sim from crates.io, as a consumer's does. These tests are of the
 # packaged tempo-sim, so it stands in for the registry's everywhere in the graph.
 [patch.crates-io]
