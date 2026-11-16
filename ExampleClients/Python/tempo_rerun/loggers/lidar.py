@@ -184,16 +184,38 @@ async def stream_lidar(sensor, mode="intensity", *, remap=None, visualize=True, 
     include_color = mode == "color"
     taps = tuple(taps)
 
-    def handle(segment):
-        for scan in accumulator.add(segment):
-            if visualize:
-                set_sim_time(conv.SIM_TIME, scan.capture_time_s)
-                rr.log(entity, conv.transform_to_rerun(scan.capture_transform))
-                rr.log(points_entity, rr.Points3D(scan.xyz, **colorize(scan, mode, remap)))
-            for tap in taps:
-                tap(scan)
+    def handle(segments):
+        for segment in segments:
+            for scan in accumulator.add(segment):
+                if visualize:
+                    set_sim_time(conv.SIM_TIME, scan.capture_time_s)
+                    rr.log(entity, conv.transform_to_rerun(scan.capture_transform))
+                    rr.log(points_entity, rr.Points3D(scan.xyz, **colorize(scan, mode, remap)))
+                for tap in taps:
+                    tap(scan)
 
+    # Whole revolutions through the queue, not segments: when the handler falls behind, the pump
+    # then drops a whole scan, rather than a segment of one, which leaves a partial scan.
     await pump(
-        ts.stream_lidar_scans(owner=sensor.owner, sensor=sensor.name, include_color=include_color),
-        handle, queue_size=8, label=f"{sensor.key}:lidar",
+        _revolutions(ts.stream_lidar_scans(owner=sensor.owner, sensor=sensor.name,
+                                           include_color=include_color)),
+        handle, queue_size=2, label=f"{sensor.key}:lidar",
     )
+
+
+async def _revolutions(segments):
+    """Group a lidar stream's segments into lists, one per revolution (sequence id). Cheap enough
+    for the event loop: it only collects messages. A revolution whose segments didn't all arrive is
+    yielded as far as it got, when the next one starts."""
+    group, sequence_id = [], None
+    async for segment in segments:
+        if group and segment.header.sequence_id != sequence_id:
+            yield group
+            group = []
+        sequence_id = segment.header.sequence_id
+        group.append(segment)
+        if len(group) >= segment.scan_count:
+            yield group
+            group = []
+    if group:
+        yield group

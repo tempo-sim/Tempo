@@ -36,6 +36,20 @@ def _viewer_on_path() -> None:
             os.environ["PATH"] = directory + os.pathsep + path
 
 
+def init(application_id: str) -> None:
+    """rr.init, sending every logged row as it is logged.
+
+    The SDK batches rows per entity and sends a batch when it reaches 1 MiB or when its 200 ms tick
+    fires. An image is past 1 MiB alone, so it goes at once; but a tick never fired while images
+    were flowing (rerun-sdk 0.26), so a camera's small 2D boxes, the 3D ground-truth boxes and the
+    poses sat in their batches until the next 1 MiB, or the end of the run: in the viewer they moved
+    a handful of times a minute while the images played. Batches of one row cost nothing that
+    matters at these rates. RERUN_FLUSH_NUM_ROWS, if set, still wins.
+    """
+    os.environ.setdefault("RERUN_FLUSH_NUM_ROWS", "1")
+    rr.init(application_id)
+
+
 def spawn(memory_limit: str = "", **kwargs) -> None:
     """rr.spawn, finding the viewer installed with this interpreter's rerun-sdk.
 

@@ -109,7 +109,7 @@ class TempoRerunClient:
         cfg = self.cfg
         blueprint = self._blueprint(self.initial_active())
 
-        rr.init(cfg.app_id)
+        _compat.init(cfg.app_id)
         _compat.start_output(live=cfg.spawn_viewer or bool(cfg.connect_grpc),
                              connect_address=cfg.connect_grpc, rrd_path=cfg.save_rrd,
                              blueprint=blueprint)

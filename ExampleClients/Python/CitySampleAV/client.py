@@ -85,7 +85,9 @@ class Session:
         # The classes that get boxes, 2D and 3D, and the class of each actor, for the 3D ones.
         self.box_ids = frozenset(c.id for c in load_box_classes(classes))
         self.actor_labels = ActorLabels()
-        self.recorder: Optional[Recorder] = Recorder(args.record) if args.record else None
+        self.recorder: Optional[Recorder] = (
+            Recorder(args.record, workers=args.record_workers, png_level=args.png_level)
+            if args.record else None)
         self.visualize = not args.no_viz
         self.stream_tasks: List[asyncio.Task] = []
         self.background: List[asyncio.Task] = []
@@ -127,7 +129,7 @@ class Session:
                                column_per_camera=True)
 
     def start_viewer(self) -> None:
-        rr.init(self.args.app_id)
+        _compat.init(self.args.app_id)
         _compat.start_output(live=self.visualize, connect_address=self.args.connect,
                              rrd_path=self.args.save_rrd, memory_limit=self.args.viewer_memory_limit)
         rr.log(conv.WORLD, conv.WORLD_VIEW_COORDINATES, static=True)
@@ -424,9 +426,10 @@ class Session:
         for key in sorted(received):
             name, kind = key.split(" ")
             if kind == "lidar":
+                # The lidar's stream is counted in whole revolutions (loggers.lidar._revolutions).
                 revs = self.revolutions.get(name, 0)
-                lines.append(f"    {name:<14} lidar   {revs / elapsed:6.2f} scans/s  ({revs} scans, "
-                             f"{received[key]} segments, {dropped[key]} dropped by the client)")
+                lines.append(f"    {name:<14} lidar   {revs / elapsed:6.2f} scans/s  ({received[key]} scans, "
+                             f"{dropped[key]} dropped by the client)")
             else:
                 lines.append(f"    {name:<14} {kind:<7} {received[key] / elapsed:6.2f} frames/s "
                              f"({received[key]} frames, {dropped[key]} dropped by the client)")

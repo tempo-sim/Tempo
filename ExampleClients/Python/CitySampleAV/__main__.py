@@ -24,7 +24,8 @@ def parse_args(argv=None):
     g.add_argument("--ip", default="localhost", help="Tempo server address (default: localhost).")
     g.add_argument("--port", type=int, default=10001, help="Tempo server port (default: 10001).")
     g.add_argument("--launch", metavar="EXE", default="",
-                   help="Start this packaged CitySample executable first, and stop it on exit.")
+                   help="Start this packaged CitySample executable first, and stop it on exit. It "
+                        "starts with -RenderOffScreen (no window) unless --viewport is given.")
 
     g = p.add_argument_group("vehicle and sensors")
     g.add_argument("--vehicle", default="random",
@@ -83,6 +84,13 @@ def parse_args(argv=None):
                         "the oldest data. Default 2GB. A viewer reached with --connect keeps its own.")
     g.add_argument("--no-record-depth", action="store_true",
                    help="With --record, don't write camera depth (written by default).")
+    g.add_argument("--png-level", type=int, choices=range(10), default=1, metavar="0-9",
+                   help="With --record, the zlib level of the color/label/instance PNGs: 0 stores "
+                        "them uncompressed (largest, and no faster to record), 1 (default) is fast "
+                        "and small.")
+    g.add_argument("--record-workers", type=int, default=0, metavar="N",
+                   help="With --record, how many processes write the files. Default: a quarter of "
+                        "the logical CPUs, from 2 to 8.")
     g.add_argument("--lidar-color", choices=LIDAR_SIGNALS, default="reflectivity",
                    help="What colors the lidar points in the viewer (default: reflectivity).")
     g.add_argument("--ground-truth-radius-m", type=float, default=80.0,
@@ -96,7 +104,7 @@ def parse_args(argv=None):
     return p.parse_args(argv)
 
 
-def launch(exe: str) -> subprocess.Popen:
+def launch(exe: str, window: bool) -> subprocess.Popen:
     path = Path(exe)
     if not path.is_file():
         sys.exit(f"--launch: no such file {exe}")
@@ -105,7 +113,10 @@ def launch(exe: str) -> subprocess.Popen:
     # game's top-level executable is a bootstrap that starts the real one as a child.
     extra: Dict[str, Any] = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
                              if sys.platform == "win32" else {"start_new_session": True})
-    return subprocess.Popen([str(path), "-DisableSandboxIntro", "-windowed", "-ResX=1280", "-ResY=720"],
+    # Without --viewport the game's window would only ever be black, so don't open one: the sensors
+    # render offscreen either way.
+    display = ["-windowed", "-ResX=1280", "-ResY=720"] if window else ["-RenderOffScreen"]
+    return subprocess.Popen([str(path), "-DisableSandboxIntro", *display],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **extra)
 
 
@@ -149,7 +160,7 @@ async def amain(args) -> None:
 
 def main(argv=None) -> None:
     args = parse_args(argv)
-    sim = launch(args.launch) if args.launch else None
+    sim = launch(args.launch, window=args.viewport) if args.launch else None
     try:
         asyncio.run(amain(args))
     except KeyboardInterrupt:
