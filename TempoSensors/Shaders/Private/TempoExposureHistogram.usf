@@ -1,0 +1,59 @@
+// Copyright Tempo Simulation, LLC. All Rights Reserved
+
+// The engine's exposure histogram (PostProcessHistogram.usf), of one texture, into a buffer the
+// camera reads back tagged with the capture it measured.
+//
+// Each texel's luminance is binned by log2 into HISTOGRAM_SIZE buckets spanning the histogram range,
+// split between the two buckets that straddle it, exactly as the engine bins it; the black bucket's
+// lower share is scaled by its influence. The engine's quad gather and per-thread histograms are an
+// optimization of the same sum. Weights are accumulated in fixed point, WEIGHT_SCALE per texel.
+
+#include "/Engine/Private/Common.ush"
+
+Texture2D<float4> InputTexture;
+uint2 InputSize;
+float3 LuminanceWeights;
+float LuminanceMin;
+float HistogramScale;
+float HistogramBias;
+float BlackBucketInfluence;
+
+RWBuffer<uint> HistogramOutput;
+
+groupshared uint SharedHistogram[HISTOGRAM_SIZE];
+
+[numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID, uint GroupIndex : SV_GroupIndex)
+{
+	if (GroupIndex < HISTOGRAM_SIZE)
+	{
+		SharedHistogram[GroupIndex] = 0;
+	}
+	GroupMemoryBarrierWithGroupSync();
+
+	if (all(DispatchThreadId.xy < InputSize))
+	{
+		const float3 Color = InputTexture.Load(int3(DispatchThreadId.xy, 0)).rgb;
+		const float Luminance = max(dot(Color, LuminanceWeights), LuminanceMin);
+		const float Position = log2(Luminance) * HistogramScale + HistogramBias;
+
+		const float Bucket = saturate(Position) * (HISTOGRAM_SIZE - 1);
+		const uint Bucket0 = min((uint)Bucket, uint(HISTOGRAM_SIZE - 1));
+		const uint Bucket1 = min(Bucket0 + 1, uint(HISTOGRAM_SIZE - 1));
+		const float Weight1 = frac(Bucket);
+		float Weight0 = 1.0f - Weight1;
+		if (Bucket0 == 0)
+		{
+			Weight0 *= BlackBucketInfluence;
+		}
+
+		InterlockedAdd(SharedHistogram[Bucket0], (uint)(Weight0 * WEIGHT_SCALE + 0.5f));
+		InterlockedAdd(SharedHistogram[Bucket1], (uint)(Weight1 * WEIGHT_SCALE + 0.5f));
+	}
+	GroupMemoryBarrierWithGroupSync();
+
+	if (GroupIndex < HISTOGRAM_SIZE && SharedHistogram[GroupIndex] != 0)
+	{
+		InterlockedAdd(HistogramOutput[GroupIndex], SharedHistogram[GroupIndex]);
+	}
+}
