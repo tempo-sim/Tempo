@@ -88,7 +88,7 @@ tools() {
 }
 
 engines() {
-  step "5. Engines: readable by $CI_USER, and nothing more"
+  step "5. Engines: readable by $CI_USER, writable only where AutomationTool insists"
   local engine dir
   while IFS= read -r engine <&3; do
     [ -f "$engine/Engine/Build/Build.version" ] || { echo "  $engine: not installed yet"; continue; }
@@ -105,6 +105,13 @@ engines() {
       echo "  letting $CI_USER read $engine"
       sudo setfacl -R -m "u:$CI_USER:rX" "$engine"
     fi
+    # The two scratch directories AutomationTool writes inside the engine, hard-coded, installed or not:
+    # Turnkey's state, and the StagedBuild_<project>.ini every package stages
+    # (CopyBuildToStagingDirectory.Automation.cs). Only these are the CI user's to write.
+    for dir in "$engine/Engine/Intermediate/Turnkey" "$engine/Engine/Intermediate/Build/BuildCookRun"; do
+      sudo mkdir -p "$dir"
+      sudo setfacl -m "u:$CI_USER:rwx,d:u:$CI_USER:rwx" "$dir"
+    done
     echo "  $engine: OK"
   done 3< <(ci_engines)
 }
