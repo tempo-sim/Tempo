@@ -257,8 +257,7 @@ This required a `PATH` entry in older versions; it no longer does. TempoROS stag
 next to the packaged executable, which is where the Windows loader finds them without help — see
 [Packaging](packaging.md#packaging-with-temporos).
 
-If it still fails, check that `CustomStageCopyHandler=TempoROSCopyHandler` is set in
-`Config/DefaultGame.ini` and that you are on TempoROS `main`, the only branch Tempo `main` is tested
+If it still fails, check that you are on TempoROS `main`, the only branch Tempo `main` is tested
 against.
 
 ## Still stuck?

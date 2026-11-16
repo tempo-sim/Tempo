@@ -86,10 +86,9 @@ code, used to be compiled into the build tool. It now lives in
 `TempoCore/Source/TempoModuleRules`, where the build tool compiles it along with the module rules
 that derive from it.
 
-TempoROS's custom stage copy handler, `TempoROS.Automation.csproj`, used to reference the engine's
-AutomationTool projects. Building it built them too, which an installed engine is not set up for,
-and two engine mods worked around that. It now references the assemblies AutomationTool runs,
-from `Engine/Binaries/DotNET/AutomationTool`, so nothing of the engine's is built.
+TempoROS used to have a custom stage copy handler, `TempoROS.Automation.csproj`, whose build relied
+on two engine mods. It is gone: TempoROS now gets the same result from its `rclcpp.Build.cs`, with no
+AutomationTool script module at all.
 
 ## See also
 

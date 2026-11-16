@@ -246,11 +246,12 @@ the `reference_build_scripts` memory.
 - **TempoROS is not vendored**, so nothing may assume a path for it. `Scripts/FindTempoROS.sh`
   (+ `.bat`) prints the plugin's directory or exits 1; `Setup.sh` and `SyncDeps.sh` go through it.
   `SyncDeps.sh` chains to TempoROS's own `SyncDeps.sh`, which is what lets CI sync everything with
-  one call. **`Package.sh` needs no TempoROS knowledge at all**: the `TempoROSCopyHandler` stage
-  copy handler lives at `TempoROS/Build/TempoROS.Automation.csproj`, and UBT's rules scan recurses
-  into `Source/` and `Build/` of any plugin directory (`Rules.cs`), so AutomationTool discovers and
-  builds it unaided — resolving the engine from the `EngineDir` MSBuild property UAT passes
-  (`EpicGames.MsBuild/CsProjBuilder.cs`), with no `UNREAL_ENGINE_PATH` needed.
+  one call. **`Package.sh` needs no TempoROS knowledge at all**, and neither does any other way of
+  packaging. TempoROS has no stage copy handler or other AutomationTool script module. A plugin's
+  automation project is only built when UAT gets `-ScriptsForProject`/`-ScriptDir`, never for
+  `-project=` alone, so one could never load unaided. Instead its `rclcpp.Build.cs` stages one name
+  per versioned library (the install name/SONAME), so staging's dereferenced copies don't
+  duplicate anything.
 - **`Build.sh`** → UBT `<Project>Editor`. **`Run.sh`** → opens the editor. **`Package.sh`** →
   `RunUAT BuildCookRun` to `Packaged/`. **`Clean.sh`** wipes artifacts.
 - **Engine path**: UE 5.7 lives at `/Users/Shared/Epic Games/UE_5.7` (path has a space —

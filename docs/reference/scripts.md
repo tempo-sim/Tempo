@@ -173,8 +173,3 @@ to your project's `Plugins` folder. The paths below are relative to wherever you
 :   Activates TempoROS's bundled minimal ROS environment, for CLI debugging with `ros2 topic list`
     and friends.
 
-`TempoROS/Build/TempoROS.Automation.csproj`
-
-:   Not a script — the `TempoROSCopyHandler` custom stage copy handler needed to package with
-    TempoROS. AutomationTool discovers and builds it automatically, because it sits in the plugin's
-    `Build` folder. Nothing needs to pre-build it or pass `-ScriptDir`.
