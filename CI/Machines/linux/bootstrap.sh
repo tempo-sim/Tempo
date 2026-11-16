@@ -200,6 +200,11 @@ runners() {
     echo "$name ($dir): $unit"
     changed=0
     printf '%s\n' LANG=en_US.UTF-8 "TEMPO_CI_MACHINE_ENV=/home/$CI_USER/tempo-ci/machine.env" > "$tmp/env"
+    # AutomationTool keeps its Saved folder (commandlet logs: the cook's) in the engine, installed or not,
+    # unless told otherwise, and the engine is read-only to the CI user. One per runner, so per engine.
+    case "${name##*-}" in
+      [0-9]*.[0-9]*) echo "uebp_EngineSavedFolder=/home/$CI_USER/tempo-ci/uat/${name##*-}" >> "$tmp/env" ;;
+    esac
     as_ci cmp -s "$dir/.env" - < "$tmp/env" || { put_ci "$tmp/env" "$dir/.env"; changed=1; }
     # config.sh writes the PATH of whoever ran it into .path. Every job gets this one instead.
     echo "/home/$CI_USER/.cargo/bin:$CI_PATH_TAIL" > "$tmp/path"
