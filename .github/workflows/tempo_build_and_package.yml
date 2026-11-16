@@ -66,6 +66,7 @@ jobs:
         machine:
           - { name: macos, runner: '["self-hosted","tempo-ci","macOS"]' }
           - { name: windows, runner: '["self-hosted","tempo-ci","Windows"]' }
+          - { name: linux, runner: '["self-hosted","tempo-ci","Linux"]' }
         unreal_version: [ "5.7", "5.8" ]
     with:
       runner: ${{ matrix.machine.runner }}

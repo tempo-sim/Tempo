@@ -13,6 +13,11 @@ case "$TEMPO_CI_OS" in
     [ -f "$TEMPO_CI_HOME/path" ] && PATH=$(cat "$TEMPO_CI_HOME/path")
     export PATH RUSTUP_HOME=/c/ci-tools/rustup
     ;;
+  Linux)
+    # systemd starts the timers' services with a bare PATH. This is the same PATH the runners get (their
+    # .path file, written by linux/bootstrap.sh).
+    export PATH="$HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin"
+    ;;
   *)
     # launchd starts jobs with a bare PATH. This is the same PATH the runners get (their .path file).
     export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -77,6 +82,19 @@ runner_problems() {
         svc=$(tr -d '\r\n' < "$dir/.service")
         state=$(sc.exe query "$svc" 2>/dev/null | awk '/STATE/ {print $4; exit}')
         [ "$state" = RUNNING ] || echo "$svc: ${state:-not installed, or not queryable by $(whoami)}"
+      done
+      [ "$found" = 1 ] || echo "no runner services in $HOME/actions-runner*"
+      ;;
+    Linux)
+      # One system unit per runner directory, named as linux/bootstrap.sh writes it into the directory's
+      # .service (svc.sh's convention). Any user may ask systemd whether a system unit is active.
+      local dir unit state found=0
+      for dir in "$HOME"/actions-runner*/; do
+        [ -f "$dir/.service" ] || continue
+        found=1
+        unit=$(cat "$dir/.service")
+        state=$(systemctl is-active "$unit" 2>/dev/null)
+        [ "$state" = active ] || echo "$unit: ${state:-unknown}"
       done
       [ "$found" = 1 ] || echo "no runner services in $HOME/actions-runner*"
       ;;
