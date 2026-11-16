@@ -17,8 +17,11 @@ How it works, and why each step:
   through the reflected API) makes the camera ride with it, so it stays a physics actor, and World
   Partition streams the city in around it.
 - **Loss.** Mass can still release the actor -- at the end of its route, say -- and a pooled actor
-  can come back as a different car. ``EgoWatch`` notices the actor disappearing, becoming parked or
-  jumping, and the client adopts another car and mounts the rig again.
+  can come back as a different car. Released, it isn't destroyed: Mass hides it where it stands
+  (``UMassActorSpawnerSubsystem::ReleaseActorToPool``) and drives the car on as a low-detail
+  stand-in, so the rig would sit invisible in the road with traffic passing through it. ``EgoWatch``
+  notices the actor disappearing, being hidden, becoming parked or jumping, and the client adopts
+  another car and mounts the rig again.
 """
 
 import asyncio
@@ -166,8 +169,9 @@ async def release(ego: Ego, sensor_names) -> None:
 
 
 class EgoWatch:
-    """Polls the ego's state; ``lost`` is set when it is destroyed, parked, jumps (a pooled actor
-    reused for another car), or has stood still for ``max_stopped_s`` of sim time.
+    """Polls the ego's state; ``lost`` is set when it is destroyed, hidden (released to Mass's actor
+    pool, which leaves it standing where it was), parked, jumps (a pooled actor reused for another
+    car), or has stood still for ``max_stopped_s`` of sim time.
 
     The last is not a failure of Mass but of the data: CitySample's traffic routinely waits a minute
     or more at lights and in jams, in Wall Clock and Fixed Step alike, and a stationary ego records
@@ -190,8 +194,14 @@ class EgoWatch:
             try:
                 state = await tw.get_current_actor_state(actor=self.ego.name)
                 tags = await world.get_async(lambda: self.ego.vehicle.Tags)
+                hidden = await world.get_async(lambda: self.ego.vehicle.bHidden)
             except Exception as exc:
                 self._lose(f"actor gone ({exc.__class__.__name__})")
+                return
+            # A released actor is hidden in place and stops moving, which otherwise reads as a car
+            # waiting at a light until max_stopped_s runs out.
+            if hidden:
+                self._lose("Mass released it to its actor pool")
                 return
             if PARKED_TAG in tags:
                 self._lose("Mass parked it")

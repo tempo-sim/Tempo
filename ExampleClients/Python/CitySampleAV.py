@@ -13,7 +13,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from CitySampleAV.__main__ import main
-
 if __name__ == "__main__":
+    # Imported here, not above: the recorder's worker processes run this file too (as __mp_main__),
+    # and they need only the path, not the client.
+    from CitySampleAV.__main__ import main
     main()

@@ -2,18 +2,19 @@
 
 """Ground-truth world logger.
 
-Streams actor states near the tracked (ego) actor and logs each as an oriented
-3D box plus a transform. All values come straight from ActorState in the
+Streams actor states near the tracked (ego) actor and logs them, each frame, as one batch of
+oriented 3D boxes in the world frame. The ego itself is logged as a box under a Transform3D
+(stream_ego), since the 3D view follows it. All values come straight from ActorState in the
 right-handed proto frame.
 
-The oriented box is built from ``local_bounds`` (an axis-aligned box in the
-actor's local frame, with scale baked in) placed by the actor's world
-``transform`` via the entity's Transform3D — so no per-box rotation is needed.
+Each oriented box is built from ``local_bounds`` (an axis-aligned box in the actor's local frame,
+with scale baked in) placed by the actor's world ``transform``.
 
-Actors that leave the query radius (or are destroyed) are cleared, so a drive through a city
-doesn't leave a trail of stale boxes behind it.
+Each frame's batch replaces the last, so actors that leave the query radius (or are destroyed)
+disappear with it, and a drive through a city doesn't leave a trail of stale boxes behind it.
 """
 
+import numpy as np
 import rerun as rr
 
 import tempo_sim.tempo_world as tw
@@ -57,7 +58,7 @@ async def stream_ground_truth(track_actor, *, search_radius_m=200.0, include_sta
     or None to not draw it. Taps receive the whole ActorStates message, unfiltered."""
     taps = tuple(taps)
     exclude = set(exclude)
-    shown = set()
+    shown = [False]     # whether the last set logged had any boxes
     last_time_s = [None]
     stopped = [False]   # set once the stream ends, so a handler still running draws nothing more
 
@@ -65,21 +66,22 @@ async def stream_ground_truth(track_actor, *, search_radius_m=200.0, include_sta
         if visualize and states.actor_states and not stopped[0]:
             last_time_s[0] = states.actor_states[0].timestamp_s
             set_sim_time(conv.SIM_TIME, last_time_s[0])
-            now = set()
+            kept, class_ids = [], []
             for state in states.actor_states:
                 if state.name in exclude or _empty(state.local_bounds):
                     continue
-                class_id = None
                 if classify is not None:
                     class_id = classify(state.name)
                     if class_id is None:
                         continue
-                _log_actor_state(state, class_id=class_id)
-                now.add(state.name)
-            for gone in shown - now:
-                rr.log(conv.ground_truth_entity(gone), rr.Clear(recursive=True))
-            shown.clear()
-            shown.update(now)
+                    class_ids.append(class_id)
+                kept.append(state)
+            # One log call for every box, not two per actor: each call waits its turn for the
+            # interpreter lock against the camera handlers, and 60 of them took half a second a
+            # frame, so most frames' boxes were dropped. Each frame's set also replaces the last
+            # whole, so an actor that left needs no Clear.
+            rr.log(GROUND_TRUTH_ENTITY, _boxes(kept, class_ids if classify is not None else None))
+            shown[0] = bool(kept)
         for tap in taps:
             tap(states)
 
@@ -97,13 +99,42 @@ async def stream_ground_truth(track_actor, *, search_radius_m=200.0, include_sta
         # Take down every box this stream drew. Otherwise, when a client stops it to follow another
         # actor, the last boxes stay in the viewer for good, frozen where they were; one of them can be
         # the next actor followed, which then carries a stale box on top of its own.
-        if visualize and shown and last_time_s[0] is not None:
+        if visualize and shown[0] and last_time_s[0] is not None:
             # Rerun's current time is per thread, and the boxes were logged from worker threads, so
-            # this thread has to be told when the clears happen.
+            # this thread has to be told when the clear happens.
             set_sim_time(conv.SIM_TIME, last_time_s[0])
-            for name in list(shown):
-                rr.log(conv.ground_truth_entity(name), rr.Clear(recursive=True))
-            shown.clear()
+            rr.log(GROUND_TRUTH_ENTITY, rr.Clear(recursive=True))
+            shown[0] = False
+
+
+# Every actor's box near the ego, as one batch.
+GROUND_TRUTH_ENTITY = f"{conv.WORLD}/ground_truth"
+
+
+def _boxes(states, class_ids=None) -> rr.Boxes3D:
+    """The actors' oriented boxes in the world frame: the local box's center placed by the actor's
+    transform, and the actor's rotation, as _log_actor_state draws one through a Transform3D."""
+    n = len(states)
+    centers = np.empty((n, 3), np.float32)
+    halves = np.empty((n, 3), np.float32)
+    quats = np.empty((n, 4), np.float32)
+    for i, state in enumerate(states):
+        center, half = conv.box_center_half(state.local_bounds)
+        loc, rot = state.transform.location, state.transform.rotation
+        q = conv.euler_rpy_to_quat(rot.r, rot.p, rot.y)
+        centers[i] = np.add([loc.x, loc.y, loc.z], _rotate(q, center))
+        halves[i] = half
+        quats[i] = q
+    return rr.Boxes3D(centers=centers, half_sizes=halves, quaternions=quats,
+                      labels=[s.name for s in states], class_ids=class_ids)
+
+
+def _rotate(q, v):
+    """Vector v rotated by unit quaternion q (x, y, z, w)."""
+    x, y, z, w = q
+    u = np.array([x, y, z])
+    v = np.asarray(v, dtype=np.float64)
+    return v + 2.0 * np.cross(u, np.cross(u, v) + w * v)
 
 
 def _empty(box) -> bool:

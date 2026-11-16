@@ -1,0 +1,11 @@
+{
+  "_comment": "default.json plus left, right and rear perspective cameras, the same sensor as FrontCamera.",
+  "sensors": [
+    { "name": "RoofLidar",     "sensor": "lidar_64ch",         "anchor": "roof_center",  "offset_m": [0.0, 0.0, 0.30] },
+    { "name": "FrontCamera",   "sensor": "camera_front_90",    "anchor": "front_top",    "offset_m": [0.0, 0.0, -0.20] },
+    { "name": "FisheyeCamera", "sensor": "camera_fisheye_170", "anchor": "front_bumper", "offset_m": [0.05, 0.0, 0.0] },
+    { "name": "LeftCamera",    "sensor": "camera_front_90",    "anchor": "roof_center",  "offset_m": [0.0, 0.0, 0.10], "rpy_deg": [0, 0, 90] },
+    { "name": "RightCamera",   "sensor": "camera_front_90",    "anchor": "roof_center",  "offset_m": [0.0, 0.0, 0.10], "rpy_deg": [0, 0, -90] },
+    { "name": "RearCamera",    "sensor": "camera_front_90",    "anchor": "roof_center",  "offset_m": [-0.30, 0.0, 0.10], "rpy_deg": [0, 0, 180] }
+  ]
+}

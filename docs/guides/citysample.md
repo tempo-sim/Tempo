@@ -211,6 +211,10 @@ pip install -r Plugins/Tempo/ExampleClients/Python/CitySampleAV/requirements.txt
 python Plugins/Tempo/ExampleClients/Python/CitySampleAV.py --launch Packaged/Windows/CitySample.exe
 ```
 
+`--launch` starts the game with `-RenderOffScreen`, so it opens no window: the sensors render
+offscreen and need none. To start the game yourself, pass the same flag
+(`Packaged/Windows/CitySample.exe -DisableSandboxIntro -RenderOffScreen`) and leave out `--launch`.
+
 Its [README](https://github.com/tempo-sim/Tempo/tree/main/ExampleClients/Python/CitySampleAV)
 covers choosing vehicles, the rig and label JSON, and the recording format.
 

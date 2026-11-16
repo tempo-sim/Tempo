@@ -40,18 +40,29 @@ pip install -r Plugins/Tempo/ExampleClients/Python/CitySampleAV/requirements.txt
 
 ## Run
 
-Start the game, or let the client start it:
+Let the client start the game:
 
 ```bash
 python Plugins/Tempo/ExampleClients/Python/CitySampleAV.py --launch Packaged/Windows/CitySample.exe
 ```
 
-The game opens on foot in the big city. Within a few seconds the client picks a car out of the
+or start it yourself, offscreen, and then run the client without `--launch`:
+
+```bash
+Packaged/Windows/CitySample.exe -DisableSandboxIntro -RenderOffScreen
+python Plugins/Tempo/ExampleClients/Python/CitySampleAV.py
+```
+
+`-RenderOffScreen` renders without opening a window, which is all the sensors need, and is how
+`--launch` starts the game unless `--viewport` is given. Leave it out to watch the game itself.
+
+The game starts on foot in the big city. Within a few seconds the client picks a car out of the
 traffic nearby, the game's camera jumps to it, and a Rerun viewer opens with a 3D view riding along
 with the car (lidar points colored by reflectivity, 3D boxes of the vehicles and pedestrians around it)
 beside a column per camera: its color image with its 2D boxes, its semantic labels and its depth.
-The viewer keeps the latest 2 GB and drops older data (`--viewer-memory-limit`). The game's own
-window goes black: the sensors render offscreen, and drawing the window too would cost them GPU time.
+The viewer keeps the latest 2 GB and drops older data (`--viewer-memory-limit`). If the game has a
+window, it goes black: the sensors render offscreen, and drawing the window too would cost them GPU
+time.
 
 ```bash
 CitySampleAV.py --vehicle van01                  # a specific model (ids in config/vehicles.json)
@@ -63,6 +74,7 @@ CitySampleAV.py --save-rrd run1.rrd              # keep the Rerun session too (r
 CitySampleAV.py --label-type semantic            # semantic ids straight from the sim, no 2D boxes
 CitySampleAV.py --lidar-color label              # or intensity, distance, instance, color (default reflectivity)
 CitySampleAV.py --rig my_rig                     # config/rigs/my_rig.json for every vehicle
+CitySampleAV.py --rig surround                   # five cameras (front, left, right, rear, fisheye) + lidar
 CitySampleAV.py --rate-hz 30                     # every sensor at 30 Hz instead of its JSON rate
 CitySampleAV.py --viewport                       # keep rendering the game's own window (off by default)
 CitySampleAV.py --instance-view --no-depth-view  # show each camera's instance ids instead of its depth
@@ -176,8 +188,12 @@ actors.jsonl                 3D ground truth: nearby moving actors' poses, bound
 
 With `--label-type semantic` there is no `instance/` or `bbox/`, and `label` is from the sim.
 
-The recorder shares the viewer's streams. If the disk can't keep up, it drops frames rather than
-slowing the sim, and `meta.json` counts the drops.
+The recorder shares the viewer's streams. It hands each frame to a pool of writer processes
+(`--record-workers`, default a quarter of the logical CPUs, 2 to 8), through shared memory and in
+batches, so the client process that reads the streams does little more than copy each frame once. If
+the writers still fall behind, it drops frames rather than stalling, and `meta.json` counts the
+drops. PNGs are written at zlib level 1 (`--png-level`; 0 makes files twice as large and records no
+faster).
 
 **Time.** The client runs the sim in **Fixed Step**: 10 steps per second (`--step-hz`), with every
 sensor at the same 10 Hz. So each step advances exactly 0.1 s of sim time and yields one frame from
@@ -189,8 +205,9 @@ fixed amount of data, stop on sim time: `--sim-duration-s 60` is 600 frames of e
 
 ## Performance
 
-The default rig runs at **about real time** on an i9-14900KF, RTX 4080 and 64 GB RAM. That's Fixed
-Step at 10 steps/s, every sensor at 10 Hz, recording color, label, depth and lidar:
+The default rig runs at **about real time in a Development package, and about 1.5× real time in a
+Shipping one**, on an i9-14900KF, RTX 4080 and 64 GB RAM. That's Fixed Step at 10 steps/s, every
+sensor at 10 Hz, recording color, label, depth and lidar:
 
 | Sensor | Settings |
 |---|---|
@@ -206,6 +223,19 @@ Measured over 90 s of sim time with a moving car (522 m, two handovers), recordi
 
 Runs vary by about ±5% with the route.
 
+**Shipping and more cameras.** A Shipping package (`Package.sh --release`) drops the engine's
+development overhead. Measured over 120 s of sim time each, with moving cars:
+
+| Rig | Not recording | Recording |
+|---|---|---|
+| default (2 cameras + lidar) | 1.43–1.77 | 1.41–1.58, nothing dropped |
+| `--rig surround` (front, left, right and rear 90° cameras, the fisheye, the lidar) | 0.97–1.01 | 0.84, nothing dropped |
+
+Each perspective camera costs roughly 0.15–0.2 of real-time factor. Recording five cameras writes
+about 150 MB/s, and costs the sim about 13%: in Fixed Step the sim captures a camera's next frame
+only once the client has read its last one, so the client's own work sets part of the pace, and
+writing that much to the disk the sim streams the city from costs about 7% by itself.
+
 **What it costs.** Sensors render in the game loop, and the cost is mostly *how many scene views*
 each frame renders, not how many pixels. Measured the same way, with a moving car:
 
@@ -216,7 +246,7 @@ each frame renders, not how many pixels. Measured the same way, with a moving ca
 | ... with the fisheye at 1024 × 640 | 0.87 |
 | ... with a square 1024 × 1024 fisheye (4 views, not 2) and 1.5× upsampling | ~0.7 \* |
 | not recording depth (`--no-record-depth`) | about +15–20% \* |
-| writing to disk at all | no measurable cost \* |
+| writing to disk at all | none measurable with this rig; about −13% with five cameras (above) |
 | the Rerun viewer open | about −7%, since it shares the GPU |
 | `--no-pipelined` (the game waits for each frame's readback) | about −10% \* |
 | lidar participating media on | about −5% \* |
@@ -229,7 +259,8 @@ Hence the choices in the defaults:
 - **A wide fisheye, not a square one.** A fisheye renders one view per 120° of each axis, so a
   square 170° image costs 4 full scene renders and a 16:10 one costs 2. Wide is also how
   automotive surround-view cameras are built.
-- **The game's own window is off** while collecting; `--viewport` keeps it.
+- **The game's own window is off** while collecting: `--launch` starts the game with
+  `-RenderOffScreen`, and a game started with a window stops drawing it. `--viewport` keeps both.
 - **Pipelined rendering is on.** Each frame still carries the sim time and sequence id of the step
   it was captured on; data just arrives a frame or two later.
 - **Participating media is off.** CitySample's streets have no smoke or fog for it to model.
@@ -253,7 +284,10 @@ recording; match frames by `time_s`.
 - [`ego.py`](ego.py) adopts the car. Mass only keeps a car as a physics actor while it is near a
   viewer, and the viewer is the player's camera, so the client points the player controller's view
   at the ego (`SetViewTargetWithBlend`, through the reflected API). The car then stays a physics
-  actor, and World Partition streams the city around it. No game code changes.
+  actor, and World Partition streams the city around it. No game code changes. Mass can still
+  release the actor; it then hides it where it stands and drives the car on without it, so the
+  client watches for that (and for the actor being destroyed, parked or reused) and moves the rig
+  to another car within a second.
 - [`rig.py`](rig.py) adds the sensor components (`world.add_component`) and configures them in one
   batch.
 - [`labels.py`](labels.py) builds and loads the label table and keeps classifying streamed-in
