@@ -159,8 +159,10 @@ def sim_server():
             # A deadline on each probe, or a sim that accepts the connection and never answers would hold
             # this call past STARTUP_TIMEOUT_S, which is checked only between probes. Session setup runs
             # outside _sim_request_deadline.
+            # A game-world service, not a game-instance one: those are active before the startup map has
+            # loaded, and a test's first call to a world service would find it "not active".
             with tempo_sim.with_request_timeout(max(1.0, min(10.0, deadline - time.monotonic()))):
-                tc.get_current_level_name()
+                tc.get_sim_time()
             break
         except Exception as e:  # gRPC server not accepting connections yet, or not answering
             last_err = e

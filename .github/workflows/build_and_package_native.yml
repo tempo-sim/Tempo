@@ -279,7 +279,9 @@ jobs:
           for pid in $PIDS; do tasklist.exe //FI "PID eq $pid" //NH //FO CSV 2>/dev/null; done
           for pid in $PIDS; do taskkill.exe //F //T //PID "$pid" > /dev/null 2>&1 || true; done
           sleep 3
-          [ -z "$(tree_pids)" ] || { echo "::error::Processes in $CI_BUILD survived taskkill /F."; exit 1; }
+          # One that survives is stuck in its own termination, in the kernel (a thread blocked in a driver),
+          # and keeps its files in the tree open: nothing short of a reboot frees it.
+          [ -z "$(tree_pids)" ] || { echo "::error::Processes in $CI_BUILD survived taskkill /F; the machine needs a reboot."; exit 1; }
           exit 0
         fi
         # Matched in awk through ENVIRON, so the path is in no matcher's own command line.

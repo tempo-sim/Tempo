@@ -53,8 +53,9 @@ takes precedence over the port.
 ## How the sim is managed
 
 `conftest.py` provides a session-scoped `sim_server` fixture that launches the packaged binary
-headless (`-nullrhi -unattended ... -ServerPort=<port>`), polls `get_current_level_name()`
-until the gRPC server answers, and shuts it down (`quit()`, then escalate) at the end. Tests
+headless (`-nullrhi -unattended ... -ServerPort=<port>`), polls `get_sim_time()`
+until the startup map's services answer (a game-instance RPC such as `get_current_level_name()`
+answers before the map has loaded), and shuts it down (`quit()`, then escalate) at the end. Tests
 that need the sim depend on `sim_server`; `contract` tests don't, so a contract-only run never
 launches it. The `fixed_step` fixture puts the sim in deterministic fixed-step mode for
 time/motion assertions. The sim's full log is written to `TEMPO_TEST_REPORT_DIR/sim.log` (uploaded
