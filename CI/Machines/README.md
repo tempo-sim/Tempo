@@ -113,8 +113,11 @@ runs as root. The runners are system services (`actions.runner.tempo-sim.<name>.
 so they start at boot without anyone logging on: no automatic login is needed.
 
 ```text
-/home/ci/tempo-ci/              machine.env, slack-webhook, healthchecks-url, bin/, logs/, state/
+/home/ci/tempo-ci/              machine.env, slack-webhook, healthchecks-url, bin/, logs/, state/,
+                                uat/<v>/ (AutomationTool's Saved folder, uebp_EngineSavedFolder in each runner's .env)
 /home/ci/actions-runner-<v>/    one runner (a systemd service) per Unreal version
+/opt/UnrealEngine/UE_<v>/       the engines: read-only to ci, but for the two scratch folders AutomationTool
+                                insists on (Engine/Intermediate/Turnkey and Engine/Intermediate/Build/BuildCookRun)
 /ci                             TEMPO_CI_ROOT, the build trees: XFS, for reflinks
 /var/lib/tempo-ci/ci.xfs        the sparse image behind /ci when the disk cannot reflink (ext4), mounted by ci.mount
 /usr/local/libexec/tempo-ci/    update.sh, root-owned
