@@ -135,5 +135,6 @@ with the other is untested — track `main` on both, or pin a pair you have veri
   rather than letting the build fail later with UnrealBuildTool's `Unable to find plugin 'TempoROS'`.
 - **Windows packaged games no longer need a `PATH` entry.** TempoROS stages the `rclcpp` DLLs next to
   the executable — see [Packaging](../guides/packaging.md#packaging-with-temporos).
-- **`CustomStageCopyHandler=TempoROSCopyHandler`** in `Config/DefaultGame.ini` is still required to
-  package with ROS, and is still a line you only add if you use ROS.
+- **`CustomStageCopyHandler=TempoROSCopyHandler` is no longer needed.** TempoROS dropped its custom
+  stage copy handler and now stages each `rclcpp` library once under its own name. Remove the line
+  from `Config/DefaultGame.ini`; left in, it only logs a warning when you package.

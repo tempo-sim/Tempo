@@ -108,22 +108,15 @@ codesign -d --entitlements - Packaged/Mac/MyGame.app   # should list no com.appl
 
 ## Packaging with TempoROS
 
-If you use [TempoROS](../plugins/tempo-ros.md), your `Config/DefaultGame.ini` must specify its
-custom stage copy handler, so symbolic links in the `rclcpp` libraries are copied correctly on all
-platforms:
+If you use [TempoROS](../plugins/tempo-ros.md), there is nothing to set up. That holds for
+`Package.sh`, for `RunUAT BuildCookRun` directly, and for the editor's **Package Project** menu. The
+`rclcpp` libraries come as chains of symlinks (`libddsc.dylib -> libddsc.0.dylib ->
+libddsc.0.10.5.dylib`), and staging copies every symlink as a full file. So TempoROS stages only the
+name the dynamic loader asks for, and each library ends up in the package once.
 
-```ini
-CustomStageCopyHandler=TempoROSCopyHandler
-```
-
-That is the only step. The handler is `Build/TempoROS.Automation.csproj` inside TempoROS, and
-AutomationTool discovers and builds it on its own — UnrealBuildTool's rules scan looks in the
-`Build` folder of any plugin for automation projects. Nothing has to pre-build it or pass
-`-ScriptDir`, so this works with `Package.sh`, with `RunUAT BuildCookRun` directly, and from the
-editor's **Package Project** menu alike.
-
-If you are **not** using ROS there is nothing to do: TempoROS is a separate repository you never
-cloned, the bridge is opt-in, and `CustomStageCopyHandler` is a line you simply never add.
+Older TempoROS versions needed `CustomStageCopyHandler=TempoROSCopyHandler` in
+`Config/DefaultGame.ini`. That handler is gone, so remove the line. If you leave it in, packaging only
+logs `Failed to create custom stage copy handler 'TempoROSCopyHandler'`.
 
 !!! note "Windows: no `PATH` setup needed"
 
