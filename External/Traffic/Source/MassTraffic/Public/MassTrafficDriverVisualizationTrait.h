@@ -5,6 +5,7 @@
 #include "MassTrafficDrivers.h"
 #include "MassEntityTraitBase.h"
 #include "MassObserverProcessor.h"
+#include "MassEntityQuery.h"
 #include "MassRepresentationSubsystem.h"
 #include "MassTrafficDriverVisualizationTrait.generated.h"
 
