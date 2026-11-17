@@ -1,7 +1,7 @@
 # Adding a Linux or Windows CI machine
 
 Instructions for an agent (or a human) turning a dedicated Linux or Windows machine into one of Tempo's
-native CI runners. The first machine, a Mac mini, is set up from `macos/`. Read `README.md` here first,
+native CI runners. The Mac is set up from `macos/`, Windows from `windows/` and Linux from `linux/`. Read `README.md` here first,
 then the header of `.github/workflows/build_and_package_native.yml`: its **machine contract** is the
 specification you are implementing, and this file is the advice that comes with it.
 
