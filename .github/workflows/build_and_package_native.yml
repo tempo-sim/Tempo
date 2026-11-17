@@ -250,8 +250,31 @@ jobs:
           echo "CI_GOLDEN=$ROOT/golden"
           echo "CI_STAMP=$STAMP"
         } >> "$GITHUB_ENV"
+
+        # A Zen server per engine. Every engine's editor otherwise auto-launches the same one (one
+        # version-agnostic data dir, port 8558), and 5.7 and 5.8 launch it with different arguments, so an
+        # editor starting under one engine shuts down and relaunches the server the other engine's editor
+        # or cook is using: that cook loses its local DDC ("no writable nodes available"). Through
+        # UE-CmdLineArgs, which every Unreal process inserts into its command line, so it reaches the
+        # editors the scripts launch and UAT's cook without either knowing. Persistent, outside the build
+        # tree that every job resets, and per engine only: one runner per engine never runs two jobs at once.
+        ZEN_DATA="$TEMPO_CI_ROOT/zen/$UNREAL_VERSION"
+        mkdir -p "$ZEN_DATA" || trouble "Cannot create the Zen data directory $ZEN_DATA."
+        [ "$RUNNER_OS" = Windows ] && ZEN_DATA=$(cygpath -m "$ZEN_DATA")
+        echo "UE-CmdLineArgs=-ZenDataPath=\"$ZEN_DATA\" -ini:Engine:[Zen.AutoLaunch]:DesiredPort=$((8600 + ${UNREAL_VERSION//./}))" >> "$GITHUB_ENV"
+
+        # For Gather Test Reports, which collects the crash reports written after this.
+        touch "$RUNNER_TEMP/tempo-ci-job-start"
         echo "trouble=false" >> "$GITHUB_OUTPUT"
         echo "Machine OK: $STAMP; ${FREE_GB}GB free"
+
+    # Not every shell passes an environment variable whose name is no identifier on to its children.
+    # Checked from a non-shell child of the step's shell, as the scripts' Unreal processes are. Without it
+    # the engines share a Zen server again, as before, so this warns rather than failing the job.
+    - name: Check Zen Settings Reach Unreal
+      run: |
+        python3 -c 'import os, sys; sys.exit(0 if os.environ.get("UE-CmdLineArgs") else 1)' \
+          || echo "::warning title=Shared Zen server::UE-CmdLineArgs did not reach a child of this step's shell, so the engines' jobs share one Zen server and can restart it under each other."
 
     # Whatever an earlier job left running from this engine's build tree. A cancelled or timed-out job's sim
     # outlives it: pytest dies on SIGTERM without its fixture teardown, and TestCppAPI.sh gives the sim a
@@ -522,8 +545,20 @@ jobs:
     # it then resolves against the workspace and refuses every file.
     - name: Gather Test Reports
       if: always()
+      env:
+        PROJECT_ROOT: ${{ inputs.project_root }}
       run: |
-        REPORT="${CI_BUILD:-}/${{ inputs.project_root }}/Saved/TempoTestReport"
+        # macOS's reports of this job's crashes: the packaged sim's (named for the project) and the
+        # editor's. A sim that dies before Unreal's logging starts leaves an empty sim.log, and this is
+        # then all there is to go on. Small text files; the exit-time crashes add one per test group.
+        if [ "$RUNNER_OS" = macOS ] && [ -f "$RUNNER_TEMP/tempo-ci-job-start" ]; then
+          CRASHES="$RUNNER_TEMP/test-reports/crash-reports"
+          find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 1 -type f -newer "$RUNNER_TEMP/tempo-ci-job-start" \
+            \( -name "$(basename "$PROJECT_ROOT")-*" -o -name 'UnrealEditor*' \) 2>/dev/null |
+            while IFS= read -r f; do mkdir -p "$CRASHES"; cp "$f" "$CRASHES/"; done || true
+          [ -d "$CRASHES" ] && echo "Collected $(ls "$CRASHES" | wc -l | tr -d ' ') crash report(s)."
+        fi
+        REPORT="${CI_BUILD:-}/$PROJECT_ROOT/Saved/TempoTestReport"
         [ -n "${CI_BUILD:-}" ] && [ -d "$REPORT" ] || exit 0
         mkdir -p "$RUNNER_TEMP/test-reports/automation"
         cp -R "$REPORT/." "$RUNNER_TEMP/test-reports/automation/"
