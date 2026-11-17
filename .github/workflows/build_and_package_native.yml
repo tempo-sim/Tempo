@@ -280,38 +280,41 @@ jobs:
     # outlives it: pytest dies on SIGTERM without its fixture teardown, and TestCppAPI.sh gives the sim a
     # process group of its own. It keeps writing into the tree, so it cannot be deleted. Every job does this
     # again when it ends (the last step); here is for a job that ended without getting there.
+    # Matched against the engine's whole tree root, not the build tree with a trailing slash: a cancelled
+    # job's clone of the golden tree (`cp -cR .../golden .../build`) names neither with one, outlives the
+    # cancellation, and keeps filling the build tree while the next job deletes it ("Directory not empty").
     - name: Stop Leftover Processes
       run: &stop_leftover_processes |
-        [ -n "${CI_BUILD:-}" ] || exit 0
+        [ -n "${CI_TREE_ROOT:-}" ] || exit 0
         if [ "$RUNNER_OS" = Windows ]; then
           # Git Bash's ps sees only MSYS processes, and the editor, UBT and the packaged sim are native.
           # Match every process's command line against the tree, in its Windows and Git Bash spellings,
           # read through the environment so the path is in no matcher's own command line. Native
           # processes have no SIGTERM to honor, so stop them outright, children too.
-          export CI_BUILD_WIN=$(cygpath -m "$CI_BUILD")
+          export CI_TREE_ROOT_WIN=$(cygpath -m "$CI_TREE_ROOT")
           tree_pids() {
             powershell.exe -NoProfile -NonInteractive -Command '
-              $paths = @($env:CI_BUILD_WIN, $env:CI_BUILD) | ForEach-Object { $_.ToLower() + "/" }
+              $paths = @($env:CI_TREE_ROOT_WIN, $env:CI_TREE_ROOT) | ForEach-Object { $_.ToLower() + "/" }
               Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine } |
                 Where-Object { $c = $_.CommandLine.ToLower().Replace("\", "/"); $paths | Where-Object { $c.Contains($_) } } |
                 ForEach-Object { $_.ProcessId }' | tr -d '\r'
           }
           PIDS=$(tree_pids)
           [ -n "$PIDS" ] || exit 0
-          echo "::warning title=Leftover processes::Stopping processes still running from $CI_BUILD."
+          echo "::warning title=Leftover processes::Stopping processes still running from $CI_TREE_ROOT."
           for pid in $PIDS; do tasklist.exe //FI "PID eq $pid" //NH //FO CSV 2>/dev/null; done
           for pid in $PIDS; do taskkill.exe //F //T //PID "$pid" > /dev/null 2>&1 || true; done
           sleep 3
           # One that survives is stuck in its own termination, in the kernel (a thread blocked in a driver),
           # and keeps its files in the tree open: nothing short of a reboot frees it.
-          [ -z "$(tree_pids)" ] || { echo "::error::Processes in $CI_BUILD survived taskkill /F; the machine needs a reboot."; exit 1; }
+          [ -z "$(tree_pids)" ] || { echo "::error::Processes in $CI_TREE_ROOT survived taskkill /F; the machine needs a reboot."; exit 1; }
           exit 0
         fi
         # Matched in awk through ENVIRON, so the path is in no matcher's own command line.
-        tree_pids() { ps -axo pid=,command= | awk 'index($0, ENVIRON["CI_BUILD"] "/") { print $1 }'; }
+        tree_pids() { ps -axo pid=,command= | awk 'index($0, ENVIRON["CI_TREE_ROOT"] "/") { print $1 }'; }
         PIDS=$(tree_pids)
         [ -n "$PIDS" ] || exit 0
-        echo "::warning title=Leftover processes::Stopping processes still running from $CI_BUILD."
+        echo "::warning title=Leftover processes::Stopping processes still running from $CI_TREE_ROOT."
         ps -o pid=,etime=,command= -p "$(echo $PIDS | tr ' ' ',')" || true
         kill -TERM $PIDS 2>/dev/null || true
         for _ in $(seq 1 15); do
@@ -320,7 +323,7 @@ jobs:
         done
         kill -KILL $(tree_pids) 2>/dev/null || true
         sleep 2
-        [ -z "$(tree_pids)" ] || { echo "::error::Processes in $CI_BUILD survived SIGKILL."; exit 1; }
+        [ -z "$(tree_pids)" ] || { echo "::error::Processes in $CI_TREE_ROOT survived SIGKILL."; exit 1; }
 
     - name: Prepare Build Tree
       env:
