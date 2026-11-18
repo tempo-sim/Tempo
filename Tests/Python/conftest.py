@@ -19,6 +19,9 @@ Configuration comes from the environment (set by Scripts/TestPythonAPI.sh):
                                0 for none). The first call to miss it stops the session.
   TEMPO_SIM_RENDER             "1" to render off-screen (sensors group); else -nullrhi.
   TEMPO_TEST_REPORT_DIR        If set, the sim's full log is written here (sim.log) so CI uploads it.
+
+A sim killed by a signal within EARLY_CRASH_WINDOW_S of launch, before its server answers, is
+relaunched once (see _crashed_at_startup); the crashed attempt's log is kept beside sim.log.
 """
 
 import importlib.util
@@ -63,6 +66,8 @@ SERVER_PORT = int(os.environ.get("TEMPO_SERVER_PORT", "10001"))
 SERVER_SOCKET = os.environ.get("TEMPO_SERVER_SOCKET", "").strip()
 PACKAGED_BINARY = os.environ.get("TEMPO_PACKAGED_BINARY", "")
 STARTUP_TIMEOUT_S = float(os.environ.get("TEMPO_SIM_STARTUP_TIMEOUT_S", "300"))
+# A crash this soon after launch is a startup crash, not one in anything a test does.
+EARLY_CRASH_WINDOW_S = 30.0
 def _env_seconds(name, default):
     """A duration in seconds from the environment: unset or empty is the default, 0 is none."""
     raw = os.environ.get(name, "").strip()
@@ -97,8 +102,39 @@ def _tail(path, n=200):
         return "(no log captured)"
 
 
+def _crashed_at_startup(returncode, seconds_since_launch):
+    """Whether the sim died from a signal right after launch, which is worth one relaunch.
+
+    UE 5.8's packaged Mac build intermittently fails an LLM check (FLLMThreadState::PopTag, "stack
+    was empty on pop") on the main thread about a second and a half after exec, before its logging
+    starts: a race between LLM switching itself off and a tag scope already open. It is the engine's,
+    and a relaunch starts cleanly; it leaves only an empty sim.log and an assertion in the macOS
+    unified log. A negative return code is a signal; a launcher script (Linux) reports one as 128+N.
+    A sim that exits on its own, or late, is not retried: that is a failure to report."""
+    by_signal = returncode < 0 or 128 < returncode < 128 + 64
+    return by_signal and seconds_since_launch < EARLY_CRASH_WINDOW_S
+
+
+def _open_sim_log(report_dir):
+    if report_dir:
+        os.makedirs(report_dir, exist_ok=True)
+        return open(os.path.join(report_dir, "sim.log"), "wb")
+    return tempfile.NamedTemporaryFile(prefix="tempo-sim-", suffix=".log", delete=False)
+
+
+def _announce(pytestconfig, message):
+    """A line that reaches the terminal (and so the CI log) from a fixture, past pytest's capture.
+    Prefixed as a GitHub Actions warning, so a job that recovered still says so on its summary."""
+    reporter = pytestconfig.pluginmanager.get_plugin("terminalreporter")
+    line = f"::warning title=Sim relaunched::{message}"
+    if reporter is not None:
+        reporter.write_line(line)
+    else:
+        print(line)
+
+
 @pytest.fixture(scope="session")
-def sim_server():
+def sim_server(pytestconfig):
     if not PACKAGED_BINARY:
         pytest.fail(
             "TEMPO_PACKAGED_BINARY is not set. Run these tests via Scripts/TestPythonAPI.sh, or "
@@ -133,45 +169,59 @@ def sim_server():
     # Capture the sim's full stdout/stderr. Prefer the report dir (TEMPO_TEST_REPORT_DIR) so the log
     # is uploaded as a CI artifact for post-mortem; fall back to a temp file locally.
     report_dir = os.environ.get("TEMPO_TEST_REPORT_DIR")
-    if report_dir:
-        os.makedirs(report_dir, exist_ok=True)
-        log = open(os.path.join(report_dir, "sim.log"), "wb")
-    else:
-        log = tempfile.NamedTemporaryFile(prefix="tempo-sim-", suffix=".log", delete=False)
-    print(f"Sim log: {log.name}")
-    proc = subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT)
-    global _sim_proc
-    _sim_proc = proc
 
     if SERVER_SOCKET:
         tempo_sim.set_socket(SERVER_SOCKET)
     else:
         tempo_sim.set_server(port=SERVER_PORT)
-    deadline = time.monotonic() + STARTUP_TIMEOUT_S
-    last_err = None
-    while time.monotonic() < deadline:
-        if proc.poll() is not None:
-            log.flush()
-            pytest.fail(
-                f"Sim exited early (exit code {proc.returncode}). Log tail:\n{_tail(log.name)}"
-            )
-        try:
-            # A deadline on each probe, or a sim that accepts the connection and never answers would hold
-            # this call past STARTUP_TIMEOUT_S, which is checked only between probes. Session setup runs
-            # outside _sim_request_deadline.
-            # A game-world service, not a game-instance one: those are active before the startup map has
-            # loaded, and a test's first call to a world service would find it "not active".
-            with tempo_sim.with_request_timeout(max(1.0, min(10.0, deadline - time.monotonic()))):
-                tc.get_sim_time()
+
+    global _sim_proc
+    for attempt in (1, 2):
+        log = _open_sim_log(report_dir)
+        print(f"Sim log: {log.name}")
+        launched = time.monotonic()
+        proc = subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT)
+        _sim_proc = proc
+
+        deadline = launched + STARTUP_TIMEOUT_S
+        last_err = None
+        ready = False
+        while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                break
+            try:
+                # A deadline on each probe, or a sim that accepts the connection and never answers would hold
+                # this call past STARTUP_TIMEOUT_S, which is checked only between probes. Session setup runs
+                # outside _sim_request_deadline.
+                # A game-world service, not a game-instance one: those are active before the startup map has
+                # loaded, and a test's first call to a world service would find it "not active".
+                with tempo_sim.with_request_timeout(max(1.0, min(10.0, deadline - time.monotonic()))):
+                    tc.get_sim_time()
+                ready = True
+                break
+            except Exception as e:  # gRPC server not accepting connections yet, or not answering
+                last_err = e
+                time.sleep(1.0)
+        if ready:
             break
-        except Exception as e:  # gRPC server not accepting connections yet, or not answering
-            last_err = e
-            time.sleep(1.0)
-    else:
-        proc.terminate()
+
+        log.close()
+        if proc.poll() is None:
+            proc.terminate()
+            pytest.fail(
+                f"Sim gRPC server did not become ready within {STARTUP_TIMEOUT_S}s "
+                f"(last error: {last_err}). Log tail:\n{_tail(log.name)}"
+            )
+        lived = time.monotonic() - launched
+        if attempt == 1 and _crashed_at_startup(proc.returncode, lived):
+            # Kept for the post-mortem, beside the relaunch's sim.log.
+            kept = os.path.join(os.path.dirname(log.name), "sim-crashed-at-startup.log")
+            os.replace(log.name, kept)
+            _announce(pytestconfig, f"The sim died at startup (exit code {proc.returncode}, after "
+                                    f"{lived:.1f}s), so it was launched again. Its log: {kept}")
+            continue
         pytest.fail(
-            f"Sim gRPC server did not become ready within {STARTUP_TIMEOUT_S}s "
-            f"(last error: {last_err}). Log tail:\n{_tail(log.name)}"
+            f"Sim exited early (exit code {proc.returncode}). Log tail:\n{_tail(log.name)}"
         )
 
     yield proc
