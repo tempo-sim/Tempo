@@ -442,6 +442,11 @@ sim (not the editor). They cover the client-facing API contract and behavior ove
   [group]`.
 - **Sim lifecycle:** Python's session-scoped `sim_server` fixture (and `TestRustAPI.sh` for Rust)
   launches the packaged binary headless, polls until the gRPC server answers, and tears it down.
+  A sim killed by a signal within 30 s of launch, before it answers, is relaunched once, with a
+  `Sim relaunched` warning and the crashed attempt's log kept as `sim-crashed-at-startup.log`: UE
+  5.8's packaged Mac build intermittently fails an LLM check (`FLLMThreadState::PopTag`) at
+  startup, before its logging starts, so only macOS's unified log records it (Gather Test Reports
+  copies Unreal's assertions from it).
   RHI is `-nullrhi` by default; `TEMPO_SIM_RENDER=1` renders off-screen (the `sensors` group, which
   also wants a GPU). The sim's full log is written to `TEMPO_TEST_REPORT_DIR/sim.log` (uploaded as a
   CI artifact) for post-mortem. `contract` groups never launch a sim. Python's `fixed_step` fixture

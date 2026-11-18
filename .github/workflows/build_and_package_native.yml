@@ -552,14 +552,31 @@ jobs:
         PROJECT_ROOT: ${{ inputs.project_root }}
       run: |
         # macOS's reports of this job's crashes: the packaged sim's (named for the project) and the
-        # editor's. A sim that dies before Unreal's logging starts leaves an empty sim.log, and this is
-        # then all there is to go on. Small text files; the exit-time crashes add one per test group.
+        # editor's. Small text files; the exit-time crashes add one per test group.
         if [ "$RUNNER_OS" = macOS ] && [ -f "$RUNNER_TEMP/tempo-ci-job-start" ]; then
           CRASHES="$RUNNER_TEMP/test-reports/crash-reports"
           find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 1 -type f -newer "$RUNNER_TEMP/tempo-ci-job-start" \
             \( -name "$(basename "$PROJECT_ROOT")-*" -o -name 'UnrealEditor*' \) 2>/dev/null |
             while IFS= read -r f; do mkdir -p "$CRASHES"; cp "$f" "$CRASHES/"; done || true
           [ -d "$CRASHES" ] && echo "Collected $(ls "$CRASHES" | wc -l | tr -d ' ') crash report(s)."
+          # Unreal's failed checks and fatal errors from macOS's unified log. A check that fails before
+          # Unreal's logging starts reaches nowhere else, and macOS writes no crash report for it: UE
+          # 5.8's intermittent startup LLM check (FLLMThreadState::PopTag) left only this, which the
+          # test harnesses now relaunch past, so a recovered job's warning points here.
+          SINCE=$(stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S' "$RUNNER_TEMP/tempo-ci-job-start")
+          UNIFIED="$RUNNER_TEMP/unreal-unified-log.txt"
+          if /usr/bin/log show --start "$SINCE" --style compact --predicate \
+              "(process == \"$(basename "$PROJECT_ROOT")\" OR process BEGINSWITH \"UnrealEditor\") AND
+               (eventMessage CONTAINS \"check failed\" OR eventMessage CONTAINS \"Assertion failed\" OR
+                eventMessage CONTAINS \"Fatal error\")" > "$UNIFIED" 2>&1; then
+            # The first line is the column header.
+            if [ "$(wc -l < "$UNIFIED")" -gt 1 ]; then
+              mkdir -p "$CRASHES"; cp "$UNIFIED" "$CRASHES/unified-log.txt"
+              echo "Unreal assertions in the unified log:"; tail -n +2 "$UNIFIED"
+            fi
+          else
+            echo "::notice title=Unified log unread::$(head -1 "$UNIFIED")"
+          fi
         fi
         REPORT="${CI_BUILD:-}/$PROJECT_ROOT/Saved/TempoTestReport"
         [ -n "${CI_BUILD:-}" ] && [ -d "$REPORT" ] || exit 0
