@@ -26,7 +26,7 @@ class Config:
 
     # Sensors
     sensors: List[str] = field(default_factory=list)  # allowlist of "owner:sensor" ("" = all)
-    colorize_lidar_by: str = "intensity"              # intensity|distance|reflectivity|label|color
+    colorize_lidar_by: str = "intensity"              # intensity|distance|reflectivity|label|instance|color
     # Put cameras in the 3D view: logs a Pinhole per camera, which draws the frustum
     # and back-projects images into 3D. Off by default — distorted/wide cameras don't
     # match rerun's ideal-pinhole model, so the projection is wrong and the frustums
@@ -76,7 +76,7 @@ def _add_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--sensors", nargs="*", default=None,
                         help="Allowlist of sensors as 'owner:sensor' (default: all available).")
     parser.add_argument("--colorize-lidar-by", default=None,
-                        choices=["intensity", "distance", "reflectivity", "label", "color"],
+                        choices=["intensity", "distance", "reflectivity", "label", "instance", "color"],
                         help="Initial lidar colorization mode.")
     parser.add_argument("--images-in-3d", dest="images_in_3d", action="store_true", default=None,
                         help="Put cameras in the 3D view (Pinhole frustums + back-projected images). Off by "

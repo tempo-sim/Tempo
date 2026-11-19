@@ -139,6 +139,36 @@ back. If you skip this step the build fails in C# before it compiles any C++, wi
     For the full mechanism, see
     [Traffic as a drop-in replacement](../plugins/traffic.md#drop-in-replacement-for-citysamples-traffic).
 
+It also adds the project settings Tempo needs and CitySample doesn't have, through
+`Scripts/ConfigureProject.sh`. They go in a marker-delimited block at the end of
+`Config/DefaultEngine.ini`, which overrides CitySample's own values without editing them:
+
+```ini
+[/Script/Engine.Engine]
+WorldSettingsClassName=/Script/TempoCore.TempoWorldSettings
+[/Script/Engine.PhysicsSettings]
+bSubstepping=True
+MaxSubstepDeltaTime=0.016667
+MaxSubsteps=6
+[ConsoleVariables]
+FastGeo.Enable=False
+```
+
+- **Tempo's world settings.** Pausing, stepping and Fixed Step all live on `ATempoWorldSettings`.
+  CitySample's levels were saved with the engine's own world settings, and the cook replaces them
+  with the configured class, copying their properties across.
+- **Physics substepping.** A Fixed Step frame can be a tenth of a second. Without substepping, Chaos
+  clamps each frame to 1/30 s, and vehicles would cover a third of the distance the timestamps say.
+- **No FastGeo.** In 5.6+ CitySample cooks most of its static city through Epic's FastGeoStreaming
+  plugin, which turns actors into lightweight primitives that are not components. Tempo's labeler
+  works by setting each component's custom-depth stencil, so it cannot label them. They also don't
+  draw into custom depth at all, so whatever labeled object stands behind one shows through it in
+  the label images and lidar labels. Without FastGeo, the level cooks as ordinary actors, as
+  CitySample shipped before 5.6, at some cost in streaming performance. `Setup.sh -keep-fastgeo`
+  skips this one, if you don't need labels.
+
+All three take effect at the next package. `Scripts/ConfigureProject.sh -restore` removes the block.
+
 `Setup.sh` also downloads third-party dependencies.
 
 ## 4. Build and run
@@ -166,12 +196,36 @@ python -c "import tempo_sim.tempo_core as tc; print(tc.get_current_level_name())
 If that prints the level name, you are ready for
 [Hello World](../getting-started/hello-world.md).
 
+## 6. Ride along: the AV sensor example { #av-sensor-example }
+
+`ExampleClients/Python/CitySampleAV` is a turnkey synthetic-sensor example for this project. It
+adopts a car Mass traffic is already driving, mounts a JSON-described lidar, pinhole camera and
+fisheye camera on it through the [reflected API](reflected-api.md), labels the city, and shows it
+all in Rerun, optionally recording a dataset. Package first, under Git Bash on Windows, because the
+reflected API is generated at package time:
+
+```bash
+Plugins/Tempo/Scripts/Package.sh
+pip install Packaged/API/Python/tempo-sim/*.whl Packaged/API/Python/city-sample/*.whl
+pip install -r Plugins/Tempo/ExampleClients/Python/CitySampleAV/requirements.txt
+python Plugins/Tempo/ExampleClients/Python/CitySampleAV.py --launch Packaged/Windows/CitySample.exe
+```
+
+`--launch` starts the game with `-RenderOffScreen`, so it opens no window: the sensors render
+offscreen and need none. To start the game yourself, pass the same flag
+(`Packaged/Windows/CitySample.exe -DisableSandboxIntro -RenderOffScreen`) and leave out `--launch`.
+
+Its [README](https://github.com/tempo-sim/Tempo/tree/main/ExampleClients/Python/CitySampleAV)
+covers choosing vehicles, the rig and label JSON, and the recording format.
+
 ## What changed in your project
 
 | | |
 |---|---|
 | `Source/CitySample/Util/CitySampleBlueprintLibrary.cpp` | Patched by you, in step 1 |
+| `Source/CitySample/Vehicles/CitySampleVehicleBase.cpp` | Patched by you, in step 1 |
 | `Plugins/Traffic/`, `Plugins/RuleProcessor/` | Descriptors renamed `*.disabled-by-tempo` |
+| `Config/DefaultEngine.ini` | Tempo's world settings, physics substepping, FastGeo off (a `TEMPO_PROJECT_CONFIG` block at the end) |
 | `TempoEnv/` | Generated Python virtual environment with the client packages |
 
 ## See also
