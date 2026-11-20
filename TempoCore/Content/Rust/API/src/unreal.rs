@@ -1924,12 +1924,13 @@ pub fn argument<T: ToValue>(name: &str, value: &T) -> pb::FunctionArg {
 
 fn returned(response: &pb::CallFunctionResponse) -> Result<&pb::Value, TempoError> {
     // A Blueprint usually hands back more than one thing, and position would be guesswork, so the
-    // return value is the result named "ReturnValue" -- which is what UHT calls it.
+    // return value is the result named "ReturnValue" -- which is what UHT calls it. Never another
+    // result in its place: the server also reports every by-reference input, which UHT flags
+    // CPF_OutParm, and one of those is not the return value.
     response
         .results
         .iter()
         .find(|result| result.name == "ReturnValue")
-        .or_else(|| response.results.first())
         .and_then(|result| result.typed_value.as_ref())
         .ok_or_else(|| TempoError::Protocol("the function returned no value".into()))
 }
@@ -2656,6 +2657,38 @@ mod tests {
                 translation: FVector { x: 100.0, y: 0.0, z: -5.0 },
                 scale3d: FVector { x: 1.0, y: 2.0, z: 3.0 },
             }]);
+    }
+
+    // UHT flags a `const T&` parameter CPF_OutParm, so the server reports every by-reference input
+    // among a call's results, ahead of the return value. It is neither the return value nor an out
+    // parameter, and must not be read as either.
+    #[test]
+    fn a_by_reference_input_is_not_a_result() {
+        let result = |name: &str, inner: pb::value::Value| pb::FunctionResult {
+            name: name.to_string(),
+            typed_value: Some(value(inner)),
+            ..Default::default()
+        };
+        let echoed = result(
+            "Vectors",
+            pb::value::Value::VectorArrayValue(pb::VectorArray {
+                values: vec![crate::proto::tempo_core::Vector { x: 1.0, y: 2.0, z: 3.0 }],
+            }),
+        );
+
+        let with_return = pb::CallFunctionResponse {
+            results: vec![echoed.clone(), result("ReturnValue", pb::value::Value::FloatValue(2.0))],
+        };
+        assert_eq!(f64::from_value(returned(&with_return).unwrap()).unwrap(), 2.0);
+
+        let with_output = pb::CallFunctionResponse {
+            results: vec![echoed.clone(), result("Count", pb::value::Value::IntValue(3))],
+        };
+        assert_eq!(ObjectRef::result_of::<i32>(&with_output, "Count").unwrap(), 3);
+
+        // Without a return value there is nothing to read, not the first result in its place.
+        let only_echoed = pb::CallFunctionResponse { results: vec![echoed] };
+        assert!(returned(&only_echoed).is_err());
     }
 
     #[test]

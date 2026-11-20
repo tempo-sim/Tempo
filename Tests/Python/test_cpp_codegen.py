@@ -582,6 +582,28 @@ def test_values_conversions_and_batches_behave(generated):
     wire.mutable_struct_value()->set_struct_name("FSomethingElse");
     expect(!ValueTraits<FWidgetSettings>::from(wire).ok(), "a different struct is refused");
 
+    // UHT flags a `const T&` parameter CPF_OutParm, so the server reports every by-reference input
+    // among a call's results, ahead of the return value. It is neither the return value nor an out
+    // parameter, and must not be read as either.
+    {
+        TempoWorld::CallFunctionResponse response;
+        TempoWorld::FunctionResult* echoed = response.add_results();
+        echoed->set_name("Vectors");
+        *echoed->mutable_typed_value() = ValueTraits<std::vector<FVector>>::to({FVector{1.0, 2.0, 3.0}});
+        TempoWorld::CallFunctionResponse only_echoed = response;
+        TempoWorld::FunctionResult* count = response.add_results();
+        count->set_name("Count");
+        count->mutable_typed_value()->set_int_value(3);
+        TempoWorld::FunctionResult* returned_value = response.add_results();
+        returned_value->set_name("ReturnValue");
+        returned_value->mutable_typed_value()->set_float_value(2.0);
+        auto ret = detail::returned(response);
+        expect(ret.ok() && ret.value().float_value() == 2.0, "a by-reference input is not the return value");
+        auto out = ObjectRef::result_of<std::int32_t>(response, "Count");
+        expect(out.ok() && out.value() == 3, "a by-reference input does not displace an out parameter");
+        expect(!detail::returned(only_echoed).ok(), "no return value is an error, not the first result");
+    }
+
     // An enum travels as its authored name.
     TempoWorld::Value mode = ValueTraits<EWidgetMode>::to(EWidgetMode::Advanced);
     expect(mode.enum_value() == "Advanced", "enum by name");

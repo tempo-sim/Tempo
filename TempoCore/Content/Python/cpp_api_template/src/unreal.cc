@@ -713,12 +713,11 @@ Result<TempoWorld::CallFunctionResponse> call_results(const TempoWorld::BatchOpR
 
 Result<TempoWorld::Value> returned(const TempoWorld::CallFunctionResponse& response) {
     // A Blueprint usually hands back more than one thing, and position would be guesswork, so the
-    // return value is the result named "ReturnValue" -- which is what UHT calls it.
+    // return value is the result named "ReturnValue" -- which is what UHT calls it. Never another
+    // result in its place: the server also reports every by-reference input, which UHT flags
+    // CPF_OutParm, and one of those is not the return value.
     for (const auto& result : response.results()) {
         if (result.name() == "ReturnValue" && result.has_typed_value()) return result.typed_value();
-    }
-    if (response.results_size() > 0 && response.results(0).has_typed_value()) {
-        return response.results(0).typed_value();
     }
     return TempoError::protocol("the function returned no value");
 }
