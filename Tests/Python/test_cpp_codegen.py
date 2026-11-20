@@ -582,13 +582,13 @@ def test_values_conversions_and_batches_behave(generated):
     wire.mutable_struct_value()->set_struct_name("FSomethingElse");
     expect(!ValueTraits<FWidgetSettings>::from(wire).ok(), "a different struct is refused");
 
-    // UHT flags a `const T&` parameter CPF_OutParm, so the server reports every by-reference input
-    // among a call's results, ahead of the return value. It is neither the return value nor an out
-    // parameter, and must not be read as either.
+    // The server reports a UPARAM(ref) input among a call's results, ahead of the return value,
+    // because the function may have changed it. The schema calls it an input, so it is neither the
+    // return value nor an out parameter, and must not be read as either.
     {
         TempoWorld::CallFunctionResponse response;
         TempoWorld::FunctionResult* echoed = response.add_results();
-        echoed->set_name("Vectors");
+        echoed->set_name("Points");
         *echoed->mutable_typed_value() = ValueTraits<std::vector<FVector>>::to({FVector{1.0, 2.0, 3.0}});
         TempoWorld::CallFunctionResponse only_echoed = response;
         TempoWorld::FunctionResult* count = response.add_results();

@@ -532,6 +532,19 @@ bool IsInputParameter(const FProperty* Property)
 	return !Property->HasAnyPropertyFlags(CPF_OutParm) || Property->HasAnyPropertyFlags(CPF_ReferenceParm);
 }
 
+bool IsCallResult(const FProperty* Property)
+{
+	if (!Property || !Property->HasAnyPropertyFlags(CPF_Parm))
+	{
+		return false;
+	}
+	if (Property->HasAnyPropertyFlags(CPF_ReturnParm))
+	{
+		return true;
+	}
+	return Property->HasAnyPropertyFlags(CPF_OutParm) && !Property->HasAllPropertyFlags(CPF_ConstParm | CPF_ReferenceParm);
+}
+
 FFunctionInfo ClassifyFunction(const UFunction* Function)
 {
 	FFunctionInfo Info;

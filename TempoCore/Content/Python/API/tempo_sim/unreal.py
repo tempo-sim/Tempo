@@ -1632,8 +1632,8 @@ def _function_result(response, signature):
     a dict keyed by name, because position would be guesswork.
 
     Only the results the signature declares are kept, as the stub declares them. The server also
-    reports every by-reference input -- UHT flags a `const T&` parameter CPF_OutParm -- and keeping
-    those turned a function declared `-> float` into one returning a dict.
+    reports a `UPARAM(ref)` input, which the function may have changed but which the schema calls an
+    input, and keeping it would turn a function declared `-> float` into one returning a dict.
     """
     returns = signature.get("returns")
     outputs = signature.get("outputs") or {}

@@ -192,6 +192,12 @@ namespace TempoWorldReflection
 	// Whether the caller must supply this parameter.
 	TEMPOWORLD_API bool IsInputParameter(const FProperty* Property);
 
+	// Whether a call reports this parameter among its results: the return value, an out parameter,
+	// and a by-reference input the function may change (`UPARAM(ref) T&`), whose new value is the
+	// only way a caller gets that change back. Not a `const T&` input, which UHT also flags
+	// CPF_OutParm but which cannot have changed, so reporting it would only echo the argument.
+	TEMPOWORLD_API bool IsCallResult(const FProperty* Property);
+
 	// Classifies a function. Never fails: an uninvokable function comes back with
 	// bCallable == false and a reason.
 	TEMPOWORLD_API FFunctionInfo ClassifyFunction(const UFunction* Function);

@@ -509,7 +509,8 @@ A few rules worth knowing:
   of that parameter keeps its zero value.
 - **Return values and out parameters come back typed.** The response carries one
   `FunctionResult` per value the function handed back — its return value (which Unreal names
-  `ReturnValue`) and any out parameters, in declaration order. `typed_value` is the same `Value`
+  `ReturnValue`), any out parameters, and any `UPARAM(ref)` inputs, whose values the function may
+  have changed, in declaration order. A `const&` input is not reported. `typed_value` is the same `Value`
   `get_property` returns, Unreal-native; `property_type` and the human-readable `value` string use
   the same vocabulary and format as `get_*_properties`.
 - **Latent functions, C-style array parameters, and delegate parameters are rejected**, since

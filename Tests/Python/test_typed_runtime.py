@@ -888,15 +888,15 @@ def test_a_function_result_is_typed_by_its_signature(classes):
 
 
 def test_a_by_reference_input_is_not_a_result(classes):
-    """UHT flags a `const T&` parameter CPF_OutParm, so the server reports it among a call's
-    results. It is an input, which the signature does not list as an output and the stub does not
-    declare, so it must not turn `float GetVectorArrayAverage(const TArray<FVector>& Vectors)` into
-    a call returning a dict -- nor appear beside a declared out parameter."""
+    """The server reports a `UPARAM(ref)` input among a call's results, because the function may
+    have changed it. The schema calls it an input, which the signature does not list as an output
+    and the stub does not declare, so it must not turn `float Smooth(UPARAM(ref) TArray<FVector>&
+    Points)` into a call returning a dict -- nor appear beside a declared out parameter."""
     import tempo_sim.unreal as unreal
     import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
 
     echoed = WorldControl.FunctionResult(
-        name="Vectors", typed_value=unreal._to_value("vector_array_value", [unreal.FVector(1, 2, 3)]))
+        name="Points", typed_value=unreal._to_value("vector_array_value", [unreal.FVector(1, 2, 3)]))
 
     class ReturnOnly:
         results = [echoed, WorldControl.FunctionResult(
@@ -1573,7 +1573,7 @@ def test_out_parameters_come_back_by_name(classes, fake_calls):
 
 def test_an_undeclared_result_does_not_change_what_a_call_returns(classes, fake_calls):
     # Resize is `bool Resize(int NewSize)`, so it returns a bool, whatever else the server reports --
-    # as it reports every by-reference input.
+    # as it reports a UPARAM(ref) input.
     fake_calls["results"] = [
         fake_calls["make"]("ReturnValue", bool_value=True),
         fake_calls["make"]("NewSize", int_value=4),

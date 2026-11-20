@@ -1925,8 +1925,8 @@ pub fn argument<T: ToValue>(name: &str, value: &T) -> pb::FunctionArg {
 fn returned(response: &pb::CallFunctionResponse) -> Result<&pb::Value, TempoError> {
     // A Blueprint usually hands back more than one thing, and position would be guesswork, so the
     // return value is the result named "ReturnValue" -- which is what UHT calls it. Never another
-    // result in its place: the server also reports every by-reference input, which UHT flags
-    // CPF_OutParm, and one of those is not the return value.
+    // result in its place: the server also reports a `UPARAM(ref)` input, ahead of the return value,
+    // and that is not it.
     response
         .results
         .iter()
@@ -2659,9 +2659,9 @@ mod tests {
             }]);
     }
 
-    // UHT flags a `const T&` parameter CPF_OutParm, so the server reports every by-reference input
-    // among a call's results, ahead of the return value. It is neither the return value nor an out
-    // parameter, and must not be read as either.
+    // The server reports a `UPARAM(ref)` input among a call's results, ahead of the return value,
+    // because the function may have changed it. The schema calls it an input, so it is neither the
+    // return value nor an out parameter, and must not be read as either.
     #[test]
     fn a_by_reference_input_is_not_a_result() {
         let result = |name: &str, inner: pb::value::Value| pb::FunctionResult {
@@ -2670,7 +2670,7 @@ mod tests {
             ..Default::default()
         };
         let echoed = result(
-            "Vectors",
+            "Points",
             pb::value::Value::VectorArrayValue(pb::VectorArray {
                 values: vec![crate::proto::tempo_core::Vector { x: 1.0, y: 2.0, z: 3.0 }],
             }),

@@ -7,6 +7,7 @@
 #include "Engine/DataTable.h"
 #include "Engine/HitResult.h"
 #include "GameFramework/Actor.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
@@ -284,6 +285,40 @@ bool FTempoWorldReflectionFunctionsTest::RunTest(const FString& Parameters)
 				TEXT("parameter '%s': kind and signature disagree about out-ness (signature: %s)"),
 				*Parameter.Name, *Bounds.Signature));
 		}
+	}
+
+	// What a call reports back. A const by-reference input is flagged CPF_OutParm by UHT but cannot
+	// have changed, so it is not a result; a UPARAM(ref) input can, so it is; and so are true out
+	// parameters and the return value. GetVectorArrayAverage(const TArray<FVector>& Vectors) and
+	// Vector_Assign(UPARAM(ref) FVector& A, const FVector& InVector) carry both kinds of input.
+	auto Parameter = [this](UClass* Owner, const TCHAR* FunctionName, const TCHAR* ParameterName) -> const FProperty*
+	{
+		const UFunction* Function = Owner->FindFunctionByName(FName(FunctionName));
+		const FProperty* Found = Function ? Function->FindPropertyByName(FName(ParameterName)) : nullptr;
+		if (!Found)
+		{
+			AddError(FString::Printf(TEXT("%s has no parameter %s.%s"), *Owner->GetName(), FunctionName, ParameterName));
+		}
+		return Found;
+	};
+	const FProperty* ConstRefArray = Parameter(UKismetMathLibrary::StaticClass(), TEXT("GetVectorArrayAverage"), TEXT("Vectors"));
+	const FProperty* ConstRef = Parameter(UKismetMathLibrary::StaticClass(), TEXT("Vector_Assign"), TEXT("InVector"));
+	const FProperty* MutableRef = Parameter(UKismetMathLibrary::StaticClass(), TEXT("Vector_Assign"), TEXT("A"));
+	const FProperty* Returned = Parameter(UKismetMathLibrary::StaticClass(), TEXT("GetVectorArrayAverage"), TEXT("ReturnValue"));
+	const FProperty* ByValue = Parameter(AActor::StaticClass(), TEXT("SetActorHiddenInGame"), TEXT("bNewHidden"));
+	TestTrue(TEXT("a const T& input is flagged CPF_OutParm, which is why this needs deciding"),
+		ConstRefArray && ConstRefArray->HasAllPropertyFlags(CPF_OutParm | CPF_ConstParm | CPF_ReferenceParm));
+	TestTrue(TEXT("a const TArray& input is an input"), IsInputParameter(ConstRefArray));
+	TestFalse(TEXT("a const TArray& input is not a result"), IsCallResult(ConstRefArray));
+	TestFalse(TEXT("a const FVector& input is not a result"), IsCallResult(ConstRef));
+	TestTrue(TEXT("a UPARAM(ref) input is an input"), IsInputParameter(MutableRef));
+	TestTrue(TEXT("a UPARAM(ref) input is a result"), IsCallResult(MutableRef));
+	TestTrue(TEXT("the return value is a result"), IsCallResult(Returned));
+	TestFalse(TEXT("a by-value input is not a result"), IsCallResult(ByValue));
+	for (const FParameterInfo& Out : Bounds.Parameters)
+	{
+		TestTrue(FString::Printf(TEXT("out parameter %s is a result"), *Out.Name),
+			IsCallResult(AActor::StaticClass()->FindFunctionByName(TEXT("GetActorBounds"))->FindPropertyByName(FName(*Out.Name))) == (Out.Kind == EParameterKind::Output));
 	}
 
 	// A latent function cannot be driven from outside: only the caller's own latent action manager

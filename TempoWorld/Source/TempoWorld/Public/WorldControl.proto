@@ -938,7 +938,8 @@ message CallFunctionRequest {
   string subsystem = 5;
 }
 
-// One value a function handed back: its return value or an out parameter.
+// One value a function handed back: its return value, an out parameter, or a non-const
+// by-reference input.
 message FunctionResult {
   // Parameter name. Unreal names a return value "ReturnValue".
   string name = 1;
@@ -957,8 +958,9 @@ message FunctionResult {
 }
 
 message CallFunctionResponse {
-  // The function's return value and any out parameters, in declaration order.
-  // Empty for a void function with no out parameters.
+  // The function's return value, its out parameters, and its non-const by-reference inputs
+  // (UPARAM(ref)), whose values the function may have changed, in declaration order. A const
+  // by-reference input is not reported: it cannot have changed. Empty for a void function with none.
   repeated FunctionResult results = 1;
 }
 

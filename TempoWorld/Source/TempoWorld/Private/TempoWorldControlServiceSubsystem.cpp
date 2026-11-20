@@ -4669,7 +4669,7 @@ namespace
 		for (TFieldIterator<FProperty> It(Function); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
 		{
 			const FProperty* Parm = *It;
-			if (!Parm->HasAnyPropertyFlags(CPF_ReturnParm | CPF_OutParm))
+			if (!TempoWorldReflection::IsCallResult(Parm))
 			{
 				continue;
 			}
