@@ -44,7 +44,7 @@ use fixture_project::reflected::classes::core_u_object::Object;
 use fixture_project::reflected::classes::engine::{MeshThing, Widget};
 use fixture_project::reflected::enums::EWidgetMode;
 use fixture_project::reflected::structs::{FWidgetSettings, FWidgetTrim};
-use tempo_sim::unreal::{Class, ObjectRef, FVector};
+use tempo_sim::unreal::{Class, ObjectRef, FRotator, FVector};
 use tempo_sim::{world, TempoError};
 
 fn takes_mesh(_m: &MeshThing) {}
@@ -210,6 +210,16 @@ def test_a_property_reads_and_writes(workspace):
     let enabled: bool = widget.b_enabled()?;
     widget.set_b_enabled(true)?;
     let offset: FVector = widget.offset()?;
+""") == []
+
+
+def test_a_container_of_a_first_class_struct_reads_and_writes(workspace):
+    """An array or a set of a struct the Value carries first-class is a Vec of its value type."""
+    assert check(workspace, """
+    let path: Vec<FVector> = widget.path()?;
+    widget.set_path(vec![FVector::default()])?;
+    let corners: Vec<tempo_sim::unreal::FIntPoint> = widget.corners()?;
+    widget.set_corners(vec![tempo_sim::unreal::FIntPoint { x: 1, y: 2 }])?;
 """) == []
 
 
@@ -540,6 +550,7 @@ def test_a_property_whose_setter_cannot_be_named_is_read_only(workspace):
     ("a function returning a struct that cannot travel", "let _ = widget.get_limits()?;"),
     ("a function taking a struct that cannot travel", "widget.apply_limits()?;"),
     ("a container nothing can read", "let _ = widget.waypoints()?;"),
+    ("a container of the wrong first-class struct", "widget.set_path(vec![FRotator::default()])?;"),
 ])
 def test_drift_does_not_compile(workspace, case, body):
     """Each of these is what a release is expected to break, and must break the build.

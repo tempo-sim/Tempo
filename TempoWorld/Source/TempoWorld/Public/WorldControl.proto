@@ -798,6 +798,18 @@ message StructField {
 
 message StructArray { repeated StructValue values = 1; }
 
+// Element wrappers for the repeated variants of the structs a Value carries first-class. Each
+// element is exactly what the matching singular variant carries.
+message VectorArray { repeated TempoCore.Vector values = 1; }
+message Vector2DArray { repeated TempoCore.Vector2D values = 1; }
+message IntVectorArray { repeated IntVector values = 1; }
+message IntPointArray { repeated IntPoint values = 1; }
+message RotatorArray { repeated TempoCore.Rotation values = 1; }
+message QuatArray { repeated Quat values = 1; }
+message ColorArray { repeated Color values = 1; }
+message LinearColorArray { repeated LinearColor values = 1; }
+message NativeTransformArray { repeated NativeTransform values = 1; }
+
 // One typed value, independent of what it is assigned to. Used by SetProperty
 // as a property's new value and by CallFunction as an argument's value.
 //
@@ -869,6 +881,25 @@ message Value {
     NativeTransform native_transform_value = 41;
     // An FLinearColor, which always reads this way.
     LinearColor linear_color_value = 42;
+    // Arrays and sets of the structs above, each element as its singular variant carries it.
+    VectorArray vector_array_value = 43;
+    Vector2DArray vector2d_array_value = 44;
+    IntVectorArray int_vector_array_value = 45;
+    IntPointArray int_point_array_value = 46;
+    RotatorArray rotator_array_value = 47;
+    QuatArray quat_array_value = 48;
+    ColorArray color_array_value = 49;
+    LinearColorArray linear_color_array_value = 50;
+    NativeTransformArray native_transform_array_value = 51;
+    VectorArray vector_set_value = 52;
+    Vector2DArray vector2d_set_value = 53;
+    IntVectorArray int_vector_set_value = 54;
+    IntPointArray int_point_set_value = 55;
+    RotatorArray rotator_set_value = 56;
+    QuatArray quat_set_value = 57;
+    ColorArray color_set_value = 58;
+    LinearColorArray linear_color_set_value = 59;
+    NativeTransformArray native_transform_set_value = 60;
   }
   // A transform in the API's units, which a Value no longer carries: see native_transform_value.
   reserved 13;

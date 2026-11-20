@@ -291,6 +291,16 @@ def test_a_property_reads_and_writes(generated, tmp_path):
 """, tmp_path) == []
 
 
+def test_a_container_of_a_value_type_reads_and_writes(generated, tmp_path):
+    """An array or a set of one of the first-class structs is one value, in both directions."""
+    assert check(generated, """
+    Result<std::vector<FVector>> path = widget.path();
+    Result<void> moved = widget.set_path({FVector{1, 2, 3}, FVector{4, 5, 6}});
+    Result<std::vector<FIntPoint>> corners = widget.corners();
+    Result<void> cornered = widget.set_corners({FIntPoint{1, 2}});
+""", tmp_path) == []
+
+
 def test_an_inherited_property_is_inherited(generated, tmp_path):
     """Name is declared on Object, and Widget derives from it -- by C++'s own inheritance."""
     header = (generated / "include/tempo/reflected/classes/engine/Widget.h").read_text()
@@ -631,6 +641,28 @@ def test_values_conversions_and_batches_behave(generated):
     expect(ValueTraits<FLinearColor>::from(ValueTraits<FLinearColor>::to(linear)).value() == linear,
            "a linear color is not squeezed into 8 bits");
     expect(FTransform{}.scale3d == FVector{1, 1, 1} && FColor{}.a == 255, "Unreal's defaults");
+
+    // A container of a value type: each element in its singular shape, the array variant written,
+    // and either variant read, since a set and an array share the one C++ shape.
+    std::vector<FTransform> poses{scaled, FTransform{}};
+    TempoWorld::Value pose_array = ValueTraits<std::vector<FTransform>>::to(poses);
+    expect(pose_array.native_transform_array_value().values_size() == 2 &&
+           pose_array.native_transform_array_value().values(0).scale3d().x() == 2,
+           "a transform array is written element by element");
+    expect(ValueTraits<std::vector<FTransform>>::from(pose_array).value() == poses, "a transform array round-trips");
+    std::vector<FRotator> turns{FRotator{10, 20, 30}};
+    expect(ValueTraits<std::vector<FRotator>>::to(turns).rotator_array_value().values(0).r() == 30,
+           "an element keeps its singular shape");
+    TempoWorld::Value corner_set;
+    corner_set.mutable_int_point_set_value()->add_values()->set_x(7);
+    auto corners = ValueTraits<std::vector<FIntPoint>>::from(corner_set);
+    expect(corners.ok() && corners.value() == std::vector<FIntPoint>{FIntPoint{7, 0}}, "a set reads as a vector");
+    TempoWorld::Value colors;
+    colors.mutable_color_array_value()->add_values()->set_r(9);
+    expect(ValueTraits<std::vector<FColor>>::from(colors).value() == std::vector<FColor>{FColor{9, 0, 0, 255}},
+           "an element's unset alpha is opaque");
+    expect(ValueTraits<std::vector<FVector>>::to({}).has_vector_array_value(), "an empty array still says what it is");
+    expect(!ValueTraits<std::vector<FVector>>::from(corner_set).ok(), "the wrong element kind is refused");
 
     // A batch abandoned by its body sends nothing, which is what lets this run without a sim; a
     // deferred read inside it waits rather than resolving.

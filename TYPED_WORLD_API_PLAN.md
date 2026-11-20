@@ -1447,6 +1447,14 @@ A function whose struct parameter is not value-expressible by §17.3, and one wi
 structs or a map. Those were already absent and stay absent, by the rule that an unsupported type is
 omitted rather than loosened.
 
+Containers of the first-class structs (`TArray<FVector>`, `TSet<FIntPoint>`, `TArray<FTransform>`,
+…) were also absent, for a different reason: §3a gave `Value` repeated variants for the scalar kinds
+and the references only. They have them now, an array and a set variant per first-class struct
+(`vector_array_value`, `int_point_set_value`, …), each element carried as its singular variant
+carries it. Unlike a set of an arbitrary struct, a set of one of these needs nothing reflection
+cannot see: the struct is native, and Unreal would not have compiled the `TSet` had it no
+`GetTypeHash`. Python reads a set back as a `set`, so its value types are `unsafe_hash` dataclasses.
+
 ### 17.7 As built
 
 Measured on TempoSample's editor walk: **1,230 of 1,558 structs are value-expressible**, and

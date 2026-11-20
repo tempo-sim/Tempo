@@ -550,6 +550,50 @@ TempoWorld::Value ValueTraits<std::vector<ClassRef>>::to(const std::vector<Class
     return string_array(&TempoWorld::Value::mutable_class_array_value, paths);
 }
 
+// Containers of the value types above. A TSet travels in a variant of its own carrying the same
+// payload as the array's, and both containers have the one C++ shape, so a read accepts either; a
+// write sends the array variant, and the server stores it into whichever container the property is.
+// Each element goes through its type's own singular conversion, so the shape is defined once.
+#define TEMPO_VALUE_TYPE_CONTAINER(Type, Variant, Wanted)                                              \
+    Result<std::vector<Type>> ValueTraits<std::vector<Type>>::from(const TempoWorld::Value& value) {    \
+        const auto* array = value.has_##Variant##_array_value() ? &value.Variant##_array_value()       \
+                            : value.has_##Variant##_set_value() ? &value.Variant##_set_value()         \
+                                                                 : nullptr;                            \
+        if (array == nullptr) return detail::wrong(value, Wanted);                                     \
+        std::vector<Type> elements;                                                                    \
+        elements.reserve(array->values_size());                                                        \
+        for (const auto& element : array->values()) {                                                  \
+            TempoWorld::Value single;                                                                  \
+            *single.mutable_##Variant##_value() = element;                                             \
+            auto converted = ValueTraits<Type>::from(single);                                          \
+            if (!converted) return std::move(converted).error();                                       \
+            elements.push_back(std::move(converted).value());                                          \
+        }                                                                                              \
+        return elements;                                                                               \
+    }                                                                                                  \
+                                                                                                       \
+    TempoWorld::Value ValueTraits<std::vector<Type>>::to(const std::vector<Type>& v) {                 \
+        TempoWorld::Value value;                                                                       \
+        auto* array = value.mutable_##Variant##_array_value();                                         \
+        for (const Type& element : v) {                                                                \
+            TempoWorld::Value single = ValueTraits<Type>::to(element);                                 \
+            *array->add_values() = std::move(*single.mutable_##Variant##_value());                    \
+        }                                                                                              \
+        return value;                                                                                  \
+    }
+
+TEMPO_VALUE_TYPE_CONTAINER(FVector, vector, "a vector array")
+TEMPO_VALUE_TYPE_CONTAINER(FVector2D, vector2d, "a 2D vector array")
+TEMPO_VALUE_TYPE_CONTAINER(FIntVector, int_vector, "an int vector array")
+TEMPO_VALUE_TYPE_CONTAINER(FIntPoint, int_point, "an int point array")
+TEMPO_VALUE_TYPE_CONTAINER(FRotator, rotator, "a rotator array")
+TEMPO_VALUE_TYPE_CONTAINER(FQuat, quat, "a quaternion array")
+TEMPO_VALUE_TYPE_CONTAINER(FTransform, native_transform, "a transform array")
+TEMPO_VALUE_TYPE_CONTAINER(FColor, color, "a color array")
+TEMPO_VALUE_TYPE_CONTAINER(FLinearColor, linear_color, "a linear color array")
+
+#undef TEMPO_VALUE_TYPE_CONTAINER
+
 // -- struct values -------------------------------------------------------------------------------------
 
 Result<StructFields> StructFields::of(const TempoWorld::Value& value, std::string_view name) {

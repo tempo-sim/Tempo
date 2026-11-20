@@ -91,16 +91,24 @@ bool FTempoWorldReflectionValueExpressibleTest::RunTest(const FString& Parameter
 	// A struct is decided by its members (see StructValues), so one with no struct to look at is not.
 	TestFalse(TEXT("struct with no UScriptStruct"), Scalar(EValueKind::Struct).IsValueExpressible());
 
-	// Containers, element by element: a Value has repeated variants only for the scalar kinds and
-	// the object references.
+	// Containers, element by element: a Value has repeated variants only for the scalar kinds, the
+	// first-class structs and the object references.
 	TestTrue(TEXT("array of int"), Container(EValueKind::Array, EValueKind::Int).IsValueExpressible());
 	TestTrue(TEXT("array of string"), Container(EValueKind::Array, EValueKind::String).IsValueExpressible());
 	TestTrue(TEXT("array of actor"), Container(EValueKind::Array, EValueKind::Actor).IsValueExpressible());
 	TestTrue(TEXT("set of enum"), Container(EValueKind::Set, EValueKind::Enum).IsValueExpressible());
 
+	// The first-class structs have repeated variants of their own, for arrays and sets alike.
+	for (const EValueKind Kind : { EValueKind::Vector, EValueKind::Vector2D, EValueKind::IntVector, EValueKind::IntPoint,
+		EValueKind::Rotator, EValueKind::Quat, EValueKind::Transform, EValueKind::Color, EValueKind::LinearColor })
+	{
+		if (!Container(EValueKind::Array, Kind).IsValueExpressible() || !Container(EValueKind::Set, Kind).IsValueExpressible())
+		{
+			AddError(FString::Printf(TEXT("containers of %s should be value-expressible"), GetKindName(Kind)));
+		}
+	}
+
 	// No repeated variant exists for these, so the whole container is nested-access only.
-	TestFalse(TEXT("array of vector"), Container(EValueKind::Array, EValueKind::Vector).IsValueExpressible());
-	TestFalse(TEXT("array of transform"), Container(EValueKind::Array, EValueKind::Transform).IsValueExpressible());
 	TestFalse(TEXT("array of a struct with no UScriptStruct"), Container(EValueKind::Array, EValueKind::Struct).IsValueExpressible());
 	TestFalse(TEXT("array of unsupported"), Container(EValueKind::Array, EValueKind::Unsupported).IsValueExpressible());
 	TestFalse(TEXT("nested array"), Container(EValueKind::Array, EValueKind::Array).IsValueExpressible());

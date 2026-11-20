@@ -31,7 +31,10 @@ from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
 
 
-@dataclass
+# The value types are hashable as well as mutable, because a TSet of one reads back as a Python set.
+# The hash is of the current members, so an element changed while it is in a set is lost to it, as it
+# would be in any mutable hashable type.
+@dataclass(unsafe_hash=True)
 class FVector:
     """Unreal's FVector: a location or direction in centimeters, left-handed."""
     X: float = 0.0
@@ -39,14 +42,14 @@ class FVector:
     Z: float = 0.0
 
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class FVector2D:
     """Unreal's FVector2D."""
     X: float = 0.0
     Y: float = 0.0
 
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class FIntVector:
     """Unreal's FIntVector."""
     X: int = 0
@@ -54,14 +57,14 @@ class FIntVector:
     Z: int = 0
 
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class FIntPoint:
     """Unreal's FIntPoint."""
     X: int = 0
     Y: int = 0
 
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class FRotator:
     """Unreal's FRotator: an orientation in degrees, left-handed, constructed (Pitch, Yaw, Roll) as
     Unreal's is."""
@@ -70,7 +73,7 @@ class FRotator:
     Roll: float = 0.0
 
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class FQuat:
     """Unreal's FQuat: a rotation, left-handed."""
     X: float = 0.0
@@ -79,7 +82,7 @@ class FQuat:
     W: float = 1.0
 
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class FTransform:
     """Unreal's FTransform: a rotation as a quaternion, a translation in centimeters and a 3D scale,
     left-handed, constructed (Rotation, Translation, Scale3D) as Unreal's is."""
@@ -88,7 +91,7 @@ class FTransform:
     Scale3D: FVector = field(default_factory=lambda: FVector(1.0, 1.0, 1.0))
 
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class FColor:
     """Unreal's FColor: 8-bit RGBA, sRGB. Opaque unless told otherwise."""
     R: int = 0
@@ -97,7 +100,7 @@ class FColor:
     A: int = 255
 
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class FLinearColor:
     """Unreal's FLinearColor: floating-point RGBA, linear. Opaque unless told otherwise."""
     R: float = 0.0
@@ -884,6 +887,15 @@ _COMPONENT_VARIANTS = {
     "linear_color_value": ("r", "g", "b", "a"),
 }
 
+# The repeated variants of the first-class structs, each by the singular variant one element of it
+# travels as. The element conversion is the singular one, so it is written once.
+_STRUCT_CONTAINER_VARIANTS = {
+    "{}_{}_value".format(base, container): base + "_value"
+    for base in ("vector", "vector2d", "int_vector", "int_point", "rotator", "quat", "color",
+                 "linear_color", "native_transform")
+    for container in ("array", "set")
+}
+
 # How a component-shaped variant maps onto one of this module's value types.
 _COMPONENT_TYPES = {
     "vector_value": (FVector, ("X", "Y", "Z")),
@@ -1002,6 +1014,13 @@ def _to_value(variant, value):
             value.Scale3D.X, value.Scale3D.Y, value.Scale3D.Z)
         return message
 
+    if variant in _STRUCT_CONTAINER_VARIANTS:
+        element_variant = _STRUCT_CONTAINER_VARIANTS[variant]
+        target = getattr(message, variant)
+        for element in value:
+            target.values.add().CopyFrom(getattr(_to_value(element_variant, element), element_variant))
+        return message
+
     if variant.endswith("_array_value") or variant.endswith("_set_value"):
         target = getattr(message, variant)
         reference = variant.startswith(("class_", "asset_", "actor_", "component_"))
@@ -1098,6 +1117,13 @@ def _from_value(message, member=None):
             FQuat(source.rotation.x, source.rotation.y, source.rotation.z, source.rotation.w),
             FVector(source.translation.x, source.translation.y, source.translation.z),
             FVector(source.scale3d.x, source.scale3d.y, source.scale3d.z))
+
+    if variant in _STRUCT_CONTAINER_VARIANTS:
+        element_variant = _STRUCT_CONTAINER_VARIANTS[variant]
+        value_type = _value_type()
+        decoded = [_from_value(value_type(**{element_variant: element}))
+                   for element in getattr(message, variant).values]
+        return set(decoded) if variant.endswith("_set_value") else decoded
 
     if variant in ("asset_array_value", "asset_set_value"):
         assets = [AssetRef(path) for path in getattr(message, variant).values]

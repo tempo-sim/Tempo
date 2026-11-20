@@ -228,14 +228,42 @@
     {
      "name": "Waypoints",
      "kind": "array",
+     "type": "array<array<vector>>",
+     "element": {
+      "kind": "array",
+      "type": "array<vector>",
+      "element": {
+       "kind": "vector",
+       "type": "vector"
+      }
+     },
+     "readable": true,
+     "writable": false,
+     "value_expressible": false
+    },
+    {
+     "name": "Path",
+     "kind": "array",
      "type": "array<vector>",
      "element": {
       "kind": "vector",
       "type": "vector"
      },
      "readable": true,
-     "writable": false,
-     "value_expressible": false
+     "writable": true,
+     "value_expressible": true
+    },
+    {
+     "name": "Corners",
+     "kind": "set",
+     "type": "set<FIntPoint>",
+     "element": {
+      "kind": "intpoint",
+      "type": "FIntPoint"
+     },
+     "readable": true,
+     "writable": true,
+     "value_expressible": true
     },
     {
      "name": "Doomed",

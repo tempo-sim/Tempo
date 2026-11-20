@@ -403,6 +403,39 @@ def test_structured_values_round_trip(classes):
         assert unreal._from_value(unreal._to_value(variant, original)) == original, variant
 
 
+def test_containers_of_first_class_structs_round_trip(classes):
+    """Each first-class struct has an array and a set variant, whose elements travel exactly as
+    the singular variant's do. A set reads back as a Python set, so the value types are hashable."""
+    import tempo_sim.unreal as unreal
+
+    for kind, elements in (
+            ("vector", [unreal.FVector(1.0, 2.0, 3.0), unreal.FVector(4.0, 5.0, 6.0)]),
+            ("vector2d", [unreal.FVector2D(4.0, 5.0)]),
+            ("int_vector", [unreal.FIntVector(1, 2, 3)]),
+            ("int_point", [unreal.FIntPoint(6, 7), unreal.FIntPoint(8, 9)]),
+            ("rotator", [unreal.FRotator(10.0, 20.0, 30.0)]),
+            ("quat", [unreal.FQuat(0.0, 0.0, 0.5, 0.5)]),
+            ("color", [unreal.FColor(1, 2, 3, 4)]),
+            ("linear_color", [unreal.FLinearColor(0.25, 0.5, 0.75, 0.125)]),
+            ("native_transform", [unreal.FTransform(unreal.FQuat(0.0, 0.0, 0.5, 0.5),
+                                                    unreal.FVector(1.0, 2.0, 3.0),
+                                                    unreal.FVector(2.0, 2.0, 2.0))])):
+        array_variant, set_variant = kind + "_array_value", kind + "_set_value"
+        assert unreal._from_value(unreal._to_value(array_variant, elements)) == elements, kind
+        assert unreal._from_value(unreal._to_value(set_variant, set(elements))) == set(elements), kind
+
+        for variant in (array_variant, set_variant):
+            message = unreal._to_value(variant, [])
+            assert message.WhichOneof("value") == variant, "an empty {} must still select it".format(
+                variant)
+
+
+def test_value_types_hash_by_value(classes):
+    import tempo_sim.unreal as unreal
+    assert len({unreal.FVector(1.0, 2.0, 3.0), unreal.FVector(1.0, 2.0, 3.0)}) == 1
+    assert unreal.FTransform() in {unreal.FTransform()}
+
+
 def test_value_types_have_unreals_shapes(classes):
     """Constructed in Unreal's own order, and carried by name rather than by position."""
     import tempo_sim.unreal as unreal

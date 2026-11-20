@@ -89,6 +89,16 @@ def test_generates_the_expected_files(generated):
     assert widget["properties"]["Offset"]["writable"] is False
 
 
+def test_containers_of_first_class_structs_are_carried(generated):
+    """An array or set of FVector, FIntPoint and the rest has a repeated Value variant of its own,
+    so it is one assignable member rather than one reachable only an element at a time."""
+    metadata = json.loads((generated / DIST / "Engine.meta.json").read_text())
+    widget = metadata["/Script/Engine.Widget"]
+    assert widget["properties"]["Path"]["variant"] == "vector_array_value"
+    assert widget["properties"]["Corners"]["variant"] == "int_point_set_value"
+    assert widget["properties"]["Path"]["writable"] is True
+
+
 def test_metadata_says_what_a_reference_or_enum_reads_back_as(generated):
     """A reference travels as a name and an enum as its spelling. The stub types them as a handle of
     the declared class and as the generated member; the runtime can only build those if the
@@ -201,12 +211,15 @@ def test_valid_usage_type_checks(generated, tmp_path):
     errors = check(generated, """
 import fixture_classes.Engine as E
 import fixture_classes.enums as enums
+import tempo_sim.unreal as _unreal
 
 def ok(w: E.Widget) -> None:
     w.bEnabled = True
     w.Mode = enums.EWidgetMode.Advanced
     w.Tags = ["a", "b"]
-    print(w.Offset.X, w.Settings.Scale)
+    w.Path = [_unreal.FVector(1.0, 2.0, 3.0)]
+    w.Corners = {_unreal.FIntPoint(1, 2)}
+    print(w.Offset.X, w.Settings.Scale, w.Path[0].X, len(w.Corners))
     if w.Resize(4):
         w.Refresh()
 """, tmp_path)
@@ -398,11 +411,14 @@ def drift(w: E.Widget) -> None:
     ("a function returning a struct that cannot travel", "w.GetLimits()"),
     ("a function taking a struct that cannot travel", "w.ApplyLimits(structs.FWidgetLimits())"),
     ("a member nothing can read", "print(w.Waypoints)"),
+    ("the wrong struct in a container", "w.Path = [_unreal.FRotator()]"),
+    ("a list where a set is wanted", "w.Corners = [_unreal.FIntPoint()]"),
 ])
 def test_struct_drift_is_a_type_error(generated, tmp_path, case, source):
     errors = check(generated, """
 import fixture_classes.Engine as E
 import fixture_classes.structs as structs
+import tempo_sim.unreal as _unreal
 
 def drift(w: E.Widget) -> None:
     {}

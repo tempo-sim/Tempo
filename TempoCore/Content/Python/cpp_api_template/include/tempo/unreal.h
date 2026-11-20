@@ -454,6 +454,15 @@ TEMPO_DECLARE_VALUE(std::vector<std::int64_t>)
 TEMPO_DECLARE_VALUE(std::vector<double>)
 TEMPO_DECLARE_VALUE(std::vector<std::string>)
 TEMPO_DECLARE_VALUE(std::vector<ClassRef>)
+TEMPO_DECLARE_VALUE(std::vector<FVector>)
+TEMPO_DECLARE_VALUE(std::vector<FVector2D>)
+TEMPO_DECLARE_VALUE(std::vector<FIntVector>)
+TEMPO_DECLARE_VALUE(std::vector<FIntPoint>)
+TEMPO_DECLARE_VALUE(std::vector<FRotator>)
+TEMPO_DECLARE_VALUE(std::vector<FQuat>)
+TEMPO_DECLARE_VALUE(std::vector<FTransform>)
+TEMPO_DECLARE_VALUE(std::vector<FColor>)
+TEMPO_DECLARE_VALUE(std::vector<FLinearColor>)
 
 #undef TEMPO_DECLARE_VALUE
 

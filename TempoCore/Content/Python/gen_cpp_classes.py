@@ -83,11 +83,13 @@ SIMPLE_TYPES = {
 # Passed by value rather than by const reference.
 BY_VALUE = frozenset(("bool", "::std::int32_t", "::std::int64_t", "double"))
 
-# Element kinds a container has a Value variant for. Anything else makes its container
-# nested-access-only, which the server already reports as value_expressible: false.
+# Element kinds a container has a Value variant for, in an array and a set alike. Anything else
+# makes its container nested-access-only, which the server already reports as
+# value_expressible: false.
 CONTAINER_ELEMENTS = frozenset(
     ("bool", "int", "int64", "float", "double", "string", "enum", "class", "asset", "actor",
-     "component"))
+     "component", "vector", "vector2d", "intvector", "intpoint", "rotator", "quat", "transform",
+     "color", "linearcolor"))
 
 # How each kind is read and written. PLAIN goes through ValueTraits both ways, which in C++ covers
 # enums, assets, struct values and containers of all of them. A reference names an actor or a

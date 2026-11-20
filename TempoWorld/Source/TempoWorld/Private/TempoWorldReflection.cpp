@@ -75,16 +75,27 @@ namespace
 	// SetValueOnTarget, which accept every property type the element kind's scalar variant does --
 	// an int_array_value writes a TArray<uint8> or a TArray<int16> as readily as a TArray<int32>, and
 	// a string_array_value a TArray<FText> as readily as a TArray<FString> -- so this is decided by
-	// kind, never by width or spelling. The repeated variants exist for the scalar kinds, the object
-	// references, and -- in an array, not a set -- a struct that is itself value-expressible. There is
-	// none for a vector, a transform or a nested container, and none for a set of structs, which
-	// needs a hash function reflection cannot see.
+	// kind, never by width or spelling. The repeated variants exist for the scalar kinds, the
+	// first-class structs, the object references, and -- in an array, not a set -- a struct that is
+	// itself value-expressible. There is none for a nested container, and none for a set of other
+	// structs, which needs a hash function reflection cannot see. A set of a first-class struct needs
+	// no such thing from reflection: the struct is native, and Unreal would not have compiled the set
+	// had it no GetTypeHash.
 	bool HasRepeatedValueVariant(const FTypeInfo& Element, bool bIsArray)
 	{
 		switch (Element.Kind)
 		{
 		case EValueKind::Struct:
 			return bIsArray && IsStructValueExpressible(Element.Struct);
+		case EValueKind::Vector:
+		case EValueKind::Vector2D:
+		case EValueKind::IntVector:
+		case EValueKind::IntPoint:
+		case EValueKind::Rotator:
+		case EValueKind::Quat:
+		case EValueKind::Transform:
+		case EValueKind::Color:
+		case EValueKind::LinearColor:
 		case EValueKind::Bool:
 		case EValueKind::Int:
 		case EValueKind::Int64:

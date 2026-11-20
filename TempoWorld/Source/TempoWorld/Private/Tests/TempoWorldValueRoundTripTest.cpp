@@ -68,6 +68,10 @@ namespace
 			Transform = AddStruct(TEXT("Transform"), TBaseStructure<FTransform>::Get());
 			Color = AddStruct(TEXT("Color"), TBaseStructure<FColor>::Get());
 			LinearColor = AddStruct(TEXT("LinearColor"), TBaseStructure<FLinearColor>::Get());
+			Vectors = AddStructContainer<FArrayProperty>(TEXT("Vectors"), TBaseStructure<FVector>::Get());
+			Transforms = AddStructContainer<FArrayProperty>(TEXT("Transforms"), TBaseStructure<FTransform>::Get());
+			LinearColors = AddStructContainer<FArrayProperty>(TEXT("LinearColors"), TBaseStructure<FLinearColor>::Get());
+			Points = AddStructContainer<FSetProperty>(TEXT("Points"), TBaseStructure<FIntPoint>::Get());
 
 			Struct->Bind();
 			Struct->StaticLink(true);
@@ -111,6 +115,25 @@ namespace
 			return Property;
 		}
 
+		// An array or set of a native struct. The set's hashability is computed when the struct links.
+		template <typename ContainerPropertyType>
+		ContainerPropertyType* AddStructContainer(const TCHAR* Name, UScriptStruct* ElementStruct)
+		{
+			ContainerPropertyType* Container = NewProperty<ContainerPropertyType>(Struct, Name);
+			FStructProperty* Element = NewProperty<FStructProperty>(Container, FString::Printf(TEXT("%s_Element"), Name));
+			Element->Struct = ElementStruct;
+			if constexpr (std::is_same_v<ContainerPropertyType, FSetProperty>)
+			{
+				Container->ElementProp = Element;
+			}
+			else
+			{
+				Container->Inner = Element;
+			}
+			Struct->AddCppProperty(Container);
+			return Container;
+		}
+
 		template <typename T>
 		T& ValueOf(const FStructProperty* Property) const
 		{
@@ -141,6 +164,10 @@ namespace
 		FStructProperty* Transform = nullptr;
 		FStructProperty* Color = nullptr;
 		FStructProperty* LinearColor = nullptr;
+		FArrayProperty* Vectors = nullptr;
+		FArrayProperty* Transforms = nullptr;
+		FArrayProperty* LinearColors = nullptr;
+		FSetProperty* Points = nullptr;
 	};
 
 	TArray<int32> IntValues(const TempoWorld::IntArray& Given)
@@ -304,6 +331,114 @@ bool FTempoWorldValueRoundTripContainersTest::RunTest(const FString& Parameters)
 		SetValueOnTarget(nullptr, Fixture.TargetFor(Fixture.Bytes), StringArrayValue({ "x" })).error_code(), grpc::FAILED_PRECONDITION);
 	TestEqual(TEXT("int_array_value onto an int32 is a type mismatch"),
 		SetValueOnTarget(nullptr, Fixture.TargetFor(Fixture.Count), IntArrayValue({ 1 })).error_code(), grpc::FAILED_PRECONDITION);
+
+	return true;
+}
+
+// An array or set of a first-class struct is one Value, each element exactly as the singular variant
+// carries it, and a set reads back in the set variant.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoWorldValueRoundTripStructContainersTest,
+	"Tempo.World.ValueRoundTrip.StructContainers", TempoWorldValueRoundTripTestFlags)
+bool FTempoWorldValueRoundTripStructContainersTest::RunTest(const FString& Parameters)
+{
+	FValueRoundTripFixture Fixture;
+
+	for (FProperty* Property : { static_cast<FProperty*>(Fixture.Vectors), static_cast<FProperty*>(Fixture.Transforms),
+		static_cast<FProperty*>(Fixture.LinearColors), static_cast<FProperty*>(Fixture.Points) })
+	{
+		const TempoWorldReflection::FTypeInfo Type = TempoWorldReflection::ClassifyProperty(Property);
+		if (!Type.IsValueExpressible())
+		{
+			AddError(FString::Printf(TEXT("%s (%s) should be value-expressible"), *Property->GetName(), *Type.TypeString));
+		}
+	}
+
+	auto ArrayOf = [&Fixture](FArrayProperty* Property) { return FScriptArrayHelper(Property, Property->ContainerPtrToValuePtr<void>(Fixture.Memory)); };
+	TempoWorld::Value Out;
+
+	// TArray<FVector>: written, read back as vector_array_value, and the read written back unchanged.
+	{
+		TempoWorld::Value In;
+		for (const FVector& V : { FVector(1.0, 2.0, 3.0), FVector(-4.0, 5.5, 6.0) })
+		{
+			TempoCore::Vector* Element = In.mutable_vector_array_value()->add_values();
+			Element->set_x(V.X); Element->set_y(V.Y); Element->set_z(V.Z);
+		}
+		TestTrue(TEXT("vector array write"), SetValueOnTarget(nullptr, Fixture.TargetFor(Fixture.Vectors), In).ok());
+		FScriptArrayHelper Helper = ArrayOf(Fixture.Vectors);
+		if (TestEqual(TEXT("vector array length"), Helper.Num(), 2))
+		{
+			TestEqual(TEXT("vector array element 1"), *reinterpret_cast<const FVector*>(Helper.GetRawPtr(1)), FVector(-4.0, 5.5, 6.0));
+		}
+		TestTrue(TEXT("vector array read"), WritePropertyToValue(Fixture.Memory, Fixture.Vectors, Out).ok());
+		TestEqual(TEXT("vector array reads as vector_array_value"), Out.SerializeAsString(), In.SerializeAsString());
+
+		// The set variant of the kind writes an array just as well: the destination decides.
+		TempoWorld::Value AsSet;
+		*AsSet.mutable_vector_set_value() = In.vector_array_value();
+		AsSet.mutable_vector_set_value()->mutable_values()->RemoveLast();
+		TestTrue(TEXT("vector set variant onto an array"), SetValueOnTarget(nullptr, Fixture.TargetFor(Fixture.Vectors), AsSet).ok());
+		TestEqual(TEXT("vector array replaced, not appended"), ArrayOf(Fixture.Vectors).Num(), 1);
+	}
+
+	// TArray<FTransform>: the native shape per element, scale included.
+	{
+		const FTransform Given(FRotator(10.0, 20.0, 30.0).Quaternion(), FVector(100.0, -200.0, 300.0), FVector(2.0, 3.0, 4.0));
+		FScriptArrayHelper Helper = ArrayOf(Fixture.Transforms);
+		Helper.AddValues(1);
+		*reinterpret_cast<FTransform*>(Helper.GetRawPtr(0)) = Given;
+		Out.Clear();
+		TestTrue(TEXT("transform array read"), WritePropertyToValue(Fixture.Memory, Fixture.Transforms, Out).ok());
+		TestTrue(TEXT("transform array reads as native_transform_array_value"),
+			Out.has_native_transform_array_value() && Out.native_transform_array_value().values_size() == 1);
+		Helper.EmptyValues();
+		TestTrue(TEXT("transform array written back"), SetValueOnTarget(nullptr, Fixture.TargetFor(Fixture.Transforms), Out).ok());
+		TestTrue(TEXT("transform array round trip"), ArrayOf(Fixture.Transforms).Num() == 1
+			&& reinterpret_cast<const FTransform*>(ArrayOf(Fixture.Transforms).GetRawPtr(0))->Equals(Given, 1e-9));
+	}
+
+	// TArray<FLinearColor> from color_array_value: 8-bit sRGB taken into linear, as the singular
+	// color_value is. Alpha unset means opaque.
+	{
+		TempoWorld::Value In;
+		TempoWorld::Color* Element = In.mutable_color_array_value()->add_values();
+		Element->set_r(255); Element->set_g(0); Element->set_b(0);
+		TestTrue(TEXT("color array onto linear colors"), SetValueOnTarget(nullptr, Fixture.TargetFor(Fixture.LinearColors), In).ok());
+		FScriptArrayHelper Helper = ArrayOf(Fixture.LinearColors);
+		TestTrue(TEXT("color array converted"), Helper.Num() == 1
+			&& *reinterpret_cast<const FLinearColor*>(Helper.GetRawPtr(0)) == FLinearColor(FColor(255, 0, 0, 255)));
+	}
+
+	// TSet<FIntPoint>: duplicates collapse, and the read reports the set variant.
+	{
+		TempoWorld::Value In;
+		for (const FIntPoint& P : { FIntPoint(1, 2), FIntPoint(3, 4), FIntPoint(1, 2) })
+		{
+			TempoWorld::IntPoint* Element = In.mutable_int_point_array_value()->add_values();
+			Element->set_x(P.X); Element->set_y(P.Y);
+		}
+		TestTrue(TEXT("int point set write"), SetValueOnTarget(nullptr, Fixture.TargetFor(Fixture.Points), In).ok());
+		FScriptSetHelper Helper(Fixture.Points, Fixture.Points->ContainerPtrToValuePtr<void>(Fixture.Memory));
+		TestEqual(TEXT("int point set deduplicated"), Helper.Num(), 2);
+		const FIntPoint Wanted(3, 4);
+		TestTrue(TEXT("int point set holds its element"), Helper.FindElementIndex(&Wanted) != INDEX_NONE);
+		Out.Clear();
+		TestTrue(TEXT("int point set read"), WritePropertyToValue(Fixture.Memory, Fixture.Points, Out).ok());
+		TestTrue(TEXT("int point set reads as int_point_set_value"),
+			Out.has_int_point_set_value() && Out.int_point_set_value().values_size() == 2);
+	}
+
+	// The wrong struct is a type mismatch, not a reinterpretation of memory.
+	{
+		TempoWorld::Value Rotators;
+		Rotators.mutable_rotator_array_value()->add_values();
+		TestEqual(TEXT("rotator_array_value onto TArray<FVector> is a type mismatch"),
+			SetValueOnTarget(nullptr, Fixture.TargetFor(Fixture.Vectors), Rotators).error_code(), grpc::FAILED_PRECONDITION);
+		TempoWorld::Value Vectors;
+		Vectors.mutable_vector_array_value()->add_values();
+		TestEqual(TEXT("vector_array_value onto an int32 is a type mismatch"),
+			SetValueOnTarget(nullptr, Fixture.TargetFor(Fixture.Count), Vectors).error_code(), grpc::FAILED_PRECONDITION);
+	}
 
 	return true;
 }
