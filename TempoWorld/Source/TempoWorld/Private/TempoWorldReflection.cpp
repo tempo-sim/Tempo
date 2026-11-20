@@ -114,7 +114,7 @@ namespace
 	}
 }
 
-// Structs the API represents directly, keyed by the CPP name GetStructCPPName reports.
+// Structs the API represents directly.
 //
 // Note that the type string is not always the kind's name: FVector, FRotator, FColor and
 // FLinearColor have reported "vector", "rotator" and "color" since the first version of this
@@ -190,17 +190,17 @@ FString SplitPropertyAddress(FString& PropertyName)
 	return FirstPropertyName;
 }
 
-EValueKind StructKindForCPPName(const FString& StructCPPName)
+EValueKind StructKindFor(const UScriptStruct* Struct)
 {
-	if (StructCPPName == TEXT("FVector"))      { return EValueKind::Vector; }
-	if (StructCPPName == TEXT("FRotator"))     { return EValueKind::Rotator; }
-	if (StructCPPName == TEXT("FColor"))       { return EValueKind::Color; }
-	if (StructCPPName == TEXT("FLinearColor")) { return EValueKind::LinearColor; }
-	if (StructCPPName == TEXT("FVector2D"))    { return EValueKind::Vector2D; }
-	if (StructCPPName == TEXT("FIntVector"))   { return EValueKind::IntVector; }
-	if (StructCPPName == TEXT("FIntPoint"))    { return EValueKind::IntPoint; }
-	if (StructCPPName == TEXT("FQuat"))        { return EValueKind::Quat; }
-	if (StructCPPName == TEXT("FTransform"))   { return EValueKind::Transform; }
+	if (Struct == TBaseStructure<FVector>::Get())      { return EValueKind::Vector; }
+	if (Struct == TBaseStructure<FRotator>::Get())     { return EValueKind::Rotator; }
+	if (Struct == TBaseStructure<FColor>::Get())       { return EValueKind::Color; }
+	if (Struct == TBaseStructure<FLinearColor>::Get()) { return EValueKind::LinearColor; }
+	if (Struct == TBaseStructure<FVector2D>::Get())    { return EValueKind::Vector2D; }
+	if (Struct == TBaseStructure<FIntVector>::Get())   { return EValueKind::IntVector; }
+	if (Struct == TBaseStructure<FIntPoint>::Get())    { return EValueKind::IntPoint; }
+	if (Struct == TBaseStructure<FQuat>::Get())        { return EValueKind::Quat; }
+	if (Struct == TBaseStructure<FTransform>::Get())   { return EValueKind::Transform; }
 	return EValueKind::Struct;
 }
 
@@ -465,7 +465,7 @@ FTypeInfo ClassifyProperty(const FProperty* Property)
 	else if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
 	{
 		const FString StructCPPName = StructProperty->Struct->GetStructCPPName();
-		Info.Kind = StructKindForCPPName(StructCPPName);
+		Info.Kind = StructKindFor(StructProperty->Struct);
 		Info.TypeString = FirstClassStructTypeString(Info.Kind, StructCPPName);
 		Info.Struct = StructProperty->Struct;
 		Info.StructName = StructCPPName;

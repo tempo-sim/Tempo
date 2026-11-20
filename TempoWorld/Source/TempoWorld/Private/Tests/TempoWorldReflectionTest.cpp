@@ -11,6 +11,7 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
+#include "UObject/Package.h"
 
 // Unit tests for the one classifier every TempoWorld path derives its view of an FProperty from.
 // No world and no RHI: the pure cases build FTypeInfo directly, and the rest classify properties off
@@ -48,23 +49,28 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoWorldReflectionStructKindsTest,
 	"Tempo.World.Reflection.StructKinds", TempoWorldReflectionTestFlags)
 bool FTempoWorldReflectionStructKindsTest::RunTest(const FString& Parameters)
 {
-	TestEqual(TEXT("FVector"), StructKindForCPPName(TEXT("FVector")), EValueKind::Vector);
-	TestEqual(TEXT("FRotator"), StructKindForCPPName(TEXT("FRotator")), EValueKind::Rotator);
-	TestEqual(TEXT("FColor"), StructKindForCPPName(TEXT("FColor")), EValueKind::Color);
-	TestEqual(TEXT("FLinearColor"), StructKindForCPPName(TEXT("FLinearColor")), EValueKind::LinearColor);
-	TestEqual(TEXT("FIntVector"), StructKindForCPPName(TEXT("FIntVector")), EValueKind::IntVector);
-	TestEqual(TEXT("FIntPoint"), StructKindForCPPName(TEXT("FIntPoint")), EValueKind::IntPoint);
+	TestEqual(TEXT("FVector"), StructKindFor(TBaseStructure<FVector>::Get()), EValueKind::Vector);
+	TestEqual(TEXT("FRotator"), StructKindFor(TBaseStructure<FRotator>::Get()), EValueKind::Rotator);
+	TestEqual(TEXT("FColor"), StructKindFor(TBaseStructure<FColor>::Get()), EValueKind::Color);
+	TestEqual(TEXT("FLinearColor"), StructKindFor(TBaseStructure<FLinearColor>::Get()), EValueKind::LinearColor);
+	TestEqual(TEXT("FIntVector"), StructKindFor(TBaseStructure<FIntVector>::Get()), EValueKind::IntVector);
+	TestEqual(TEXT("FIntPoint"), StructKindFor(TBaseStructure<FIntPoint>::Get()), EValueKind::IntPoint);
 
 	// SetProperty has always accepted these three, while the read path reported them as arbitrary
 	// structs. If any of them regresses to Struct, the generated stubs stop offering a member that
 	// the server would in fact accept.
-	TestEqual(TEXT("FVector2D is first-class"), StructKindForCPPName(TEXT("FVector2D")), EValueKind::Vector2D);
-	TestEqual(TEXT("FQuat is first-class"), StructKindForCPPName(TEXT("FQuat")), EValueKind::Quat);
-	TestEqual(TEXT("FTransform is first-class"), StructKindForCPPName(TEXT("FTransform")), EValueKind::Transform);
+	TestEqual(TEXT("FVector2D is first-class"), StructKindFor(TBaseStructure<FVector2D>::Get()), EValueKind::Vector2D);
+	TestEqual(TEXT("FQuat is first-class"), StructKindFor(TBaseStructure<FQuat>::Get()), EValueKind::Quat);
+	TestEqual(TEXT("FTransform is first-class"), StructKindFor(TBaseStructure<FTransform>::Get()), EValueKind::Transform);
 
 	// Anything else is reachable only through its members.
-	TestEqual(TEXT("unknown struct"), StructKindForCPPName(TEXT("FPostProcessSettings")), EValueKind::Struct);
-	TestEqual(TEXT("empty name"), StructKindForCPPName(FString()), EValueKind::Struct);
+	TestEqual(TEXT("unknown struct"), StructKindFor(FPostProcessSettings::StaticStruct()), EValueKind::Struct);
+	TestEqual(TEXT("no struct"), StructKindFor(nullptr), EValueKind::Struct);
+
+	// A struct that only shares a first-class struct's name is not one: its layout is its own.
+	const UScriptStruct* Impostor = NewObject<UScriptStruct>(GetTransientPackage(), TEXT("Vector"), RF_Transient);
+	TestEqual(TEXT("the impostor is named as FVector is"), Impostor->GetStructCPPName(), FString(TEXT("FVector")));
+	TestEqual(TEXT("a struct merely named Vector"), StructKindFor(Impostor), EValueKind::Struct);
 
 	return true;
 }

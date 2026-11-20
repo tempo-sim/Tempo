@@ -123,13 +123,16 @@ namespace TempoWorldReflection
 		bool IsWritable() const { return IsValueExpressible() && bBlueprintVisible && !bBlueprintReadOnly; }
 	};
 
-	// The kind a struct is represented as, keyed by the name GetStructCPPName reports. Struct for
-	// anything with no first-class representation.
+	// The kind a struct is represented as. Struct for anything with no first-class representation.
+	//
+	// Decided by the struct's identity and never by its name: a first-class kind is read and written
+	// as the C++ type it names, and a user-defined struct asset called "Vector" reports "FVector"
+	// from GetStructCPPName too, with whatever layout its author gave it.
 	//
 	// This is where the read and write paths were reconciled: SetProperty has always accepted a
 	// transform, a quaternion and a 2D vector, while the read path classified all three as arbitrary
 	// structs. They agree here.
-	TEMPOWORLD_API EValueKind StructKindForCPPName(const FString& StructCPPName);
+	TEMPOWORLD_API EValueKind StructKindFor(const UScriptStruct* Struct);
 
 	// Whether a struct with no first-class representation can be carried as one StructValue.
 	//

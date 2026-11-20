@@ -397,6 +397,15 @@ bool FTempoWorldValueRoundTripStructContainersTest::RunTest(const FString& Param
 			&& reinterpret_cast<const FTransform*>(ArrayOf(Fixture.Transforms).GetRawPtr(0))->Equals(Given, 1e-9));
 	}
 
+	// An element that gives only its translation is otherwise the identity, as the singular variant is.
+	{
+		TempoWorld::Value In;
+		In.mutable_native_transform_array_value()->add_values()->mutable_translation()->set_x(5.0);
+		TestTrue(TEXT("translation-only transform array write"), SetValueOnTarget(nullptr, Fixture.TargetFor(Fixture.Transforms), In).ok());
+		TestTrue(TEXT("translation-only transform element"), ArrayOf(Fixture.Transforms).Num() == 1
+			&& reinterpret_cast<const FTransform*>(ArrayOf(Fixture.Transforms).GetRawPtr(0))->Equals(FTransform(FVector(5.0, 0.0, 0.0)), 0.0));
+	}
+
 	// TArray<FLinearColor> from color_array_value: 8-bit sRGB taken into linear, as the singular
 	// color_value is. Alpha unset means opaque.
 	{
@@ -438,6 +447,34 @@ bool FTempoWorldValueRoundTripStructContainersTest::RunTest(const FString& Param
 		Vectors.mutable_vector_array_value()->add_values();
 		TestEqual(TEXT("vector_array_value onto an int32 is a type mismatch"),
 			SetValueOnTarget(nullptr, Fixture.TargetFor(Fixture.Count), Vectors).error_code(), grpc::FAILED_PRECONDITION);
+	}
+
+	// So is a struct that only shares the name: a struct asset called "Vector" reports "FVector" as
+	// its CPP name and has a layout of its own. The properties stand alone and have no storage,
+	// which a write that got past the check would dereference.
+	{
+		UScriptStruct* Impostor = NewObject<UScriptStruct>(GetTransientPackage(), TEXT("Vector"), RF_Transient);
+		FStructProperty* Single = NewProperty<FStructProperty>(Impostor, TEXT("Single"));
+		Single->Struct = Impostor;
+		FArrayProperty* Many = NewProperty<FArrayProperty>(Impostor, TEXT("Many"));
+		FStructProperty* Element = NewProperty<FStructProperty>(Many, TEXT("Many_Inner"));
+		Element->Struct = Impostor;
+		Many->Inner = Element;
+
+		FPropertyTarget Target;
+		Target.Property = Single;
+		TempoWorld::Value Vector;
+		Vector.mutable_vector_value();
+		TestEqual(TEXT("vector_value onto a struct merely named Vector is a type mismatch"),
+			SetValueOnTarget(nullptr, Target, Vector).error_code(), grpc::FAILED_PRECONDITION);
+		Target.Property = Many;
+		TempoWorld::Value Vectors;
+		Vectors.mutable_vector_array_value()->add_values();
+		TestEqual(TEXT("vector_array_value onto an array of them is a type mismatch"),
+			SetValueOnTarget(nullptr, Target, Vectors).error_code(), grpc::FAILED_PRECONDITION);
+
+		delete Single;
+		delete Many;
 	}
 
 	return true;
@@ -504,6 +541,14 @@ bool FTempoWorldValueRoundTripNativeShapesTest::RunTest(const FString& Parameter
 		Fixture.ValueOf<FTransform>(Fixture.Transform) = FTransform::Identity;
 		TestTrue(TEXT("transform written back"), SetValueOnTarget(nullptr, Fixture.TargetFor(Fixture.Transform), Out).ok());
 		TestTrue(TEXT("transform round trip"), Fixture.ValueOf<FTransform>(Fixture.Transform).Equals(Given, 1e-9));
+
+		// A part the value leaves unset is the identity's: an unset rotation is no rotation and an
+		// unset scale is (1, 1, 1), never the zeros an absent message reads as.
+		TempoWorld::Value TranslationOnly;
+		TranslationOnly.mutable_native_transform_value()->mutable_translation()->set_z(7.0);
+		TestTrue(TEXT("translation-only transform write"), SetValueOnTarget(nullptr, Fixture.TargetFor(Fixture.Transform), TranslationOnly).ok());
+		TestTrue(TEXT("translation-only transform is otherwise the identity"),
+			Fixture.ValueOf<FTransform>(Fixture.Transform).Equals(FTransform(FVector(0.0, 0.0, 7.0)), 0.0));
 	}
 
 	// FLinearColor: linear float RGBA, not squeezed into 8-bit sRGB.

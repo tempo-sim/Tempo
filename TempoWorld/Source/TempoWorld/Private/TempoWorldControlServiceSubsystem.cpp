@@ -1919,7 +1919,7 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 	}
 	else if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
 	{
-		if (StructProperty->Struct->GetStructCPPName() == TEXT("FVector"))
+		if (StructProperty->Struct == TBaseStructure<FVector>::Get())
 		{
 			if (Value)
 			{
@@ -1928,7 +1928,7 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 				*Value = FString::Printf(TEXT("{X:%f, Y:%f, Z:%f}"), ValueVector.X, ValueVector.Y, ValueVector.Z);
 			}
 		}
-		else if (StructProperty->Struct->GetStructCPPName() == TEXT("FRotator"))
+		else if (StructProperty->Struct == TBaseStructure<FRotator>::Get())
 		{
 			if (Value)
 			{
@@ -1938,7 +1938,7 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 				*Value = FString::Printf(TEXT("{R:%f, P:%f, Y:%f}"), ValueRotator.Roll, ValueRotator.Pitch, ValueRotator.Yaw);
 			}
 		}
-		else if (StructProperty->Struct->GetStructCPPName() == TEXT("FColor"))
+		else if (StructProperty->Struct == TBaseStructure<FColor>::Get())
 		{
 			if (Value)
 			{
@@ -1947,7 +1947,7 @@ void GetPropertyTypeAndValue(const void* Container, const FProperty* Property, F
 				*Value = FString::Printf(TEXT("{R:%d, G:%d, B:%d, A:%d}"), ValueColor.R, ValueColor.G, ValueColor.B, ValueColor.A);
 			}
 		}
-		else if (StructProperty->Struct->GetStructCPPName() == TEXT("FLinearColor"))
+		else if (StructProperty->Struct == TBaseStructure<FLinearColor>::Get())
 		{
 			if (Value)
 			{
@@ -3411,9 +3411,14 @@ grpc::Status SetContainerOnTarget(const UWorld* World, const FPropertyTarget& Ta
 	return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 }
 
+// Value is copied into the property as the bytes of a ValueType, so the property must hold that very
+// struct. Its identity is what is checked: a struct that only shares the name has its own layout.
 template <typename ValueType>
-grpc::Status SetStructOnTarget(const UWorld* World, const FPropertyTarget& Target, const ValueType& Value, const FString& ExpectedStructCPPName)
+grpc::Status SetStructOnTarget(const UWorld* World, const FPropertyTarget& Target, const ValueType& Value)
 {
+	const UScriptStruct* ExpectedStruct = TBaseStructure<ValueType>::Get();
+	const FString ExpectedStructCPPName = ExpectedStruct->GetStructCPPName();
+
 	if (!Target.InnerPropertyName.IsEmpty())
 	{
 		const FString ErrorMsg = FString::Printf(TEXT("Inner property '%s' is not supported when setting struct property '%s' as a whole"), *Target.InnerPropertyName, *Target.Property->GetName());
@@ -3427,10 +3432,9 @@ grpc::Status SetStructOnTarget(const UWorld* World, const FPropertyTarget& Targe
 		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
-	const FString StructCPPName = StructProperty->Struct->GetStructCPPName();
-	if (!StructCPPName.Equals(ExpectedStructCPPName))
+	if (StructProperty->Struct != ExpectedStruct)
 	{
-		const FString ErrorMsg = FString::Printf(TEXT("Struct property '%s' has type '%s' but type '%s' was expected"), *Target.Property->GetName(), *StructCPPName, *ExpectedStructCPPName);
+		const FString ErrorMsg = FString::Printf(TEXT("Struct property '%s' has type '%s' but type '%s' was expected"), *Target.Property->GetName(), *StructProperty->Struct->GetPathName(), *ExpectedStructCPPName);
 		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	}
 
@@ -3709,6 +3713,8 @@ grpc::Status SetStructArrayOnTarget(const UWorld* World, const FPropertyTarget& 
 
 // The Unreal value each first-class struct variant carries. One definition per kind, shared by the
 // singular variant and by every element of its array and set variants.
+namespace
+{
 FVector ToUnreal(const TempoCore::Vector& Given) { return FVector(Given.x(), Given.y(), Given.z()); }
 FVector2D ToUnreal(const TempoCore::Vector2D& Given) { return FVector2D(Given.x(), Given.y()); }
 FIntVector ToUnreal(const TempoWorld::IntVector& Given) { return FIntVector(Given.x(), Given.y(), Given.z()); }
@@ -3718,7 +3724,10 @@ FRotator ToUnreal(const TempoCore::Rotation& Given) { return FRotator(Given.p(),
 FQuat ToUnreal(const TempoWorld::Quat& Given) { return FQuat(Given.x(), Given.y(), Given.z(), Given.w()); }
 FTransform ToUnreal(const TempoWorld::NativeTransform& Given)
 {
-	return FTransform(ToUnreal(Given.rotation()), ToUnreal(Given.translation()), ToUnreal(Given.scale3d()));
+	// A part the value leaves unset is the identity's, as TempoCore.Transform's scale is, and not the
+	// zeros an unset message reads as: a zero quaternion and a zero scale are no transform at all.
+	return FTransform(Given.has_rotation() ? ToUnreal(Given.rotation()) : FQuat::Identity, ToUnreal(Given.translation()),
+		Given.has_scale3d() ? ToUnreal(Given.scale3d()) : FVector::OneVector);
 }
 FLinearColor ToUnreal(const TempoWorld::LinearColor& Given) { return FLinearColor(Given.r(), Given.g(), Given.b(), Given.a()); }
 FColor ToUnreal(const TempoWorld::Color& Given)
@@ -3744,14 +3753,88 @@ auto ToUnrealArray(const RepeatedType& Given)
 	}
 	return Values;
 }
+}
+
+// The struct an array or set property holds, or null when the property is neither or holds
+// something else.
+const FStructProperty* StructElementOf(const FProperty* Property)
+{
+	if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Property))
+	{
+		return CastField<FStructProperty>(ArrayProperty->Inner);
+	}
+	if (const FSetProperty* SetProperty = CastField<FSetProperty>(Property))
+	{
+		return CastField<FStructProperty>(SetProperty->ElementProp);
+	}
+	return nullptr;
+}
+
+// Replace the contents of the array or set at Leaf with Values, if StructType is what it holds.
+template <typename StructType>
+bool WriteFirstClassStructContainer(const FProperty* Leaf, void* LeafContainer, const TArray<StructType>& Values)
+{
+	const FStructProperty* StructElement = StructElementOf(Leaf);
+	if (!StructElement || StructElement->Struct != TBaseStructure<StructType>::Get())
+	{
+		return false;
+	}
+
+	void* ValuePtr = Leaf->ContainerPtrToValuePtr<void>(LeafContainer);
+	if (const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Leaf))
+	{
+		FScriptArrayHelper ArrayHelper{ ArrayProperty, ValuePtr };
+		ArrayHelper.EmptyValues();
+		ArrayHelper.AddValues(Values.Num());
+		for (int32 Index = 0; Index < Values.Num(); ++Index)
+		{
+			StructElement->CopySingleValue(ArrayHelper.GetRawPtr(Index), &Values[Index]);
+		}
+	}
+	else
+	{
+		FScriptSetHelper SetHelper{ CastFieldChecked<FSetProperty>(Leaf), ValuePtr };
+		SetHelper.EmptyElements();
+		for (const StructType& Value : Values)
+		{
+			SetHelper.AddElement(&Value);
+		}
+	}
+	return true;
+}
 
 // A whole array or set of one of the first-class structs. Replaces the container's contents, as every
 // other container variant does, and like them writes whichever of the two the destination is. A set
 // collapses duplicates by the struct's own GetTypeHash, which Unreal requires of any set element.
-template <typename StructType>
+//
+// A variant that more than one struct can take -- a color, into FColor or FLinearColor -- passes the
+// same values as each, and the destination's element picks. They are candidates for one write and
+// not one attempt each, so the edit is announced once.
+template <typename... StructTypes>
 grpc::Status SetFirstClassStructContainerOnTarget(const UWorld* World, const FPropertyTarget& Target,
-	const TArray<StructType>& Values, const TCHAR* ExpectedStructCPPName)
+	const TArray<StructTypes>&... Candidates)
 {
+	const auto Accepts = [](const FProperty* Leaf)
+	{
+		const FStructProperty* StructElement = StructElementOf(Leaf);
+		return StructElement && ((StructElement->Struct == TBaseStructure<StructTypes>::Get()) || ...);
+	};
+	const auto Mismatch = [](const FProperty* Leaf)
+	{
+		const FString Expected = FString::Join(TArray<FString>{ TBaseStructure<StructTypes>::Get()->GetStructCPPName()... }, TEXT("' or '"));
+		const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' but an array or set of '%s' was given"),
+			*Leaf->GetName(), *Leaf->GetCPPType(), *Expected);
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	};
+
+	// With no nested address the destination is the property itself, so a mismatch is known before
+	// anything is touched and announces no edit. Resolving a nested address can create what it
+	// names, which is an edit whatever comes of the write.
+	if (Target.InnerPropertyName.IsEmpty() && !Accepts(Target.Property))
+	{
+		return Mismatch(Target.Property);
+	}
+
 	{
 		FScopedPropertyEdit EditScope(World, Target);
 
@@ -3765,36 +3848,9 @@ grpc::Status SetFirstClassStructContainerOnTarget(const UWorld* World, const FPr
 			return AddressErrorStatus(AddressError, ResolveError);
 		}
 
-		const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Leaf);
-		const FSetProperty* SetProperty = CastField<FSetProperty>(Leaf);
-		const FProperty* ElementProperty = ArrayProperty ? ArrayProperty->Inner : SetProperty ? SetProperty->ElementProp : nullptr;
-		const FStructProperty* StructElement = CastField<FStructProperty>(ElementProperty);
-		if (!StructElement || !StructElement->Struct->GetStructCPPName().Equals(ExpectedStructCPPName))
+		if (!(WriteFirstClassStructContainer(Leaf, LeafContainer, Candidates) || ...))
 		{
-			const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' but an array or set of '%s' was given"),
-				*Leaf->GetName(), *Leaf->GetCPPType(), ExpectedStructCPPName);
-			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-		}
-
-		void* ValuePtr = Leaf->ContainerPtrToValuePtr<void>(LeafContainer);
-		if (ArrayProperty)
-		{
-			FScriptArrayHelper ArrayHelper{ ArrayProperty, ValuePtr };
-			ArrayHelper.EmptyValues();
-			ArrayHelper.AddValues(Values.Num());
-			for (int32 Index = 0; Index < Values.Num(); ++Index)
-			{
-				StructElement->CopySingleValue(ArrayHelper.GetRawPtr(Index), &Values[Index]);
-			}
-		}
-		else
-		{
-			FScriptSetHelper SetHelper{ SetProperty, ValuePtr };
-			SetHelper.EmptyElements();
-			for (const StructType& Value : Values)
-			{
-				SetHelper.AddElement(&Value);
-			}
+			return Mismatch(Leaf);
 		}
 	}
 
@@ -3838,31 +3894,31 @@ grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target
 		return TryTypesOnTarget<FEnumProperty, FByteProperty>(World, Target, ValueStr);
 	}
 	case PropertyValue::kVectorValue:
-		return SetStructOnTarget(World, Target, ToUnreal(Value.vector_value()), TEXT("FVector"));
+		return SetStructOnTarget(World, Target, ToUnreal(Value.vector_value()));
 	case PropertyValue::kVector2DValue:
-		return SetStructOnTarget(World, Target, ToUnreal(Value.vector2d_value()), TEXT("FVector2D"));
+		return SetStructOnTarget(World, Target, ToUnreal(Value.vector2d_value()));
 	case PropertyValue::kIntVectorValue:
-		return SetStructOnTarget(World, Target, ToUnreal(Value.int_vector_value()), TEXT("FIntVector"));
+		return SetStructOnTarget(World, Target, ToUnreal(Value.int_vector_value()));
 	case PropertyValue::kIntPointValue:
-		return SetStructOnTarget(World, Target, ToUnreal(Value.int_point_value()), TEXT("FIntPoint"));
+		return SetStructOnTarget(World, Target, ToUnreal(Value.int_point_value()));
 	case PropertyValue::kRotatorValue:
-		return SetStructOnTarget(World, Target, ToUnreal(Value.rotator_value()), TEXT("FRotator"));
+		return SetStructOnTarget(World, Target, ToUnreal(Value.rotator_value()));
 	case PropertyValue::kQuatValue:
-		return SetStructOnTarget(World, Target, ToUnreal(Value.quat_value()), TEXT("FQuat"));
+		return SetStructOnTarget(World, Target, ToUnreal(Value.quat_value()));
 	case PropertyValue::kNativeTransformValue:
-		return SetStructOnTarget(World, Target, ToUnreal(Value.native_transform_value()), TEXT("FTransform"));
+		return SetStructOnTarget(World, Target, ToUnreal(Value.native_transform_value()));
 	case PropertyValue::kLinearColorValue:
-		return SetStructOnTarget(World, Target, ToUnreal(Value.linear_color_value()), TEXT("FLinearColor"));
+		return SetStructOnTarget(World, Target, ToUnreal(Value.linear_color_value()));
 	case PropertyValue::kColorValue:
 	{
 		const FColor Color = ToUnreal(Value.color_value());
-		const grpc::Status ColorStatus = SetStructOnTarget(World, Target, Color, TEXT("FColor"));
+		const grpc::Status ColorStatus = SetStructOnTarget(World, Target, Color);
 		if (ColorStatus.ok())
 		{
 			return ColorStatus;
 		}
 
-		return SetStructOnTarget(World, Target, FLinearColor(Color), TEXT("FLinearColor"));
+		return SetStructOnTarget(World, Target, FLinearColor(Color));
 	}
 	case PropertyValue::kClassValue:
 	{
@@ -4031,52 +4087,47 @@ grpc::Status SetValueOnTarget(const UWorld* World, const FPropertyTarget& Target
 	case PropertyValue::kVectorArrayValue:
 	case PropertyValue::kVectorSetValue:
 		return SetFirstClassStructContainerOnTarget(World, Target,
-			ToUnrealArray((Value.has_vector_array_value() ? Value.vector_array_value() : Value.vector_set_value()).values()), TEXT("FVector"));
+			ToUnrealArray((Value.has_vector_array_value() ? Value.vector_array_value() : Value.vector_set_value()).values()));
 	case PropertyValue::kVector2DArrayValue:
 	case PropertyValue::kVector2DSetValue:
 		return SetFirstClassStructContainerOnTarget(World, Target,
-			ToUnrealArray((Value.has_vector2d_array_value() ? Value.vector2d_array_value() : Value.vector2d_set_value()).values()), TEXT("FVector2D"));
+			ToUnrealArray((Value.has_vector2d_array_value() ? Value.vector2d_array_value() : Value.vector2d_set_value()).values()));
 	case PropertyValue::kIntVectorArrayValue:
 	case PropertyValue::kIntVectorSetValue:
 		return SetFirstClassStructContainerOnTarget(World, Target,
-			ToUnrealArray((Value.has_int_vector_array_value() ? Value.int_vector_array_value() : Value.int_vector_set_value()).values()), TEXT("FIntVector"));
+			ToUnrealArray((Value.has_int_vector_array_value() ? Value.int_vector_array_value() : Value.int_vector_set_value()).values()));
 	case PropertyValue::kIntPointArrayValue:
 	case PropertyValue::kIntPointSetValue:
 		return SetFirstClassStructContainerOnTarget(World, Target,
-			ToUnrealArray((Value.has_int_point_array_value() ? Value.int_point_array_value() : Value.int_point_set_value()).values()), TEXT("FIntPoint"));
+			ToUnrealArray((Value.has_int_point_array_value() ? Value.int_point_array_value() : Value.int_point_set_value()).values()));
 	case PropertyValue::kRotatorArrayValue:
 	case PropertyValue::kRotatorSetValue:
 		return SetFirstClassStructContainerOnTarget(World, Target,
-			ToUnrealArray((Value.has_rotator_array_value() ? Value.rotator_array_value() : Value.rotator_set_value()).values()), TEXT("FRotator"));
+			ToUnrealArray((Value.has_rotator_array_value() ? Value.rotator_array_value() : Value.rotator_set_value()).values()));
 	case PropertyValue::kQuatArrayValue:
 	case PropertyValue::kQuatSetValue:
 		return SetFirstClassStructContainerOnTarget(World, Target,
-			ToUnrealArray((Value.has_quat_array_value() ? Value.quat_array_value() : Value.quat_set_value()).values()), TEXT("FQuat"));
+			ToUnrealArray((Value.has_quat_array_value() ? Value.quat_array_value() : Value.quat_set_value()).values()));
 	case PropertyValue::kNativeTransformArrayValue:
 	case PropertyValue::kNativeTransformSetValue:
 		return SetFirstClassStructContainerOnTarget(World, Target,
-			ToUnrealArray((Value.has_native_transform_array_value() ? Value.native_transform_array_value() : Value.native_transform_set_value()).values()), TEXT("FTransform"));
+			ToUnrealArray((Value.has_native_transform_array_value() ? Value.native_transform_array_value() : Value.native_transform_set_value()).values()));
 	case PropertyValue::kLinearColorArrayValue:
 	case PropertyValue::kLinearColorSetValue:
 		return SetFirstClassStructContainerOnTarget(World, Target,
-			ToUnrealArray((Value.has_linear_color_array_value() ? Value.linear_color_array_value() : Value.linear_color_set_value()).values()), TEXT("FLinearColor"));
+			ToUnrealArray((Value.has_linear_color_array_value() ? Value.linear_color_array_value() : Value.linear_color_set_value()).values()));
 	case PropertyValue::kColorArrayValue:
 	case PropertyValue::kColorSetValue:
 	{
 		// As the singular variant does: an FColor container, and failing that an FLinearColor one.
 		const TArray<FColor> Colors = ToUnrealArray((Value.has_color_array_value() ? Value.color_array_value() : Value.color_set_value()).values());
-		const grpc::Status ColorStatus = SetFirstClassStructContainerOnTarget(World, Target, Colors, TEXT("FColor"));
-		if (ColorStatus.ok() || ColorStatus.error_code() != grpc::FAILED_PRECONDITION)
-		{
-			return ColorStatus;
-		}
 		TArray<FLinearColor> LinearColors;
 		LinearColors.Reserve(Colors.Num());
 		for (const FColor& Color : Colors)
 		{
 			LinearColors.Add(FLinearColor(Color));
 		}
-		return SetFirstClassStructContainerOnTarget(World, Target, LinearColors, TEXT("FLinearColor"));
+		return SetFirstClassStructContainerOnTarget(World, Target, Colors, LinearColors);
 	}
 	case PropertyValue::VALUE_NOT_SET:
 	default:
