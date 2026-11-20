@@ -768,6 +768,9 @@ message LinearColor {
 // An FTransform as Unreal stores it: a rotation as a quaternion, a translation in centimeters and a
 // 3D scale, all left-handed. What a transform-valued property reads as and is written from, since
 // TempoCore.Transform is in the API's units and holds its rotation as Euler angles.
+//
+// On a write, a part left unset is the identity's: no rotation, no translation, a scale of (1, 1, 1).
+// A read sets all three.
 message NativeTransform {
   Quat rotation = 1;
   TempoCore.Vector translation = 2;

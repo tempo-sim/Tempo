@@ -3634,6 +3634,20 @@ grpc::Status WriteStructFields(const UWorld* World, const UScriptStruct* Struct,
 grpc::Status SetStructValueOnTarget(const UWorld* World, const FPropertyTarget& Target,
 	const TempoWorld::StructValue& Value)
 {
+	const auto Mismatch = [](const FProperty* Leaf)
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' but a struct was given"), *Leaf->GetName(), *Leaf->GetCPPType());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	};
+
+	// With no nested address the destination is the property itself, so a mismatch is known before
+	// anything is touched and announces no edit. Resolving a nested address can create what it
+	// names, which is an edit whatever comes of the write.
+	if (Target.InnerPropertyName.IsEmpty() && !CastField<FStructProperty>(Target.Property))
+	{
+		return Mismatch(Target.Property);
+	}
+
 	grpc::Status Status = grpc::Status_OK;
 	{
 		FScopedPropertyEdit EditScope(World, Target);
@@ -3651,8 +3665,7 @@ grpc::Status SetStructValueOnTarget(const UWorld* World, const FPropertyTarget& 
 		const FStructProperty* StructProperty = CastField<FStructProperty>(Leaf);
 		if (!StructProperty)
 		{
-			const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' but a struct was given"), *Leaf->GetName(), *Leaf->GetCPPType());
-			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+			return Mismatch(Leaf);
 		}
 
 		Status = WriteStructFields(World, StructProperty->Struct, StructProperty->ContainerPtrToValuePtr<void>(LeafContainer),
@@ -3672,6 +3685,23 @@ grpc::Status SetStructValueOnTarget(const UWorld* World, const FPropertyTarget& 
 grpc::Status SetStructArrayOnTarget(const UWorld* World, const FPropertyTarget& Target,
 	const TempoWorld::StructArray& Values)
 {
+	const auto StructElementOfArray = [](const FProperty* Leaf) -> const FStructProperty*
+	{
+		const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Leaf);
+		return ArrayProperty ? CastField<FStructProperty>(ArrayProperty->Inner) : nullptr;
+	};
+	const auto Mismatch = [](const FProperty* Leaf)
+	{
+		const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' but an array of structs was given"), *Leaf->GetName(), *Leaf->GetCPPType());
+		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+	};
+
+	// As for a single struct: a mismatch that needs no address resolved announces no edit.
+	if (Target.InnerPropertyName.IsEmpty() && !StructElementOfArray(Target.Property))
+	{
+		return Mismatch(Target.Property);
+	}
+
 	grpc::Status Status = grpc::Status_OK;
 	{
 		FScopedPropertyEdit EditScope(World, Target);
@@ -3687,11 +3717,10 @@ grpc::Status SetStructArrayOnTarget(const UWorld* World, const FPropertyTarget& 
 		}
 
 		const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(Leaf);
-		const FStructProperty* ElementProperty = ArrayProperty ? CastField<FStructProperty>(ArrayProperty->Inner) : nullptr;
+		const FStructProperty* ElementProperty = StructElementOfArray(Leaf);
 		if (!ElementProperty)
 		{
-			const FString ErrorMsg = FString::Printf(TEXT("Property '%s' has type '%s' but an array of structs was given"), *Leaf->GetName(), *Leaf->GetCPPType());
-			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+			return Mismatch(Leaf);
 		}
 
 		FScriptArrayHelper ArrayHelper{ ArrayProperty, ArrayProperty->ContainerPtrToValuePtr<void>(LeafContainer) };
