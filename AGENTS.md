@@ -446,7 +446,9 @@ sim (not the editor). They cover the client-facing API contract and behavior ove
   `Sim relaunched` warning and the crashed attempt's log kept as `sim-crashed-at-startup.log`: UE
   5.8's packaged Mac build intermittently fails an LLM check (`FLLMThreadState::PopTag`) at
   startup, before its logging starts, so only macOS's unified log records it (Gather Test Reports
-  copies Unreal's assertions from it).
+  copies Unreal's assertions from it). On macOS every packaged-sim launch (the three test
+  harnesses and `query_packaged_classes.py`) passes `-llm`, so LLM is never switched off at startup,
+  the transition that check races; the relaunch is the backstop.
   RHI is `-nullrhi` by default; `TEMPO_SIM_RENDER=1` renders off-screen (the `sensors` group, which
   also wants a GPU). The sim's full log is written to `TEMPO_TEST_REPORT_DIR/sim.log` (uploaded as a
   CI artifact) for post-mortem. `contract` groups never launch a sim. Python's `fixed_step` fixture

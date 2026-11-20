@@ -27,6 +27,7 @@ relaunched once (see _crashed_at_startup); the crashed attempt's log is kept bes
 import importlib.util
 import os
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -102,6 +103,13 @@ def _tail(path, n=200):
         return "(no log captured)"
 
 
+# -llm keeps the engine's low-level memory tracker on, on macOS. Without it, a packaged UE 5.8 Mac
+# sim switches LLM off early in startup and frees every thread's tag stack, and a tag scope already
+# open then pops an empty one: the intermittent FLLMThreadState::PopTag check below. With LLM left on
+# there is no switch-off to race. The relaunch stays as the backstop.
+LLM_ARGS = ["-llm"] if sys.platform == "darwin" else []
+
+
 def _crashed_at_startup(returncode, seconds_since_launch):
     """Whether the sim died from a signal right after launch, which is worth one relaunch.
 
@@ -160,6 +168,7 @@ def sim_server(pytestconfig):
         "-nosound",
         "-nosplash",
         *endpoint_args,
+        *LLM_ARGS,
         "-stdout",
         "-fullstdoutlogoutput",
         # Extra launch arguments, split on whitespace: for running a group under different engine
