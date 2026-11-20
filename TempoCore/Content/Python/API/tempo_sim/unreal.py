@@ -1630,16 +1630,24 @@ def _function_result(response, signature):
     A void function returns None. A function with a return value returns it. A function that also
     has out parameters -- which is how a Blueprint usually hands back more than one thing -- returns
     a dict keyed by name, because position would be guesswork.
+
+    Only the results the signature declares are kept, as the stub declares them. The server also
+    reports every by-reference input -- UHT flags a `const T&` parameter CPF_OutParm -- and keeping
+    those turned a function declared `-> float` into one returning a dict.
     """
     returns = signature.get("returns")
     outputs = signature.get("outputs") or {}
+
+    def declared(name):
+        return name in outputs or (name == "ReturnValue" and returns is not None)
 
     def record(name):
         # Each result's declared type, so a reference or an enum reads back as the stub says.
         return returns if name == "ReturnValue" else outputs.get(name)
 
     results = {entry.name: _from_value(entry.typed_value, record(entry.name))
-               for entry in response.results if entry.HasField("typed_value")}
+               for entry in response.results
+               if entry.HasField("typed_value") and declared(entry.name)}
     if not results:
         return None
 
