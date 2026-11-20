@@ -100,6 +100,9 @@ REPEATED_ELEMENTS = {
     "bool": "bool", "int": "int", "int64": "int64", "float": "float", "double": "float",
     "string": "string", "enum": "enum", "class": "class", "asset": "asset",
     "actor": "actor", "component": "component",
+    "vector": "vector", "vector2d": "vector2d", "intvector": "int_vector", "intpoint": "int_point",
+    "rotator": "rotator", "quat": "quat", "transform": "native_transform", "color": "color",
+    "linearcolor": "linear_color",
 }
 
 
@@ -324,7 +327,7 @@ class Generator:
     def emit_member(self, member, imports, indent="    "):
         """One property, as stub lines. Returns [] when the type cannot be carried."""
         if self.variant_for(member) is None and member.get("kind") != "struct":
-            # Neither one value nor a struct to reach into -- an array of vectors, say. The runtime
+            # Neither one value nor a struct to reach into -- a map, say. The runtime
             # has no way to read it, so a stub declaring it would type-check and then fail.
             self.stats["members_omitted"] += 1
             return []

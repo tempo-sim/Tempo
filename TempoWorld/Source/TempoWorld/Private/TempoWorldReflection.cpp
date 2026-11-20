@@ -75,16 +75,27 @@ namespace
 	// SetValueOnTarget, which accept every property type the element kind's scalar variant does --
 	// an int_array_value writes a TArray<uint8> or a TArray<int16> as readily as a TArray<int32>, and
 	// a string_array_value a TArray<FText> as readily as a TArray<FString> -- so this is decided by
-	// kind, never by width or spelling. The repeated variants exist for the scalar kinds, the object
-	// references, and -- in an array, not a set -- a struct that is itself value-expressible. There is
-	// none for a vector, a transform or a nested container, and none for a set of structs, which
-	// needs a hash function reflection cannot see.
+	// kind, never by width or spelling. The repeated variants exist for the scalar kinds, the
+	// first-class structs, the object references, and -- in an array, not a set -- a struct that is
+	// itself value-expressible. There is none for a nested container, and none for a set of other
+	// structs, which needs a hash function reflection cannot see. A set of a first-class struct needs
+	// no such thing from reflection: the struct is native, and Unreal would not have compiled the set
+	// had it no GetTypeHash.
 	bool HasRepeatedValueVariant(const FTypeInfo& Element, bool bIsArray)
 	{
 		switch (Element.Kind)
 		{
 		case EValueKind::Struct:
 			return bIsArray && IsStructValueExpressible(Element.Struct);
+		case EValueKind::Vector:
+		case EValueKind::Vector2D:
+		case EValueKind::IntVector:
+		case EValueKind::IntPoint:
+		case EValueKind::Rotator:
+		case EValueKind::Quat:
+		case EValueKind::Transform:
+		case EValueKind::Color:
+		case EValueKind::LinearColor:
 		case EValueKind::Bool:
 		case EValueKind::Int:
 		case EValueKind::Int64:
@@ -103,7 +114,7 @@ namespace
 	}
 }
 
-// Structs the API represents directly, keyed by the CPP name GetStructCPPName reports.
+// Structs the API represents directly.
 //
 // Note that the type string is not always the kind's name: FVector, FRotator, FColor and
 // FLinearColor have reported "vector", "rotator" and "color" since the first version of this
@@ -179,17 +190,17 @@ FString SplitPropertyAddress(FString& PropertyName)
 	return FirstPropertyName;
 }
 
-EValueKind StructKindForCPPName(const FString& StructCPPName)
+EValueKind StructKindFor(const UScriptStruct* Struct)
 {
-	if (StructCPPName == TEXT("FVector"))      { return EValueKind::Vector; }
-	if (StructCPPName == TEXT("FRotator"))     { return EValueKind::Rotator; }
-	if (StructCPPName == TEXT("FColor"))       { return EValueKind::Color; }
-	if (StructCPPName == TEXT("FLinearColor")) { return EValueKind::LinearColor; }
-	if (StructCPPName == TEXT("FVector2D"))    { return EValueKind::Vector2D; }
-	if (StructCPPName == TEXT("FIntVector"))   { return EValueKind::IntVector; }
-	if (StructCPPName == TEXT("FIntPoint"))    { return EValueKind::IntPoint; }
-	if (StructCPPName == TEXT("FQuat"))        { return EValueKind::Quat; }
-	if (StructCPPName == TEXT("FTransform"))   { return EValueKind::Transform; }
+	if (Struct == TBaseStructure<FVector>::Get())      { return EValueKind::Vector; }
+	if (Struct == TBaseStructure<FRotator>::Get())     { return EValueKind::Rotator; }
+	if (Struct == TBaseStructure<FColor>::Get())       { return EValueKind::Color; }
+	if (Struct == TBaseStructure<FLinearColor>::Get()) { return EValueKind::LinearColor; }
+	if (Struct == TBaseStructure<FVector2D>::Get())    { return EValueKind::Vector2D; }
+	if (Struct == TBaseStructure<FIntVector>::Get())   { return EValueKind::IntVector; }
+	if (Struct == TBaseStructure<FIntPoint>::Get())    { return EValueKind::IntPoint; }
+	if (Struct == TBaseStructure<FQuat>::Get())        { return EValueKind::Quat; }
+	if (Struct == TBaseStructure<FTransform>::Get())   { return EValueKind::Transform; }
 	return EValueKind::Struct;
 }
 
@@ -454,7 +465,7 @@ FTypeInfo ClassifyProperty(const FProperty* Property)
 	else if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
 	{
 		const FString StructCPPName = StructProperty->Struct->GetStructCPPName();
-		Info.Kind = StructKindForCPPName(StructCPPName);
+		Info.Kind = StructKindFor(StructProperty->Struct);
 		Info.TypeString = FirstClassStructTypeString(Info.Kind, StructCPPName);
 		Info.Struct = StructProperty->Struct;
 		Info.StructName = StructCPPName;
@@ -519,6 +530,19 @@ bool IsInputParameter(const FProperty* Property)
 	}
 	// A Blueprint "by-ref" input is CPF_OutParm|CPF_ReferenceParm, and is an input.
 	return !Property->HasAnyPropertyFlags(CPF_OutParm) || Property->HasAnyPropertyFlags(CPF_ReferenceParm);
+}
+
+bool IsCallResult(const FProperty* Property)
+{
+	if (!Property || !Property->HasAnyPropertyFlags(CPF_Parm))
+	{
+		return false;
+	}
+	if (Property->HasAnyPropertyFlags(CPF_ReturnParm))
+	{
+		return true;
+	}
+	return Property->HasAnyPropertyFlags(CPF_OutParm) && !Property->HasAllPropertyFlags(CPF_ConstParm | CPF_ReferenceParm);
 }
 
 FFunctionInfo ClassifyFunction(const UFunction* Function)

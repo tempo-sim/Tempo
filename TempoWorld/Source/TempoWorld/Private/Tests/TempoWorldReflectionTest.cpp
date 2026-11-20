@@ -7,9 +7,11 @@
 #include "Engine/DataTable.h"
 #include "Engine/HitResult.h"
 #include "GameFramework/Actor.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
+#include "UObject/Package.h"
 
 // Unit tests for the one classifier every TempoWorld path derives its view of an FProperty from.
 // No world and no RHI: the pure cases build FTypeInfo directly, and the rest classify properties off
@@ -47,23 +49,28 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoWorldReflectionStructKindsTest,
 	"Tempo.World.Reflection.StructKinds", TempoWorldReflectionTestFlags)
 bool FTempoWorldReflectionStructKindsTest::RunTest(const FString& Parameters)
 {
-	TestEqual(TEXT("FVector"), StructKindForCPPName(TEXT("FVector")), EValueKind::Vector);
-	TestEqual(TEXT("FRotator"), StructKindForCPPName(TEXT("FRotator")), EValueKind::Rotator);
-	TestEqual(TEXT("FColor"), StructKindForCPPName(TEXT("FColor")), EValueKind::Color);
-	TestEqual(TEXT("FLinearColor"), StructKindForCPPName(TEXT("FLinearColor")), EValueKind::LinearColor);
-	TestEqual(TEXT("FIntVector"), StructKindForCPPName(TEXT("FIntVector")), EValueKind::IntVector);
-	TestEqual(TEXT("FIntPoint"), StructKindForCPPName(TEXT("FIntPoint")), EValueKind::IntPoint);
+	TestEqual(TEXT("FVector"), StructKindFor(TBaseStructure<FVector>::Get()), EValueKind::Vector);
+	TestEqual(TEXT("FRotator"), StructKindFor(TBaseStructure<FRotator>::Get()), EValueKind::Rotator);
+	TestEqual(TEXT("FColor"), StructKindFor(TBaseStructure<FColor>::Get()), EValueKind::Color);
+	TestEqual(TEXT("FLinearColor"), StructKindFor(TBaseStructure<FLinearColor>::Get()), EValueKind::LinearColor);
+	TestEqual(TEXT("FIntVector"), StructKindFor(TBaseStructure<FIntVector>::Get()), EValueKind::IntVector);
+	TestEqual(TEXT("FIntPoint"), StructKindFor(TBaseStructure<FIntPoint>::Get()), EValueKind::IntPoint);
 
 	// SetProperty has always accepted these three, while the read path reported them as arbitrary
 	// structs. If any of them regresses to Struct, the generated stubs stop offering a member that
 	// the server would in fact accept.
-	TestEqual(TEXT("FVector2D is first-class"), StructKindForCPPName(TEXT("FVector2D")), EValueKind::Vector2D);
-	TestEqual(TEXT("FQuat is first-class"), StructKindForCPPName(TEXT("FQuat")), EValueKind::Quat);
-	TestEqual(TEXT("FTransform is first-class"), StructKindForCPPName(TEXT("FTransform")), EValueKind::Transform);
+	TestEqual(TEXT("FVector2D is first-class"), StructKindFor(TBaseStructure<FVector2D>::Get()), EValueKind::Vector2D);
+	TestEqual(TEXT("FQuat is first-class"), StructKindFor(TBaseStructure<FQuat>::Get()), EValueKind::Quat);
+	TestEqual(TEXT("FTransform is first-class"), StructKindFor(TBaseStructure<FTransform>::Get()), EValueKind::Transform);
 
 	// Anything else is reachable only through its members.
-	TestEqual(TEXT("unknown struct"), StructKindForCPPName(TEXT("FPostProcessSettings")), EValueKind::Struct);
-	TestEqual(TEXT("empty name"), StructKindForCPPName(FString()), EValueKind::Struct);
+	TestEqual(TEXT("unknown struct"), StructKindFor(FPostProcessSettings::StaticStruct()), EValueKind::Struct);
+	TestEqual(TEXT("no struct"), StructKindFor(nullptr), EValueKind::Struct);
+
+	// A struct that only shares a first-class struct's name is not one: its layout is its own.
+	const UScriptStruct* Impostor = NewObject<UScriptStruct>(GetTransientPackage(), TEXT("Vector"), RF_Transient);
+	TestEqual(TEXT("the impostor is named as FVector is"), Impostor->GetStructCPPName(), FString(TEXT("FVector")));
+	TestEqual(TEXT("a struct merely named Vector"), StructKindFor(Impostor), EValueKind::Struct);
 
 	return true;
 }
@@ -91,16 +98,24 @@ bool FTempoWorldReflectionValueExpressibleTest::RunTest(const FString& Parameter
 	// A struct is decided by its members (see StructValues), so one with no struct to look at is not.
 	TestFalse(TEXT("struct with no UScriptStruct"), Scalar(EValueKind::Struct).IsValueExpressible());
 
-	// Containers, element by element: a Value has repeated variants only for the scalar kinds and
-	// the object references.
+	// Containers, element by element: a Value has repeated variants only for the scalar kinds, the
+	// first-class structs and the object references.
 	TestTrue(TEXT("array of int"), Container(EValueKind::Array, EValueKind::Int).IsValueExpressible());
 	TestTrue(TEXT("array of string"), Container(EValueKind::Array, EValueKind::String).IsValueExpressible());
 	TestTrue(TEXT("array of actor"), Container(EValueKind::Array, EValueKind::Actor).IsValueExpressible());
 	TestTrue(TEXT("set of enum"), Container(EValueKind::Set, EValueKind::Enum).IsValueExpressible());
 
+	// The first-class structs have repeated variants of their own, for arrays and sets alike.
+	for (const EValueKind Kind : { EValueKind::Vector, EValueKind::Vector2D, EValueKind::IntVector, EValueKind::IntPoint,
+		EValueKind::Rotator, EValueKind::Quat, EValueKind::Transform, EValueKind::Color, EValueKind::LinearColor })
+	{
+		if (!Container(EValueKind::Array, Kind).IsValueExpressible() || !Container(EValueKind::Set, Kind).IsValueExpressible())
+		{
+			AddError(FString::Printf(TEXT("containers of %s should be value-expressible"), GetKindName(Kind)));
+		}
+	}
+
 	// No repeated variant exists for these, so the whole container is nested-access only.
-	TestFalse(TEXT("array of vector"), Container(EValueKind::Array, EValueKind::Vector).IsValueExpressible());
-	TestFalse(TEXT("array of transform"), Container(EValueKind::Array, EValueKind::Transform).IsValueExpressible());
 	TestFalse(TEXT("array of a struct with no UScriptStruct"), Container(EValueKind::Array, EValueKind::Struct).IsValueExpressible());
 	TestFalse(TEXT("array of unsupported"), Container(EValueKind::Array, EValueKind::Unsupported).IsValueExpressible());
 	TestFalse(TEXT("nested array"), Container(EValueKind::Array, EValueKind::Array).IsValueExpressible());
@@ -276,6 +291,40 @@ bool FTempoWorldReflectionFunctionsTest::RunTest(const FString& Parameters)
 				TEXT("parameter '%s': kind and signature disagree about out-ness (signature: %s)"),
 				*Parameter.Name, *Bounds.Signature));
 		}
+	}
+
+	// What a call reports back. A const by-reference input is flagged CPF_OutParm by UHT but cannot
+	// have changed, so it is not a result; a UPARAM(ref) input can, so it is; and so are true out
+	// parameters and the return value. GetVectorArrayAverage(const TArray<FVector>& Vectors) and
+	// Vector_Assign(UPARAM(ref) FVector& A, const FVector& InVector) carry both kinds of input.
+	auto Parameter = [this](UClass* Owner, const TCHAR* FunctionName, const TCHAR* ParameterName) -> const FProperty*
+	{
+		const UFunction* Function = Owner->FindFunctionByName(FName(FunctionName));
+		const FProperty* Found = Function ? Function->FindPropertyByName(FName(ParameterName)) : nullptr;
+		if (!Found)
+		{
+			AddError(FString::Printf(TEXT("%s has no parameter %s.%s"), *Owner->GetName(), FunctionName, ParameterName));
+		}
+		return Found;
+	};
+	const FProperty* ConstRefArray = Parameter(UKismetMathLibrary::StaticClass(), TEXT("GetVectorArrayAverage"), TEXT("Vectors"));
+	const FProperty* ConstRef = Parameter(UKismetMathLibrary::StaticClass(), TEXT("Vector_Assign"), TEXT("InVector"));
+	const FProperty* MutableRef = Parameter(UKismetMathLibrary::StaticClass(), TEXT("Vector_Assign"), TEXT("A"));
+	const FProperty* Returned = Parameter(UKismetMathLibrary::StaticClass(), TEXT("GetVectorArrayAverage"), TEXT("ReturnValue"));
+	const FProperty* ByValue = Parameter(AActor::StaticClass(), TEXT("SetActorHiddenInGame"), TEXT("bNewHidden"));
+	TestTrue(TEXT("a const T& input is flagged CPF_OutParm, which is why this needs deciding"),
+		ConstRefArray && ConstRefArray->HasAllPropertyFlags(CPF_OutParm | CPF_ConstParm | CPF_ReferenceParm));
+	TestTrue(TEXT("a const TArray& input is an input"), IsInputParameter(ConstRefArray));
+	TestFalse(TEXT("a const TArray& input is not a result"), IsCallResult(ConstRefArray));
+	TestFalse(TEXT("a const FVector& input is not a result"), IsCallResult(ConstRef));
+	TestTrue(TEXT("a UPARAM(ref) input is an input"), IsInputParameter(MutableRef));
+	TestTrue(TEXT("a UPARAM(ref) input is a result"), IsCallResult(MutableRef));
+	TestTrue(TEXT("the return value is a result"), IsCallResult(Returned));
+	TestFalse(TEXT("a by-value input is not a result"), IsCallResult(ByValue));
+	for (const FParameterInfo& Out : Bounds.Parameters)
+	{
+		TestTrue(FString::Printf(TEXT("out parameter %s is a result"), *Out.Name),
+			IsCallResult(AActor::StaticClass()->FindFunctionByName(TEXT("GetActorBounds"))->FindPropertyByName(FName(*Out.Name))) == (Out.Kind == EParameterKind::Output));
 	}
 
 	// A latent function cannot be driven from outside: only the caller's own latent action manager

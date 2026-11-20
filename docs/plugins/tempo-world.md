@@ -352,9 +352,11 @@ speed = tempo_world.get_property(actor="MyActor", property="MaxSpeed").float_val
 | `component_value` | `UActorComponent*` (by name, as `ActorName:ComponentName`) |
 | `struct_value` | any other `USTRUCT`; see [Struct values](#struct-values) |
 
-The scalar and reference kinds also have `*_array_value` and `*_set_value` variants, either of which
-replaces the entire contents of a `TArray` or `TSet` property; a read reports the one matching the
-property's container. `struct_array_value` carries a `TArray` of structs.
+Every kind above except `struct_value` also has `*_array_value` and `*_set_value` variants
+(`vector_array_value`, `native_transform_set_value`, …), either of which replaces the entire contents
+of a `TArray` or `TSet` property; a read reports the one matching the property's container. Each
+element is carried exactly as the singular variant carries it. `struct_array_value` carries a
+`TArray` of any other struct.
 
 Nested addressing — `MyStruct.Inner`, `MyArray[0]`, `MyMap[key]`, to arbitrary depth — is
 described under [Naming → Properties](../concepts/naming.md#properties).
@@ -507,7 +509,8 @@ A few rules worth knowing:
   of that parameter keeps its zero value.
 - **Return values and out parameters come back typed.** The response carries one
   `FunctionResult` per value the function handed back — its return value (which Unreal names
-  `ReturnValue`) and any out parameters, in declaration order. `typed_value` is the same `Value`
+  `ReturnValue`), any out parameters, and any `UPARAM(ref)` inputs, whose values the function may
+  have changed, in declaration order. A `const&` input is not reported. `typed_value` is the same `Value`
   `get_property` returns, Unreal-native; `property_type` and the human-readable `value` string use
   the same vocabulary and format as `get_*_properties`.
 - **Latent functions, C-style array parameters, and delegate parameters are rejected**, since

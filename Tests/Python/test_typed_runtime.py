@@ -403,6 +403,39 @@ def test_structured_values_round_trip(classes):
         assert unreal._from_value(unreal._to_value(variant, original)) == original, variant
 
 
+def test_containers_of_first_class_structs_round_trip(classes):
+    """Each first-class struct has an array and a set variant, whose elements travel exactly as
+    the singular variant's do. A set reads back as a Python set, so the value types are hashable."""
+    import tempo_sim.unreal as unreal
+
+    for kind, elements in (
+            ("vector", [unreal.FVector(1.0, 2.0, 3.0), unreal.FVector(4.0, 5.0, 6.0)]),
+            ("vector2d", [unreal.FVector2D(4.0, 5.0)]),
+            ("int_vector", [unreal.FIntVector(1, 2, 3)]),
+            ("int_point", [unreal.FIntPoint(6, 7), unreal.FIntPoint(8, 9)]),
+            ("rotator", [unreal.FRotator(10.0, 20.0, 30.0)]),
+            ("quat", [unreal.FQuat(0.0, 0.0, 0.5, 0.5)]),
+            ("color", [unreal.FColor(1, 2, 3, 4)]),
+            ("linear_color", [unreal.FLinearColor(0.25, 0.5, 0.75, 0.125)]),
+            ("native_transform", [unreal.FTransform(unreal.FQuat(0.0, 0.0, 0.5, 0.5),
+                                                    unreal.FVector(1.0, 2.0, 3.0),
+                                                    unreal.FVector(2.0, 2.0, 2.0))])):
+        array_variant, set_variant = kind + "_array_value", kind + "_set_value"
+        assert unreal._from_value(unreal._to_value(array_variant, elements)) == elements, kind
+        assert unreal._from_value(unreal._to_value(set_variant, set(elements))) == set(elements), kind
+
+        for variant in (array_variant, set_variant):
+            message = unreal._to_value(variant, [])
+            assert message.WhichOneof("value") == variant, "an empty {} must still select it".format(
+                variant)
+
+
+def test_value_types_hash_by_value(classes):
+    import tempo_sim.unreal as unreal
+    assert len({unreal.FVector(1.0, 2.0, 3.0), unreal.FVector(1.0, 2.0, 3.0)}) == 1
+    assert unreal.FTransform() in {unreal.FTransform()}
+
+
 def test_value_types_have_unreals_shapes(classes):
     """Constructed in Unreal's own order, and carried by name rather than by position."""
     import tempo_sim.unreal as unreal
@@ -852,6 +885,39 @@ def test_a_function_result_is_typed_by_its_signature(classes):
     assert type(result["ReturnValue"]) is classes.MeshThing
     assert result["ReturnValue"].actor == "Thing"
     assert result["Mode"] is enums.EWidgetMode.Simple
+
+
+def test_a_by_reference_input_is_not_a_result(classes):
+    """The server reports a `UPARAM(ref)` input among a call's results, because the function may
+    have changed it. The schema calls it an input, which the signature does not list as an output
+    and the stub does not declare, so it must not turn `float Smooth(UPARAM(ref) TArray<FVector>&
+    Points)` into a call returning a dict -- nor appear beside a declared out parameter."""
+    import tempo_sim.unreal as unreal
+    import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
+
+    echoed = WorldControl.FunctionResult(
+        name="Points", typed_value=unreal._to_value("vector_array_value", [unreal.FVector(1, 2, 3)]))
+
+    class ReturnOnly:
+        results = [echoed, WorldControl.FunctionResult(
+            name="ReturnValue", typed_value=WorldControl.Value(float_value=2.0))]
+
+    assert unreal._function_result(
+        ReturnOnly(), {"inputs": [], "returns": {"variant": "float_value", "struct": ""},
+                       "outputs": {}}) == 2.0
+
+    class WithOutput:
+        results = [echoed, WorldControl.FunctionResult(
+            name="Count", typed_value=WorldControl.Value(int_value=3))]
+
+    assert unreal._function_result(
+        WithOutput(), {"inputs": [], "returns": None,
+                       "outputs": {"Count": {"variant": "int_value", "struct": ""}}}) == {"Count": 3}
+
+    class Void:
+        results = [echoed]
+
+    assert unreal._function_result(Void(), {"inputs": [], "returns": None, "outputs": {}}) is None
 
 
 def test_a_read_with_no_metadata_keeps_the_name_it_travelled_as(classes):
@@ -1495,11 +1561,25 @@ def test_out_parameters_come_back_by_name(classes, fake_calls):
     # How a Blueprint usually hands back more than one thing. Position would be guesswork, so the
     # result is keyed.
     fake_calls["results"] = [
+        fake_calls["make"]("Measured", struct_value={
+            "struct_name": "FWidgetSettings", "fields": [{"name": "Scale", "value": {"float_value": 2.0}}]}),
         fake_calls["make"]("ReturnValue", bool_value=True),
-        fake_calls["make"]("Remainder", int_value=2),
     ]
     widget = classes.Widget("MyActor")
-    assert widget.Resize(4) == {"ReturnValue": True, "Remainder": 2}
+    result = widget.Measure()
+    assert set(result) == {"ReturnValue", "Measured"}
+    assert result["ReturnValue"] is True and result["Measured"].Scale == 2.0
+
+
+def test_an_undeclared_result_does_not_change_what_a_call_returns(classes, fake_calls):
+    # Resize is `bool Resize(int NewSize)`, so it returns a bool, whatever else the server reports --
+    # as it reports a UPARAM(ref) input.
+    fake_calls["results"] = [
+        fake_calls["make"]("ReturnValue", bool_value=True),
+        fake_calls["make"]("NewSize", int_value=4),
+    ]
+    widget = classes.Widget("MyActor")
+    assert widget.Resize(4) is True
 
 
 @pytest.mark.parametrize("case,call", [

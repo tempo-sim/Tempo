@@ -455,6 +455,24 @@ fn variant_name(value: &pb::value::Value) -> &'static str {
         V::StructArrayValue(_) => "struct_array_value",
         V::NativeTransformValue(_) => "native_transform_value",
         V::LinearColorValue(_) => "linear_color_value",
+        V::VectorArrayValue(_) => "vector_array_value",
+        V::Vector2dArrayValue(_) => "vector2d_array_value",
+        V::IntVectorArrayValue(_) => "int_vector_array_value",
+        V::IntPointArrayValue(_) => "int_point_array_value",
+        V::RotatorArrayValue(_) => "rotator_array_value",
+        V::QuatArrayValue(_) => "quat_array_value",
+        V::ColorArrayValue(_) => "color_array_value",
+        V::LinearColorArrayValue(_) => "linear_color_array_value",
+        V::NativeTransformArrayValue(_) => "native_transform_array_value",
+        V::VectorSetValue(_) => "vector_set_value",
+        V::Vector2dSetValue(_) => "vector2d_set_value",
+        V::IntVectorSetValue(_) => "int_vector_set_value",
+        V::IntPointSetValue(_) => "int_point_set_value",
+        V::RotatorSetValue(_) => "rotator_set_value",
+        V::QuatSetValue(_) => "quat_set_value",
+        V::ColorSetValue(_) => "color_set_value",
+        V::LinearColorSetValue(_) => "linear_color_set_value",
+        V::NativeTransformSetValue(_) => "native_transform_set_value",
     }
 }
 
@@ -839,6 +857,55 @@ macro_rules! name_container {
 
 name_container! {
     ClassArrayValue, ClassSetValue, "a class array or set", ClassRef;
+}
+
+// A container of a first-class struct. Each element is exactly what the singular variant carries,
+// so it is wrapped back into that variant and read or written by the element's own conversion --
+// one definition of each struct's encoding, not two. As for every container, a read accepts the
+// array or the set variant and a write sends the array one.
+macro_rules! struct_container {
+    ($($case:ident, $set_case:ident, $single:ident, $wanted:literal, $message:ident, $element:ty;)*) => { $(
+        impl FromValue for Vec<$element> {
+            fn from_value(value: &pb::Value) -> Result<Self, TempoError> {
+                let elements = match variant(value)? {
+                    pb::value::Value::$case(inner) | pb::value::Value::$set_case(inner) => &inner.values,
+                    _ => return Err(wrong(value, $wanted)),
+                };
+                elements
+                    .iter()
+                    .map(|element| {
+                        <$element>::from_value(&pb::Value {
+                            value: Some(pb::value::Value::$single(element.clone())),
+                        })
+                    })
+                    .collect()
+            }
+        }
+        impl ToValue for Vec<$element> {
+            fn to_value(&self) -> pb::Value {
+                let values = self
+                    .iter()
+                    .filter_map(|element| match element.to_value().value {
+                        Some(pb::value::Value::$single(inner)) => Some(inner),
+                        _ => None,
+                    })
+                    .collect();
+                pb::Value { value: Some(pb::value::Value::$case(pb::$message { values })) }
+            }
+        }
+    )* };
+}
+
+struct_container! {
+    VectorArrayValue, VectorSetValue, VectorValue, "a vector array or set", VectorArray, FVector;
+    Vector2dArrayValue, Vector2dSetValue, Vector2dValue, "a 2D vector array or set", Vector2DArray, FVector2D;
+    IntVectorArrayValue, IntVectorSetValue, IntVectorValue, "an int vector array or set", IntVectorArray, FIntVector;
+    IntPointArrayValue, IntPointSetValue, IntPointValue, "an int point array or set", IntPointArray, FIntPoint;
+    RotatorArrayValue, RotatorSetValue, RotatorValue, "a rotator array or set", RotatorArray, FRotator;
+    QuatArrayValue, QuatSetValue, QuatValue, "a quaternion array or set", QuatArray, FQuat;
+    ColorArrayValue, ColorSetValue, ColorValue, "a color array or set", ColorArray, FColor;
+    LinearColorArrayValue, LinearColorSetValue, LinearColorValue, "a linear color array or set", LinearColorArray, FLinearColor;
+    NativeTransformArrayValue, NativeTransformSetValue, NativeTransformValue, "a transform array or set", NativeTransformArray, FTransform;
 }
 
 // -- struct values -------------------------------------------------------------------------------
@@ -1857,12 +1924,13 @@ pub fn argument<T: ToValue>(name: &str, value: &T) -> pb::FunctionArg {
 
 fn returned(response: &pb::CallFunctionResponse) -> Result<&pb::Value, TempoError> {
     // A Blueprint usually hands back more than one thing, and position would be guesswork, so the
-    // return value is the result named "ReturnValue" -- which is what UHT calls it.
+    // return value is the result named "ReturnValue" -- which is what UHT calls it. Never another
+    // result in its place: the server also reports a `UPARAM(ref)` input, ahead of the return value,
+    // and that is not it.
     response
         .results
         .iter()
         .find(|result| result.name == "ReturnValue")
-        .or_else(|| response.results.first())
         .and_then(|result| result.typed_value.as_ref())
         .ok_or_else(|| TempoError::Protocol("the function returned no value".into()))
 }
@@ -2546,6 +2614,101 @@ mod tests {
         let assets: Vec<AssetRef> =
             Vec::from_value(&value(V::AssetSetValue(strings(&["/Game/M_Paint"])))).expect("an asset set");
         assert_eq!(assets, [AssetRef::from_path("/Game/M_Paint")]);
+    }
+
+    // Writes a Vec of a first-class struct, checks it went out in the array variant, then reads it
+    // back from that variant and from the set variant carrying the same payload.
+    macro_rules! assert_struct_container_round_trips {
+        ($element:ty, $case:ident, $set_case:ident, $values:expr) => {{
+            let values: Vec<$element> = $values;
+            let written = values.to_value();
+            let payload = match written.value {
+                Some(pb::value::Value::$case(ref inner)) => inner.clone(),
+                ref other => panic!("expected {}, got {:?}", stringify!($case), other),
+            };
+            assert_eq!(payload.values.len(), values.len());
+            assert_eq!(Vec::<$element>::from_value(&written).expect(stringify!($case)), values);
+            let as_set = value(pb::value::Value::$set_case(payload));
+            assert_eq!(Vec::<$element>::from_value(&as_set).expect(stringify!($set_case)), values);
+        }};
+    }
+
+    #[test]
+    fn a_container_of_a_first_class_struct_round_trips() {
+        assert_struct_container_round_trips!(FVector, VectorArrayValue, VectorSetValue,
+            vec![FVector { x: 1.0, y: -2.0, z: 3.5 }, FVector::default()]);
+        assert_struct_container_round_trips!(FVector2D, Vector2dArrayValue, Vector2dSetValue,
+            vec![FVector2D { x: 1.0, y: 2.0 }]);
+        assert_struct_container_round_trips!(FIntVector, IntVectorArrayValue, IntVectorSetValue,
+            vec![FIntVector { x: 1, y: -2, z: 3 }]);
+        assert_struct_container_round_trips!(FIntPoint, IntPointArrayValue, IntPointSetValue,
+            vec![FIntPoint { x: 4, y: 5 }, FIntPoint { x: -1, y: 0 }]);
+        assert_struct_container_round_trips!(FRotator, RotatorArrayValue, RotatorSetValue,
+            vec![FRotator { pitch: 10.0, yaw: 20.0, roll: 30.0 }]);
+        assert_struct_container_round_trips!(FQuat, QuatArrayValue, QuatSetValue,
+            vec![FQuat { x: 0.0, y: 0.0, z: 0.5, w: 0.75 }]);
+        assert_struct_container_round_trips!(FColor, ColorArrayValue, ColorSetValue,
+            vec![FColor { r: 1, g: 2, b: 3, a: 4 }, FColor { r: 255, g: 0, b: 0, a: 255 }]);
+        assert_struct_container_round_trips!(FLinearColor, LinearColorArrayValue, LinearColorSetValue,
+            vec![FLinearColor { r: 0.25, g: 0.5, b: 2.0, a: 1.0 }]);
+        assert_struct_container_round_trips!(FTransform, NativeTransformArrayValue, NativeTransformSetValue,
+            vec![FTransform {
+                rotation: FQuat { x: 0.0, y: 0.0, z: 0.0, w: 1.0 },
+                translation: FVector { x: 100.0, y: 0.0, z: -5.0 },
+                scale3d: FVector { x: 1.0, y: 2.0, z: 3.0 },
+            }]);
+    }
+
+    // The server reports a `UPARAM(ref)` input among a call's results, ahead of the return value,
+    // because the function may have changed it. The schema calls it an input, so it is neither the
+    // return value nor an out parameter, and must not be read as either.
+    #[test]
+    fn a_by_reference_input_is_not_a_result() {
+        let result = |name: &str, inner: pb::value::Value| pb::FunctionResult {
+            name: name.to_string(),
+            typed_value: Some(value(inner)),
+            ..Default::default()
+        };
+        let echoed = result(
+            "Points",
+            pb::value::Value::VectorArrayValue(pb::VectorArray {
+                values: vec![crate::proto::tempo_core::Vector { x: 1.0, y: 2.0, z: 3.0 }],
+            }),
+        );
+
+        let with_return = pb::CallFunctionResponse {
+            results: vec![echoed.clone(), result("ReturnValue", pb::value::Value::FloatValue(2.0))],
+        };
+        assert_eq!(f64::from_value(returned(&with_return).unwrap()).unwrap(), 2.0);
+
+        let with_output = pb::CallFunctionResponse {
+            results: vec![echoed.clone(), result("Count", pb::value::Value::IntValue(3))],
+        };
+        assert_eq!(ObjectRef::result_of::<i32>(&with_output, "Count").unwrap(), 3);
+
+        // Without a return value there is nothing to read, not the first result in its place.
+        let only_echoed = pb::CallFunctionResponse { results: vec![echoed] };
+        assert!(returned(&only_echoed).is_err());
+    }
+
+    #[test]
+    fn an_empty_container_of_a_first_class_struct_is_still_its_variant() {
+        // An empty array still has to say what it is, or the server cannot clear the property.
+        match Vec::<FVector>::new().to_value().value {
+            Some(pb::value::Value::VectorArrayValue(inner)) => assert!(inner.values.is_empty()),
+            other => panic!("expected an empty vector array, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn a_container_of_the_wrong_struct_is_named_in_the_error() {
+        let error = Vec::<FVector>::from_value(&value(pb::value::Value::RotatorSetValue(
+            pb::RotatorArray { values: vec![] },
+        )))
+        .expect_err("a rotator set is not a vector container")
+        .to_string();
+        assert!(error.contains("a vector array or set"), "{error}");
+        assert!(error.contains("rotator_set_value"), "{error}");
     }
 
     #[test]

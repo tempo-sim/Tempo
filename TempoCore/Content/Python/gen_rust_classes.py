@@ -64,7 +64,8 @@ SIMPLE_TYPES = {
 # nested-access-only, which the server already reports as value_expressible: false.
 CONTAINER_ELEMENTS = frozenset(
     ("bool", "int", "int64", "float", "double", "string", "enum", "class", "asset", "actor",
-     "component"))
+     "component", "vector", "vector2d", "intvector", "intpoint", "rotator", "quat", "transform",
+     "color", "linearcolor"))
 
 # How each kind is read and written. `plain` is get/set; the others need a runtime helper, either
 # because the Rust type cannot say which Value variant to use or because the orphan rule forbids
