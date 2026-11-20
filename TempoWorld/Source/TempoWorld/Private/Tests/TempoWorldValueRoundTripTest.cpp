@@ -449,6 +449,19 @@ bool FTempoWorldValueRoundTripStructContainersTest::RunTest(const FString& Param
 			SetValueOnTarget(nullptr, Fixture.TargetFor(Fixture.Count), Vectors).error_code(), grpc::FAILED_PRECONDITION);
 	}
 
+	// A struct_array_value naming the wrong struct is refused before the array is touched: it keeps
+	// what it held rather than being emptied for a write that cannot land.
+	{
+		FScriptArrayHelper Helper = ArrayOf(Fixture.Vectors);
+		Helper.EmptyValues();
+		Helper.AddValues(2);
+		TempoWorld::Value Misnamed;
+		Misnamed.mutable_struct_array_value()->add_values()->set_struct_name("FRotator");
+		TestEqual(TEXT("a misnamed struct_array_value is a type mismatch"),
+			SetValueOnTarget(nullptr, Fixture.TargetFor(Fixture.Vectors), Misnamed).error_code(), grpc::FAILED_PRECONDITION);
+		TestEqual(TEXT("a misnamed struct_array_value leaves the array alone"), ArrayOf(Fixture.Vectors).Num(), 2);
+	}
+
 	// So is a struct that only shares the name: a struct asset called "Vector" reports "FVector" as
 	// its CPP name and has a layout of its own. The properties stand alone and have no storage,
 	// which a write that got past the check would dereference.

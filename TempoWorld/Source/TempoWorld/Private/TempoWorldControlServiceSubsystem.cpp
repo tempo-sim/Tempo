@@ -3577,6 +3577,22 @@ grpc::Status AddressErrorStatus(TempoWorldReflection::EAddressError Error, const
 	return grpc::Status(Code, std::string(TCHAR_TO_UTF8(*Message)));
 }
 
+// A StructValue may name the struct it is a value of, and one that names another is refused.
+grpc::Status CheckStructName(const UScriptStruct* Struct, const TempoWorld::StructValue& Value)
+{
+	if (!Value.struct_name().empty())
+	{
+		const FString Given(UTF8_TO_TCHAR(Value.struct_name().c_str()));
+		const FString StructName = Struct->GetStructCPPName();
+		if (Given != StructName)
+		{
+			const FString ErrorMsg = FString::Printf(TEXT("A '%s' was given where a '%s' is expected"), *Given, *StructName);
+			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
+		}
+	}
+	return grpc::Status_OK;
+}
+
 // Write the fields of a StructValue into the struct at StructPtr, each through SetValueOnTarget.
 //
 // A merge: a member the value does not mention keeps what it holds. That is what lets a client that
@@ -3587,16 +3603,12 @@ grpc::Status AddressErrorStatus(TempoWorldReflection::EAddressError Error, const
 grpc::Status WriteStructFields(const UWorld* World, const UScriptStruct* Struct, void* StructPtr,
 	const TempoWorld::StructValue& Value)
 {
-	const FString StructName = Struct->GetStructCPPName();
-	if (!Value.struct_name().empty())
+	const grpc::Status NameStatus = CheckStructName(Struct, Value);
+	if (!NameStatus.ok())
 	{
-		const FString Given(UTF8_TO_TCHAR(Value.struct_name().c_str()));
-		if (Given != StructName)
-		{
-			const FString ErrorMsg = FString::Printf(TEXT("A '%s' was given where a '%s' is expected"), *Given, *StructName);
-			return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
-		}
+		return NameStatus;
 	}
+	const FString StructName = Struct->GetStructCPPName();
 
 	for (const TempoWorld::StructField& Field : Value.fields())
 	{
@@ -3640,12 +3652,22 @@ grpc::Status SetStructValueOnTarget(const UWorld* World, const FPropertyTarget& 
 		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	};
 
-	// With no nested address the destination is the property itself, so a mismatch is known before
-	// anything is touched and announces no edit. Resolving a nested address can create what it
-	// names, which is an edit whatever comes of the write.
-	if (Target.InnerPropertyName.IsEmpty() && !CastField<FStructProperty>(Target.Property))
+	// With no nested address the destination is the property itself, so a mismatch -- of the
+	// property's type, or of the struct the value names -- is known before anything is touched and
+	// announces no edit. Resolving a nested address can create what it names, which is an edit
+	// whatever comes of the write.
+	if (Target.InnerPropertyName.IsEmpty())
 	{
-		return Mismatch(Target.Property);
+		const FStructProperty* StructProperty = CastField<FStructProperty>(Target.Property);
+		if (!StructProperty)
+		{
+			return Mismatch(Target.Property);
+		}
+		const grpc::Status NameStatus = CheckStructName(StructProperty->Struct, Value);
+		if (!NameStatus.ok())
+		{
+			return NameStatus;
+		}
 	}
 
 	grpc::Status Status = grpc::Status_OK;
@@ -3696,10 +3718,23 @@ grpc::Status SetStructArrayOnTarget(const UWorld* World, const FPropertyTarget& 
 		return grpc::Status(grpc::FAILED_PRECONDITION, std::string(TCHAR_TO_UTF8(*ErrorMsg)));
 	};
 
-	// As for a single struct: a mismatch that needs no address resolved announces no edit.
-	if (Target.InnerPropertyName.IsEmpty() && !StructElementOfArray(Target.Property))
+	// As for a single struct: a mismatch that needs no address resolved announces no edit, and
+	// here leaves the array as it was rather than emptied.
+	if (Target.InnerPropertyName.IsEmpty())
 	{
-		return Mismatch(Target.Property);
+		const FStructProperty* ElementProperty = StructElementOfArray(Target.Property);
+		if (!ElementProperty)
+		{
+			return Mismatch(Target.Property);
+		}
+		for (const TempoWorld::StructValue& Element : Values.values())
+		{
+			const grpc::Status NameStatus = CheckStructName(ElementProperty->Struct, Element);
+			if (!NameStatus.ok())
+			{
+				return NameStatus;
+			}
+		}
 	}
 
 	grpc::Status Status = grpc::Status_OK;
@@ -3784,6 +3819,8 @@ auto ToUnrealArray(const RepeatedType& Given)
 }
 }
 
+namespace
+{
 // The struct an array or set property holds, or null when the property is neither or holds
 // something else.
 const FStructProperty* StructElementOf(const FProperty* Property)
@@ -3830,6 +3867,7 @@ bool WriteFirstClassStructContainer(const FProperty* Leaf, void* LeafContainer, 
 		}
 	}
 	return true;
+}
 }
 
 // A whole array or set of one of the first-class structs. Replaces the container's contents, as every
