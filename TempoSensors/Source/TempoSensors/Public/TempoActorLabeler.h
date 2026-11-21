@@ -21,11 +21,18 @@
 struct FInstanceIdAllocator
 {
 	FInstanceIdAllocator() = default;
-	FInstanceIdAllocator(int32 MinIdIn, int32 MaxIdIn);
+	// ExcludedIds are left out of the range: never handed out, and never expected back. The labeler
+	// reserves every class's own label this way.
+	FInstanceIdAllocator(int32 MinIdIn, int32 MaxIdIn, const TSet<int32>& ExcludedIds = TSet<int32>());
 
 	// The ID with the fewest live allocations. Unset when every ID is already held and
 	// bAllowSharedIds is false, or the range is empty.
 	TOptional<int32> Allocate(bool bAllowSharedIds);
+
+	// Takes one more allocation of an ID that is already live, for a second object that is part of
+	// the same instance; each allocation is given back with its own Return. False, and nothing taken,
+	// when Id has no live allocation.
+	bool Share(int32 Id);
 
 	// Gives back one allocation of Id. Returning an ID with no live allocation is a caller bug,
 	// and is reported rather than counted.
@@ -127,6 +134,12 @@ public:
 
 	TMap<uint8, uint8> GetInstanceToSemanticIdMap() const;
 
+	// The instance IDs that stand for a whole class rather than one object: each class's own Label.
+	// It is shared by every object of a non-instanced (stuff) class, and by the instanced mesh
+	// components of an instanced class, each of which draws many objects. The camera reports no 2D
+	// bounding boxes for them.
+	TSet<uint8> GetClassInstanceIds() const;
+
 	// The value the labeler writes into the stencil for an Actor's primitives, its instance or
 	// semantic ID per the label type setting, for callers that label something the Actor owns but
 	// that renders no custom depth of its own, such as fog. Unset if the Actor has not been labeled.
@@ -190,6 +203,17 @@ protected:
 
 	void ReturnInstanceId(int32 InstanceId);
 
+	// The instance ID an object of this semantic class gets: the class's own Label when the class is
+	// non-instanced (stuff), shared by all of them, and otherwise a freshly allocated one.
+	TOptional<int32> InstanceIdForSemanticId(int32 SemanticId);
+
+	// The instance ID for a component that resolves a label of its own, given its owning Actor's.
+	// A component is part of its Actor's object when they share a class: it takes the Actor's ID, or,
+	// when the Actor has none of that class, the one a sibling component of the class already holds.
+	// An instanced static mesh component of a class draws many objects in one, so it takes the
+	// class's own ID, as stuff does.
+	TOptional<int32> InstanceIdForComponent(const UPrimitiveComponent* Component, int32 SemanticId, const FInstanceSemanticIdPair& ActorIdPair);
+
 	// Re-derive everything cached from the semantic label table, then re-label the world from
 	// scratch. Bound to the settings' label-settings-changed event.
 	void OnLabelSettingsChanged();
@@ -219,6 +243,15 @@ protected:
 
 	UPROPERTY(VisibleAnywhere)
 	TMap<FName, int32> SemanticIds;
+
+	// The Labels of the table's non-instanced (stuff) rows.
+	UPROPERTY(VisibleAnywhere)
+	TSet<int32> NonInstancedSemanticIds;
+
+	// Every row's Label but 0's. Reserved in the instance ID allocator, so in Instance mode each
+	// always means its class (see GetClassInstanceIds).
+	UPROPERTY(VisibleAnywhere)
+	TSet<int32> ClassInstanceIds;
 
 	UPROPERTY()
 	TMap<const UObject*, FInstanceSemanticIdPair> LabeledObjects;
