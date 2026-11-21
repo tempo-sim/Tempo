@@ -520,6 +520,12 @@ matrix entry.
   don't write custom depth, labels behind them show through. `Setup.sh` runs
   `Scripts/ConfigureProject.sh`, which turns FastGeo off in the project's cook (`-keep-fastgeo` skips
   it). `FASTGEO_LABELING_NOTES.md` covers what supporting it would take.
+- **Stock CitySample doesn't compile on Clang.** Its targets build at `BuildSettingsVersion.V7`
+  (UE 5.8), which makes unreachable code an error on Clang, and `GetWorldInfo` in
+  `CitySampleBlueprintLibrary.cpp` has a loop that always returns. `Setup.sh` runs
+  `Scripts/PatchCitySample.sh`, which rewrites that one line (exact match, idempotent, `-restore`);
+  it does nothing in a project without CitySample's source. A further CitySample source fix
+  belongs there, as one more entry.
 - **Time control needs `ATempoWorldSettings` in the level.** Every time RPC fails without it. A host
   project's maps keep the engine's `AWorldSettings` unless `WorldSettingsClassName` names Tempo's.
   `ConfigureProject.sh` sets it when the project uses the default, and the editor or cook swaps the

@@ -120,6 +120,14 @@ your project root works.
 
     [:octicons-arrow-right-24: Traffic as a drop-in replacement](../plugins/traffic.md#drop-in-replacement-for-citysamples-traffic)
 
+`PatchCitySample.sh`
+
+:   In a CitySample project, rewrites the one line of CitySample's source that fails to compile on
+    Clang at `BuildSettingsVersion.V7`. Any other project has none of that source, and it does
+    nothing there. Called by `Setup.sh`; pass `-restore` to undo it.
+
+    [:octicons-arrow-right-24: The CitySample source fix](../guides/citysample.md#patch-citysample)
+
 ## Discovery helpers
 
 These print a path and exit. They're used by the other scripts, and are useful in your own

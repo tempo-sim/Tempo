@@ -127,6 +127,8 @@ if [ "$KEEP_FASTGEO" -eq 1 ]; then
 else
   bash "$SCRIPT_DIR/ConfigureProject.sh"
 fi
+# CitySample only: source fixes it needs to compile; see PatchCitySample.sh.
+bash "$SCRIPT_DIR/PatchCitySample.sh"
 for TARGET_FILE in "$PROJECT_ROOT/Source/"*.Target.cs; do
   [ -f "$TARGET_FILE" ] || continue
   REMOVE_TOOLCHAIN_BLOCK_FROM_TARGET_FILE "$TARGET_FILE"

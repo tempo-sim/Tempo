@@ -26,10 +26,11 @@ stock CitySample checkout to a Tempo gRPC server you can drive from Python.
 - A CitySample checkout on **UE 5.7 or 5.8**. Epic distributes CitySample through the Epic Games
   Launcher and Fab. Tempo does not support 5.6 or earlier.
 
-## 1. Patch CitySample so it compiles { #patch-citysample }
+## 1. The CitySample source fix { #patch-citysample }
 
-Do this first, before adding Tempo — it is a problem in CitySample's own code, and it will fail a
-stock build on macOS or Linux with no plugin involved:
+You don't need to do anything for this step: `Setup.sh` (step 3) makes the fix. It's described here
+because it edits CitySample's own source. The bug is in CitySample itself, and it fails a stock build
+on macOS or Linux with no plugin involved:
 
 ```text
 CitySample/Source/CitySample/Util/CitySampleBlueprintLibrary.cpp:203:97: error: loop will run
@@ -39,7 +40,8 @@ CitySample/Source/CitySample/Util/CitySampleBlueprintLibrary.cpp:203:97: error: 
 ```
 
 The loop body returns unconditionally, so `++It` can never run. The function means "return the
-first `ACitySampleWorldInfo`, or `nullptr`" — write that directly:
+first `ACitySampleWorldInfo`, or `nullptr`", and `Scripts/PatchCitySample.sh`, which `Setup.sh`
+runs, rewrites that one line to say so:
 
 ```cpp title="Source/CitySample/Util/CitySampleBlueprintLibrary.cpp"
 ACitySampleWorldInfo* UCitySampleBlueprintLibrary::GetWorldInfo(const UObject* const WorldContextObject)
@@ -60,6 +62,10 @@ This is exactly equivalent. `TActorIteratorBase` has an `explicit operator bool(
 performs the same validity check the `for` condition did, and constructing the iterator already
 advances it to the first match. CitySample is built as C++20 — `BuildSettingsVersion.V4` and later
 set `CppStandardVersion.Cpp20` — so the if-with-initializer form is available.
+
+The script changes only that exact line, so running it again does nothing. If Epic changes the
+code, it leaves the file alone and says so. `Scripts/PatchCitySample.sh -restore` puts Epic's line
+back. In any other project it finds no CitySample source and does nothing.
 
 ??? question "Why doesn't this happen in other projects?"
 
@@ -89,7 +95,7 @@ set `CppStandardVersion.Cpp20` — so the if-with-initializer form is available.
 
 !!! tip "Relaxing the warning instead"
 
-    If you would rather not patch CitySample, a module can opt out in its `*.Build.cs`:
+    If you would rather not patch CitySample (run `PatchCitySample.sh -restore` after `Setup.sh`), a module can opt out in its `*.Build.cs`:
 
     ```csharp
     CppCompileWarningSettings.UnreachableCodeWarningLevel = WarningLevel.Warning;
@@ -124,8 +130,7 @@ Plugins/Traffic/Traffic.uplugin              → Traffic.uplugin.disabled-by-tem
 Plugins/RuleProcessor/RuleProcessor.uplugin  → RuleProcessor.uplugin.disabled-by-tempo
 ```
 
-Nothing else on disk is touched, and `Scripts/DisableConflictingPlugins.sh -restore` puts them
-back. If you skip this step the build fails in C# before it compiles any C++, with
+`Scripts/DisableConflictingPlugins.sh -restore` puts them back. If you skip this step the build fails in C# before it compiles any C++, with
 [`CS0101: already contains a definition for 'MassTraffic'`](troubleshooting.md#cs0101-already-contains-a-definition-for-masstraffic).
 
 !!! note "Your `.uproject` does not need editing"
@@ -169,7 +174,8 @@ FastGeo.Enable=False
 
 All three take effect at the next package. `Scripts/ConfigureProject.sh -restore` removes the block.
 
-`Setup.sh` also downloads third-party dependencies.
+It also makes the [source fix](#patch-citysample) from step 1, and downloads third-party
+dependencies.
 
 ## 4. Build and run
 
@@ -222,8 +228,7 @@ covers choosing vehicles, the rig and label JSON, and the recording format.
 
 | | |
 |---|---|
-| `Source/CitySample/Util/CitySampleBlueprintLibrary.cpp` | Patched by you, in step 1 |
-| `Source/CitySample/Vehicles/CitySampleVehicleBase.cpp` | Patched by you, in step 1 |
+| `Source/CitySample/Util/CitySampleBlueprintLibrary.cpp` | One line patched by `Setup.sh` (step 1) |
 | `Plugins/Traffic/`, `Plugins/RuleProcessor/` | Descriptors renamed `*.disabled-by-tempo` |
 | `Config/DefaultEngine.ini` | Tempo's world settings, physics substepping, FastGeo off (a `TEMPO_PROJECT_CONFIG` block at the end) |
 | `TempoEnv/` | Generated Python virtual environment with the client packages |
