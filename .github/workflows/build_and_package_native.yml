@@ -30,10 +30,15 @@
 # socket (TEMPO_SERVER_PORT, TEMPO_CI_SOCKET) for the same reason.
 #
 # Security: this job runs the code under test on a machine that outlives the job, and it is given NO
-# secrets. Callers must not pass any (no `secrets: inherit`), and should gate fork PRs behind a protected
-# environment (the `environment` input), exactly as for build_and_package.yml. Alerting a human about the
-# machine is therefore the machine's job (TEMPO_CI_ALERT_COMMAND), not this workflow's. The machine's own
-# setup, monitoring and updates live in CI/Machines.
+# secrets. Callers must not pass any (no `secrets: inherit`). Needing none, a caller should run it on
+# pull_request, as tempo_build_and_test_native.yml does: then GitHub checks out the PR merged with its
+# base, and a PR's changes to this workflow are what its run uses. On pull_request a PR can edit its
+# caller too, so the `environment` input cannot gate a fork there; the repository setting "Require
+# approval for all external contributors" (Settings > Actions > General) must, since the PR cannot change
+# it. A pull_request_target caller gates fork PRs with `environment` and `allow_unsafe_pr_checkout`, as for
+# build_and_package.yml. Alerting a human about the machine is the machine's job
+# (TEMPO_CI_ALERT_COMMAND), not this workflow's. The machine's own setup, monitoring and updates live in
+# CI/Machines.
 # ======
 
 name: Build, Package and Test a Tempo Project Natively
@@ -78,11 +83,14 @@ on:
         description: >-
           Check out a pull request's head commit instead of github.sha on pull_request_target runs. That runs
           the PR's code on this persistent machine; gate fork PRs behind a protected environment (the
-          environment input) if you set it. Same meaning as in build_and_package.yml.
+          environment input) if you set it. Same meaning as in build_and_package.yml. pull_request runs
+          ignore it: they always build the PR, as GitHub merged it with its base (github.sha).
         default: false
       environment:
         type: string
-        description: Deployment environment to gate the job behind (e.g. a manual-approval environment for fork PRs). Empty = no gate.
+        description: >-
+          Deployment environment to gate the job behind (e.g. a manual-approval environment for fork PRs). Empty
+          = no gate. Only a pull_request_target caller can rely on it: on pull_request the PR can edit the caller.
         default: ''
       automation_test_filter:
         type: string
@@ -359,13 +367,15 @@ jobs:
     - name: Determine Checkout Ref
       id: checkout_ref
       run: |
-        if [ "${{ github.event_name }}" = "pull_request_target" ] && [ "${{ inputs.allow_unsafe_pr_checkout }}" != "true" ]; then
+        # On pull_request, github.sha is already the PR head merged with its base (refs/pull/N/merge), so
+        # only pull_request_target, whose github.sha is the base branch, needs the head and a merge.
+        if [ "${{ github.event_name }}" != "pull_request_target" ]; then
           echo "REF=${{ github.sha }}" >> $GITHUB_OUTPUT
-          if [ -n "${{ github.event.pull_request.head.sha }}" ]; then
-            echo "::warning title=Unsafe PR checkout skipped::allow_unsafe_pr_checkout is false on this pull_request_target run, so the PR head commit was not checked out. Building ${{ github.sha }} (the base branch) instead."
-          fi
+        elif [ "${{ inputs.allow_unsafe_pr_checkout }}" != "true" ]; then
+          echo "REF=${{ github.sha }}" >> $GITHUB_OUTPUT
+          echo "::warning title=Unsafe PR checkout skipped::allow_unsafe_pr_checkout is false on this pull_request_target run, so the PR head commit was not checked out. Building ${{ github.sha }} (the base branch) instead."
         else
-          echo "REF=${{ github.event.pull_request.head.sha || github.sha }}" >> $GITHUB_OUTPUT
+          echo "REF=${{ github.event.pull_request.head.sha }}" >> $GITHUB_OUTPUT
         fi
 
     # Not actions/checkout: it can only check out under the workspace, and checking out the host project

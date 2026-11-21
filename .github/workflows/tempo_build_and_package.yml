@@ -11,7 +11,7 @@ on:
     branches:
       - main
   pull_request_target:
-    # closed: only to cancel the PR's native job, which would otherwise still hold the one machine.
+    # closed: only to cancel the PR's native job (native_cancel below).
     types: [opened, synchronize, closed]
   workflow_dispatch:
 
@@ -51,17 +51,18 @@ jobs:
       upload_artifact: true
     secrets: inherit
 
-  # Native builds on Tempo's dedicated self-hosted machines (runner group "tempo-ci"): build, package and
-  # every test group in ONE job per (machine, engine version), incrementally from the machine's cached
-  # build of main. See build_and_package_native.yml. No secrets: the job runs PR code on a persistent
-  # machine, and fork PRs wait for approval in fork-pr-environment like every other job here.
-  build_and_test_native:
+  # The native jobs run from tempo_build_and_test_native.yml, on pull_request. This only cancels a closed
+  # PR's native job, which would otherwise still hold the one machine: here, on pull_request_target, a
+  # fork PR's cancellation needs no approval. It runs no PR code (cancel_only builds nothing), and its
+  # concurrency group matches the build's only if the matrix matches, so keep it in step with that file.
+  native_cancel:
     name: Native
+    if: github.event.action == 'closed'
+    # What the (skipped) build job declares: a caller may not grant a called job less than it asks for.
     permissions:
       contents: read
     uses: ./.github/workflows/build_and_package_native.yml
     strategy:
-      fail-fast: false
       matrix:
         machine:
           - { name: macos, runner: '["self-hosted","tempo-ci","macOS"]' }
@@ -71,44 +72,14 @@ jobs:
     with:
       runner: ${{ matrix.machine.runner }}
       unreal_version: ${{ matrix.unreal_version }}
-      project_root: TempoSample
-      tempo_root: TempoSample/Plugins/Tempo
-      host_project: tempo-sim/TempoSample
-      checkout_path: TempoSample/Plugins/Tempo
-      cache_branch: main
-      environment: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository && 'fork-pr-environment' || '' }}
-      allow_unsafe_pr_checkout: true
-      gen_rust_api: true
-      gen_cpp_api: true
-      require_reflected_api: true
-      automation_test_filter: Tempo.
-      cancel_only: ${{ github.event.action == 'closed' }}
-      # The same groups the Linux fan-out jobs below run (codegen stays Linux-only: nothing it checks
-      # depends on the platform), and sensors, which renders and so runs only here, where there is a GPU.
-      # A machine may add sim arguments of its own through TEMPO_SIM_EXTRA_ARGS (a GPU driver workaround, say:
-      # CI/Machines/linux/machine.env.example), which the sensors line keeps.
-      # Sensors runs without the ROS plugins: its tests load a level, and TempoROS crashes when a node
-      # is destroyed, as a level load destroys the world's (an allocator lifetime bug in rclcpp).
-      test_commands: |
-        python-contract: Scripts/TestPythonAPI.sh contract
-        python-core: Scripts/TestPythonAPI.sh core
-        python-world: Scripts/TestPythonAPI.sh world
-        python-movement: Scripts/TestPythonAPI.sh movement
-        python-core-socket: if [ "$RUNNER_OS" = Windows ]; then echo "Skipped: Tempo has no Unix socket transport on Windows."; else TEMPO_SERVER_SOCKET=$TEMPO_CI_SOCKET Scripts/TestPythonAPI.sh core; fi
-        python-sensors: TEMPO_SIM_RENDER=1 TEMPO_SIM_EXTRA_ARGS="${TEMPO_SIM_EXTRA_ARGS:-} -DisablePlugins=TempoROS,TempoROSBridge" Scripts/TestPythonAPI.sh sensors
-        rust-contract: Scripts/TestRustAPI.sh contract
-        rust-integration: Scripts/TestRustAPI.sh integration
-        rust-typed: Scripts/TestRustAPI.sh typed
-        cpp-contract: Scripts/TestCppAPI.sh contract
-        cpp-integration: Scripts/TestCppAPI.sh integration
-        cpp-typed: Scripts/TestCppAPI.sh typed
+      cancel_only: true
 
   # Fan-out (Python): one parallel job per (Unreal version x group). Each downloads the single
   # packaged artifact produced above, installs the generated tempo-sim wheel from it, launches the
   # packaged sim headless, and runs that group's pytest markers. Build once, test in parallel.
   #
   # NOTE: the "sensors" group is intentionally NOT here — sensor-data APIs need a GPU, and it runs
-  # in the native job above instead. To run it here too, add "sensors" to the matrix below AND give
+  # in the native job (tempo_build_and_test_native.yml) instead. To run it here too, add "sensors" to the matrix below AND give
   # it a GPU runner + render:true (e.g. via matrix `include`), since this matrix's jobs run on the
   # GPU-less default runner.
   test_packaged_python_api:

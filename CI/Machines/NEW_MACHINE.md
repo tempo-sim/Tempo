@@ -76,17 +76,18 @@ and the healthchecks.io URL stay on the machine.
      code as `ci`. Don't update the OS automatically; report pending updates instead.
    - Put the new scripts in `CI/Machines/linux/` or `CI/Machines/windows/`, with a `bootstrap` that
      makes all of the above repeatable, as `macos/bootstrap.sh` does for the Mac.
-9. **Wire it into CI.** In `.github/workflows/tempo_build_and_package.yml`, add the machine to the
+9. **Wire it into CI.** In `.github/workflows/tempo_build_and_test_native.yml`, add the machine to the
    `build_and_test_native` matrix:
    `- { name: linux, runner: '["self-hosted","tempo-ci","Linux"]' }` (or `windows` / `Windows`).
+   Add the same line to the `native_cancel` matrix in `tempo_build_and_package.yml`, which cancels a
+   closed PR's job and finds it only by a matching matrix.
    - **Windows has no Unix socket transport**, so the `python-core-socket` line in `test_commands` must
      not run there. Either give each machine its own test list (a `test_commands` field in its matrix
      entry) or make that line skip itself on Windows; don't drop it for the other machines.
    - `ci_machine_watchdog.yml` needs no change: it watches the whole `tempo-ci` group.
-10. **Test it before merging.** `pull_request_target` runs main's workflow, so your PR's own runs won't
-    use your changes. Push your branch, then dispatch the workflow on it:
-    `gh workflow run tempo_build_and_package.yml --ref <branch>`. Both engines must pass Build, Run
-    Automation Tests, Package, and Test Package. The first run builds from scratch (expect over an
+10. **Test it before merging.** The native workflow runs on `pull_request`, so your PR's own runs use
+    your changes, the new machine included. Both engines must pass Build, Run Automation Tests,
+    Package, and Test Package. The first run builds from scratch (expect over an
     hour); the cached trees only fill once a build of main passes after your PR merges.
 
 ## Things the Mac taught us
