@@ -205,6 +205,10 @@ def query(binary, port, timeout, socket_name):
 
     endpoint_args, point_client = _point_client_at(socket_name, port)
     arguments = [binary, "-nullrhi", "-unattended", "-nopause", "-nosound", "-nosplash"] + endpoint_args
+    # On macOS, keep LLM on: a packaged UE 5.8 Mac build that switches it off at startup intermittently
+    # fails FLLMThreadState::PopTag on a tag scope already open (Tests/Python/conftest.py, LLM_ARGS).
+    if sys.platform == "darwin":
+        arguments.append("-llm")
 
     if _endpoint_answers(socket_name, port):
         raise RuntimeError(

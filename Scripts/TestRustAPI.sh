@@ -156,6 +156,11 @@ if [ "$GROUP" != "contract" ]; then
     ENDPOINT_ARG=(-ServerPort="$PORT")
     echo "Launching sim: $BINARY $RHI_ARG (port $PORT)"
   fi
+  # -llm keeps the engine's low-level memory tracker on, on macOS. Without it a packaged UE 5.8 Mac
+  # sim switches LLM off early in startup, freeing every thread's tag stack, and a tag scope already
+  # open then pops an empty one: the PopTag check below. The relaunch stays as the backstop.
+  LLM_ARG=()
+  [ "$(uname -s)" = Darwin ] && LLM_ARG=(-llm)
   # A sim killed by a signal within 30s of launch, before its endpoint appears, is launched once more:
   # UE 5.8's packaged Mac build intermittently fails an LLM check (FLLMThreadState::PopTag, "stack was
   # empty on pop") about a second and a half after exec, before its logging starts, and a relaunch
@@ -165,7 +170,7 @@ if [ "$GROUP" != "contract" ]; then
     # Under job control, so the sim leads a process group cleanup can signal as a whole.
     set -m
     "$BINARY" "$RHI_ARG" -unattended -nopause -nosound -nosplash \
-      "${ENDPOINT_ARG[@]}" -stdout -fullstdoutlogoutput > "$REPORT_DIR/sim.log" 2>&1 &
+      "${ENDPOINT_ARG[@]}" "${LLM_ARG[@]}" -stdout -fullstdoutlogoutput > "$REPORT_DIR/sim.log" 2>&1 &
     SIM_PID=$!
     set +m
 
