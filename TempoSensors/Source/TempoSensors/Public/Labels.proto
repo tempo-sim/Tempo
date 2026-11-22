@@ -96,11 +96,17 @@ message GetAllSkeletalMeshTypesResponse {
 }
 
 // The global label type. Determines what the label image and lidar label channel carry:
-// the semantic class ID shared by every object of a class, or a per-object instance ID.
+// the semantic class ID shared by every object of a class, a per-object instance ID, or (panoptic)
+// an instance ID for each countable object and the semantic class ID for everything else.
 enum LabelType {
   LT_UNKNOWN = 0;
   LT_SEMANTIC = 1;
   LT_INSTANCE = 2;
+  // Instance IDs for the label table's instanced classes, with all of one object's parts sharing
+  // one ID. Every object of a class whose row sets bPanopticInstanced false, and every instanced
+  // mesh drawing many objects at once, carries its semantic class ID as its instance ID; such an
+  // ID maps to itself in the instance-to-semantic map and gets no 2D bounding box.
+  LT_PANOPTIC = 3;
 }
 
 message SetLabelTypeRequest {

@@ -143,10 +143,9 @@ public:
 	TMap<uint8, uint8> GetInstanceToSemanticIdMap() const;
 
 	// The instance IDs that stand for a whole class rather than one object, for which the camera
-	// reports no 2D bounding boxes: the Label of every non-instanced (stuff) row, shared by every
-	// object of the class, and, with the Panoptic Instance Labels setting, of every other row too,
-	// shared by the class's instanced mesh components, each of which draws many objects. Empty
-	// outside Instance label mode, where the label image holds no instance IDs.
+	// reports no 2D bounding boxes. In Panoptic label mode that is every row's Label: shared by every
+	// object of a non-instanced (stuff) class, and by an instanced class's instanced mesh components,
+	// each of which draws many objects. Empty in the other label modes.
 	TSet<uint8> GetClassInstanceIds() const;
 
 	// The value the labeler writes into the stencil for an Actor's primitives, its instance or
@@ -212,21 +211,22 @@ protected:
 
 	void ReturnInstanceId(int32 InstanceId);
 
-	// The instance ID an object of this semantic class gets: the class's own Label when the class is
-	// non-instanced (stuff), shared by all of them, and otherwise a freshly allocated one.
+	// The instance ID an object of this semantic class gets: a freshly allocated one, unless the
+	// label mode is Panoptic and the class is non-instanced (stuff), when it is the class's own
+	// Label, shared by all of them.
 	TOptional<int32> InstanceIdForSemanticId(int32 SemanticId);
 
-	// The instance ID for a component that resolves a label of its own, given its owning Actor's:
-	// the class's own Label for a non-instanced (stuff) class, and otherwise a freshly allocated one.
-	// With the Panoptic Instance Labels setting a component is instead part of its Actor's object
-	// when they share a class: it takes the Actor's ID, or, when the Actor has none of that class,
-	// the one a sibling component of the class already holds. And an instanced static mesh component
-	// of a class draws many objects in one, so it takes the class's own ID, as stuff does.
+	// The instance ID for a component that resolves a label of its own, given its owning Actor's: a
+	// freshly allocated one, except in Panoptic label mode. There a component of a non-instanced
+	// (stuff) class takes the class's own Label, and so does an instanced static mesh component,
+	// which draws many objects in one. Any other component is part of its Actor's object when they
+	// share a class: it takes the Actor's ID, or, when the Actor has none of that class, the one a
+	// sibling component of the class already holds.
 	TOptional<int32> InstanceIdForComponent(const UPrimitiveComponent* Component, int32 SemanticId, const FInstanceSemanticIdPair& ActorIdPair);
 
-	// Re-derive which Labels stand for a whole class from the label maps and the Panoptic Instance
-	// Labels setting, and reserve them in the instance ID allocator. Only while nothing is labeled:
-	// an object holding one of them as its own ID would keep it.
+	// Re-derive which Labels stand for a whole class from the label maps and the label type, and
+	// reserve them in the instance ID allocator. Only while nothing is labeled: an object holding
+	// one of them as its own ID would keep it.
 	void ReserveClassInstanceIds();
 
 	// Re-derive everything cached from the semantic label table, then re-label the world from
@@ -259,20 +259,19 @@ protected:
 	UPROPERTY(VisibleAnywhere)
 	TMap<FName, int32> SemanticIds;
 
-	// The Labels of the table's non-instanced (stuff) rows.
+	// The Labels of the table's non-instanced (stuff) rows, which only Panoptic label mode heeds.
 	UPROPERTY(VisibleAnywhere)
 	TSet<int32> NonInstancedSemanticIds;
 
-	// The Labels reserved in the instance ID allocator, so in Instance mode each always means its
-	// class (see GetClassInstanceIds): the non-instanced rows', and every row's but 0's when
-	// bPanopticInstanceLabels.
+	// The Labels reserved in the instance ID allocator, each of which then always means its class
+	// (see GetClassInstanceIds): every row's but 0's in Panoptic label mode, and otherwise none.
 	UPROPERTY(VisibleAnywhere)
 	TSet<int32> ClassInstanceIds;
 
-	// The Panoptic Instance Labels setting as of the last ReserveClassInstanceIds, so the labels the
+	// Whether the label type was Panoptic as of the last ReserveClassInstanceIds, so the labels the
 	// world is wearing and the reservations they were allocated around can't disagree.
 	UPROPERTY(VisibleAnywhere)
-	bool bPanopticInstanceLabels = false;
+	bool bPanopticLabels = false;
 
 	UPROPERTY()
 	TMap<const UObject*, FInstanceSemanticIdPair> LabeledObjects;

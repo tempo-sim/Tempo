@@ -49,7 +49,7 @@ bool FTempoLabelTableImportTest::RunTest(const FString& Parameters)
 			"SkeletalMeshTypes": [ "/Engine/EngineMeshes/SkeletalCube.SkeletalCube" ],
 			"ComponentTags": [ "Chassis", "Wheels" ]
 		},
-		{ "Name": "Road", "Label": 1, "bInstanced": false }
+		{ "Name": "Road", "Label": 1, "bPanopticInstanced": false }
 	])");
 
 	TArray<FString> Problems;
@@ -90,11 +90,11 @@ bool FTempoLabelTableImportTest::RunTest(const FString& Parameters)
 
 	// A row is instanced unless it says otherwise, so tables written before the column keep their
 	// meaning.
-	TestTrue(TEXT("Omitted bInstanced defaults to instanced"), Vehicle->bInstanced);
+	TestTrue(TEXT("Omitted bPanopticInstanced defaults to instanced"), Vehicle->bPanopticInstanced);
 	const FSemanticLabel* Road = Table->FindRow<FSemanticLabel>(TEXT("Road"), TEXT(""), false);
 	if (TestNotNull(TEXT("Road row imported"), Road))
 	{
-		TestFalse(TEXT("bInstanced false imported"), Road->bInstanced);
+		TestFalse(TEXT("bPanopticInstanced false imported"), Road->bPanopticInstanced);
 	}
 
 	return true;
@@ -225,7 +225,7 @@ bool FTempoLabelTableRoundTripTest::RunTest(const FString& Parameters)
 			"SkeletalMeshTypes": [ "/Engine/EngineMeshes/SkeletalCube.SkeletalCube" ],
 			"ComponentTags": [ "Chassis" ]
 		},
-		{ "Name": "Road", "Label": 1, "bInstanced": false }
+		{ "Name": "Road", "Label": 1, "bPanopticInstanced": false }
 	])");
 
 	TArray<FString> Problems;
@@ -256,11 +256,11 @@ bool FTempoLabelTableRoundTripTest::RunTest(const FString& Parameters)
 		Vehicle->ActorTags.Contains(TEXT("HeroVehicle")) && Vehicle->ActorTags.Contains(TEXT("Parked")));
 	TestTrue(TEXT("Component tag survives"), Vehicle->ComponentTags.Contains(TEXT("Chassis")));
 	TestEqual(TEXT("Skeletal mesh type survives"), Vehicle->SkeletalMeshTypes.Num(), 1);
-	TestTrue(TEXT("Instanced row survives"), Vehicle->bInstanced);
+	TestTrue(TEXT("Instanced row survives"), Vehicle->bPanopticInstanced);
 	const FSemanticLabel* Road = Reimported->FindRow<FSemanticLabel>(TEXT("Road"), TEXT(""), false);
 	if (TestNotNull(TEXT("Road row survives"), Road))
 	{
-		TestFalse(TEXT("Non-instanced row survives"), Road->bInstanced);
+		TestFalse(TEXT("Non-instanced row survives"), Road->bPanopticInstanced);
 	}
 
 	// A second export of the same content must be byte-identical, or a client diffing two fetches

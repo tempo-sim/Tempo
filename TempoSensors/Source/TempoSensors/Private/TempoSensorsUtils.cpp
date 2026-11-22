@@ -392,7 +392,7 @@ FString ExportSemanticLabelTableToJson(const UDataTable* SemanticLabelTable)
 			JsonWriter->WriteObjectStart();
 			JsonWriter->WriteValue(TEXT("Name"), RowName);
 			JsonWriter->WriteValue(TEXT("Label"), Row->Label);
-			JsonWriter->WriteValue(TEXT("bInstanced"), Row->bInstanced);
+			JsonWriter->WriteValue(TEXT("bPanopticInstanced"), Row->bPanopticInstanced);
 
 			TArray<FString> ActorTypes;
 			for (const TSubclassOf<AActor>& ActorType : Row->ActorTypes)

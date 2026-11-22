@@ -359,37 +359,52 @@ path-keyed lookup, so a mesh asset carries at most one label either way.
     out-of-range ID is clamped to 251, so its pixels take the wrong label; the labeler logs an
     error for one at startup.
 
-In `Instance` label mode (`Project Settings → Tempo → Sensors → Label Type`), each labeled actor
-also gets a unique 1–251 instance ID, and so does each component that resolves a label of its
-own. Two flags control reuse:
+`Project Settings → Tempo → Sensors → Label Type` (or `set_label_type`) chooses what the label
+image carries:
+
+| Label type | Each labeled pixel holds |
+|---|---|
+| `Semantic` (default) | Its class's `Label`. |
+| `Instance` | An instance ID, 1–251: one per labeled actor, and one more per component that resolves a label of its own. |
+| `Panoptic` | An instance ID for a countable object (a *thing*), or its class's `Label` for everything else (*stuff*). |
+
+In `Instance` and `Panoptic` modes two flags control how instance IDs are reused:
 
 - **Globally Unique Instance Labels** — don't reclaim IDs of destroyed actors.
 - **Instantaneously Unique Instance Labels** — don't repeat IDs even after exhausting all 251.
 
-Bounding-box requests use the instance label image to compute axis-aligned 2D boxes per instance,
-attaching the corresponding semantic ID via the labeler's instance→semantic map.
+Bounding-box requests use the label image to compute an axis-aligned 2D box per ID, attaching the
+corresponding semantic ID via the labeler's instance→semantic map.
 
-251 IDs go fast in a large scene, where every separately labeled road and building mesh is an
-object. A row's `bInstanced` (default `true`) is the panoptic split between *things* and *stuff*.
-Set it to `false` for a stuff class (road, building, sky), and every object it labels takes the
-row's own `Label` as its instance ID. So a stuff class costs one ID however many objects it
-covers. A stuff row's `Label` is reserved: no object is ever allocated one, so in the instance
-image it always means "this class, no particular object". Bounding-box responses leave such a
-class ID out, since its pixels describe no single object.
+##### Panoptic mode
 
-**Panoptic Instance Labels** (`Project Settings → Tempo → Sensors`, off by default) makes an
-instance ID name one object rather than one labeled component:
+`Instance` mode gives an ID to every labeled actor and component, which goes wrong in a large
+scene in three ways. `Panoptic` mode addresses each:
 
-- A component that resolves a label of its own takes its actor's ID when the class is the same,
-  or a same-class sibling component's, so a car's wheels and windows are the car.
-- An **instanced static mesh component** of a thing class takes the class's `Label` as its
-  instance ID. One such component draws many objects — Mass traffic and crowds draw every
-  far-off car or person of a model with one — and a stencil can't tell them apart, so the
-  component gets the class rather than an instance (like COCO's *crowd*), and no bounding box.
-- To make room for that, every row's `Label` is reserved, not only the stuff rows'.
+- **Stuff uses up the IDs.** Where every road and building mesh is labeled separately, 251 IDs run
+  out and unrelated objects start sharing them. Set a row's `bPanopticInstanced` to `false`
+  (default `true`) for a class with no countable objects, such as road, building or sky. Every
+  object the row labels then takes the row's own `Label` as its instance ID, so the class costs
+  one ID however many objects it covers.
+- **One object is split into several.** A label table can list a vehicle's meshes under the same
+  row as the vehicle actor, so that the vehicle is still labeled when something else draws those
+  meshes. In `Instance` mode each of those mesh components then gets an ID of its own, and one
+  car becomes several "cars", each with its own box. In `Panoptic` mode a component whose class
+  is the same as its actor's takes the actor's ID, or a same-class sibling component's if the
+  actor has a different class or none. A component of a *different* class than its actor (a row
+  of its own for wheels, say) still gets its own ID.
+- **Many objects are drawn as one.** An instanced static mesh component draws many copies of a
+  mesh — Mass traffic and crowds draw every far-off car or person of a model with one — and they
+  all carry the component's one label, so the copies can't be told apart. In `Instance` mode the
+  component gets one instance ID, and one bounding box spanning every copy. In `Panoptic` mode it
+  takes its class's `Label` instead, like COCO's *crowd*: "some cars, no particular one".
 
-With the setting off and no `bInstanced = false` row, instance IDs and bounding boxes are
-allocated exactly as before either existed. In `Semantic` mode none of this has any effect.
+So in the `Panoptic` label image, a pixel holding a row's `Label` means "this class, no particular
+object". Every row's `Label` is reserved for that, and never allocated to an object, which leaves
+251 less the number of rows for things. A class ID maps to itself in the instance→semantic map,
+and bounding-box responses leave it out, since its pixels describe no single object.
+
+`bPanopticInstanced` is ignored in the other two modes.
 
 #### Inspecting and editing labels from a client
 
@@ -427,7 +442,7 @@ Whole-table and mode changes, each of which re-labels the world in place:
 | RPC | What it does |
 |---|---|
 | `load_label_table` | Replace the entire table from a JSON string (`json`) or a file (`json_file`) — Unreal's DataTable JSON format, an array of rows keyed by `"Name"`. Supersedes the configured `SemanticLabelTable` until the world is torn down. Send it with neither field set to go back to the configured table. A table that fails to import *or* to validate is rejected whole, leaving the active one in place. |
-| `set_label_type` | Switch between `LT_SEMANTIC` and `LT_INSTANCE`. |
+| `set_label_type` | Switch between `LT_SEMANTIC`, `LT_INSTANCE` and `LT_PANOPTIC`. |
 | `set_instance_label_uniqueness` | Set the two instance-ID reuse flags. Governs future allocations only — already-labeled objects keep their IDs. |
 | `set_label_row_overrides` | Set the `OverridableLabelRowName` / `OverridingLabelRowName` pair driving the subsurface-color per-pixel override, or clear both to disable it. Live sensors pick it up without a capture restart. |
 

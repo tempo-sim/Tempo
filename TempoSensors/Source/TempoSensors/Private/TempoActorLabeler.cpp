@@ -158,6 +158,12 @@ namespace
 	// object. The allocator hands out 1..GTempoCamera_Max_Label, so 0 can never be a live ID.
 	constexpr int32 NoInstanceId = 0;
 
+	// Whether the label image carries instance IDs rather than semantic IDs.
+	bool UsesInstanceIds(ELabelType LabelType)
+	{
+		return LabelType == ELabelType::Instance || LabelType == ELabelType::Panoptic;
+	}
+
 	// Every Set*SemanticId RPC takes the same semantic ID domain: a label the camera can encode, or
 	// -1 meaning "forget the override and let the table decide". Returns false and answers the
 	// request when the ID is outside it.
@@ -230,9 +236,9 @@ void UTempoActorLabeler::HandleGetLabeledActorTypes(const TempoCore::Empty& Requ
 
 	// Check if instance ID mode is enabled. If not, this request is not applicable.
 	const UTempoSensorsSettings* TempoSensorsSettings = GetDefault<UTempoSensorsSettings>();
-	if (TempoSensorsSettings->GetLabelType() != ELabelType::Instance)
+	if (!UsesInstanceIds(TempoSensorsSettings->GetLabelType()))
 	{
-		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Instance label mode is not enabled"));
+		ResponseContinuation.ExecuteIfBound(Response, grpc::Status(grpc::StatusCode::FAILED_PRECONDITION, "Instance or Panoptic label mode is not enabled"));
 		return;
 	}
 
@@ -572,10 +578,15 @@ void UTempoActorLabeler::HandleSetLabelType(const TempoSensors::SetLabelTypeRequ
 			LabelType = ELabelType::Instance;
 			break;
 		}
+	case TempoSensors::LT_PANOPTIC:
+		{
+			LabelType = ELabelType::Panoptic;
+			break;
+		}
 	default:
 		{
 			ResponseContinuation.ExecuteIfBound(TempoCore::Empty(),
-				grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "label_type must be LT_SEMANTIC or LT_INSTANCE"));
+				grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "label_type must be LT_SEMANTIC, LT_INSTANCE or LT_PANOPTIC"));
 			return;
 		}
 	}
@@ -1024,7 +1035,7 @@ void UTempoActorLabeler::BuildLabelMaps()
 		SemanticIds.Add(Label, Value.Label);
 
 		// 0 is "unlabeled" and never an instance ID, so it can't stand for a class.
-		if (!Value.bInstanced && Value.Label > 0)
+		if (!Value.bPanopticInstanced && Value.Label > 0)
 		{
 			NonInstancedSemanticIds.Add(Value.Label);
 		}
@@ -1033,13 +1044,14 @@ void UTempoActorLabeler::BuildLabelMaps()
 
 void UTempoActorLabeler::ReserveClassInstanceIds()
 {
-	bPanopticInstanceLabels = GetDefault<UTempoSensorsSettings>()->GetPanopticInstanceLabels();
+	bPanopticLabels = GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Panoptic;
 
-	ClassInstanceIds = NonInstancedSemanticIds;
-	if (bPanopticInstanceLabels)
+	ClassInstanceIds.Reset();
+	if (bPanopticLabels)
 	{
 		for (const auto& [LabelName, SemanticId] : SemanticIds)
 		{
+			// 0 is "unlabeled" and never an instance ID, so there is nothing to reserve for it.
 			if (SemanticId > 0)
 			{
 				ClassInstanceIds.Add(SemanticId);
@@ -1047,15 +1059,15 @@ void UTempoActorLabeler::ReserveClassInstanceIds()
 		}
 	}
 
-	// An object can never be given a reserved Label as its own instance ID, so in Instance mode it
-	// always means the whole class. Reserving in place, rather than starting the allocator over,
-	// keeps the IDs that Globally Unique Instance Labels has retired retired.
+	// An object can never be given a reserved Label as its own instance ID, so in Panoptic mode a
+	// class's Label always means the whole class. Reserving in place, rather than starting the
+	// allocator over, keeps the IDs that Globally Unique Instance Labels has retired retired.
 	InstanceIdAllocator.SetExcludedIds(ClassInstanceIds);
 }
 
 TOptional<int32> UTempoActorLabeler::InstanceIdForSemanticId(int32 SemanticId)
 {
-	if (NonInstancedSemanticIds.Contains(SemanticId))
+	if (bPanopticLabels && NonInstancedSemanticIds.Contains(SemanticId))
 	{
 		return SemanticId;
 	}
@@ -1064,14 +1076,14 @@ TOptional<int32> UTempoActorLabeler::InstanceIdForSemanticId(int32 SemanticId)
 
 TOptional<int32> UTempoActorLabeler::InstanceIdForComponent(const UPrimitiveComponent* Component, int32 SemanticId, const FInstanceSemanticIdPair& ActorIdPair)
 {
+	if (!bPanopticLabels)
+	{
+		return AllocateInstanceId();
+	}
+
 	if (NonInstancedSemanticIds.Contains(SemanticId))
 	{
 		return SemanticId;
-	}
-
-	if (!bPanopticInstanceLabels)
-	{
-		return AllocateInstanceId();
 	}
 
 	// One component drawing many objects -- Mass traffic and crowds draw every far-off car or person
@@ -1114,12 +1126,6 @@ TOptional<int32> UTempoActorLabeler::InstanceIdForComponent(const UPrimitiveComp
 TSet<uint8> UTempoActorLabeler::GetClassInstanceIds() const
 {
 	TSet<uint8> Ids;
-	// In Semantic mode the label image holds each class's Label as just that, and every one of them
-	// gets its bounding box.
-	if (GetDefault<UTempoSensorsSettings>()->GetLabelType() != ELabelType::Instance)
-	{
-		return Ids;
-	}
 	for (const int32 Id : ClassInstanceIds)
 	{
 		Ids.Add(static_cast<uint8>(Id));
@@ -1185,8 +1191,8 @@ void UTempoActorLabeler::LabelActor(AActor* Actor)
 		{
 			ActorIdPair.InstanceId = *InstanceId;
 			// Track actor class names that have been assigned instance IDs of their own
-			if (GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance
-				&& !NonInstancedSemanticIds.Contains(*SemanticId))
+			if (UsesInstanceIds(GetDefault<UTempoSensorsSettings>()->GetLabelType())
+				&& !ClassInstanceIds.Contains(*InstanceId))
 			{
 				LabeledActorClassNames.Add(Actor->GetClass()->GetFName());
 			}
@@ -1210,7 +1216,7 @@ TOptional<int32> UTempoActorLabeler::GetActorLabelValue(const AActor* Actor) con
 		return TOptional<int32>();
 	}
 	// The same choice AssignId makes for the Actor's components.
-	return GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance ? IdPair->InstanceId : IdPair->SemanticId;
+	return UsesInstanceIds(GetDefault<UTempoSensorsSettings>()->GetLabelType()) ? IdPair->InstanceId : IdPair->SemanticId;
 }
 
 TOptional<int32> UTempoActorLabeler::ResolveActorSemanticId(const AActor* Actor) const
@@ -1347,11 +1353,11 @@ void UTempoActorLabeler::LabelComponent(UPrimitiveComponent* Component, FInstanc
 		return;
 	}
 
-	// No component label found. Label with its owning Actor's label -- but with panoptic instance
-	// labels an instanced static mesh component draws many objects, so it takes the class (see
+	// No component label found. Label with its owning Actor's label -- but in Panoptic mode an
+	// instanced static mesh component draws many objects, so it takes the class (see
 	// InstanceIdForComponent).
 	FInstanceSemanticIdPair IdPair = ActorIdPair;
-	if (bPanopticInstanceLabels && Cast<UInstancedStaticMeshComponent>(Component) && ClassInstanceIds.Contains(ActorIdPair.SemanticId))
+	if (bPanopticLabels && Cast<UInstancedStaticMeshComponent>(Component) && ClassInstanceIds.Contains(ActorIdPair.SemanticId))
 	{
 		IdPair.InstanceId = ActorIdPair.SemanticId;
 	}
@@ -1602,7 +1608,7 @@ void UTempoActorLabeler::OnLabelSettingsChanged()
 		}
 	}
 
-	// Nothing is labeled at this point, so the reservations can follow the new table and setting.
+	// Nothing is labeled at this point, so the reservations can follow the new table and label type.
 	ReserveClassInstanceIds();
 
 	LabelAllActors();
@@ -1614,7 +1620,7 @@ void UTempoActorLabeler::AssignId(UPrimitiveComponent* Component, FInstanceSeman
 	{
 		Component->SetRenderCustomDepth(true);
 	}
-	const int32 StencilValue = GetDefault<UTempoSensorsSettings>()->GetLabelType() == ELabelType::Instance ? IdPair.InstanceId : IdPair.SemanticId;
+	const int32 StencilValue = UsesInstanceIds(GetDefault<UTempoSensorsSettings>()->GetLabelType()) ? IdPair.InstanceId : IdPair.SemanticId;
 	if (Component->CustomDepthStencilValue != StencilValue)
 	{
 		Component->SetCustomDepthStencilValue(StencilValue);
