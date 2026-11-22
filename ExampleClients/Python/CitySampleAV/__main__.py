@@ -44,7 +44,8 @@ def parse_args(argv=None):
     g.add_argument("--max-stopped-s", type=float, default=30.0,
                    help="Move the rig to another, moving car once the ego has stood still this many "
                         "seconds of sim time (CitySample's traffic often waits a minute or more at "
-                        "lights). 0 keeps the same car however long it waits. Default 30.")
+                        "lights). While no other car is moving it keeps the ego and keeps looking. "
+                        "0 keeps the same car however long it waits. Default 30.")
     g.add_argument("--rate-hz", type=float, default=0.0,
                    help="Capture every sensor at this rate instead of its JSON rate_hz. In Fixed Step "
                         "(the default) every sensor runs at --step-hz unless this is given.")

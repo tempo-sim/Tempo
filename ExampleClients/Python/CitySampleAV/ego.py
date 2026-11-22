@@ -29,7 +29,7 @@ import math
 import random
 import time
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import Awaitable, Callable, List, Optional, Tuple
 
 from tempo_sim import world
 
@@ -46,7 +46,9 @@ from .config import VehicleCatalog, VehicleEntry
 from .labels import EGO_TAG
 
 PARKED_TAG = "ParkedVehicle"
-STOPPED_SPEED_MPS = 0.5
+STOPPED_SPEED_MPS = 0.5     # below this the ego counts as standing still
+MOVING_SPEED_MPS = 2.0      # above this a candidate counts as moving
+ALTERNATIVE_CHECK_S = 5.0   # how often a stopped-out ego looks again for a moving car
 
 
 @dataclass
@@ -60,7 +62,10 @@ class Ego:
 
 
 async def _traffic_vehicles(catalog: VehicleCatalog, allowed: List[VehicleEntry], exclude):
-    """(handle, entry) for every physics vehicle traffic is driving whose class is allowed."""
+    """(handle, entry) for every physics vehicle traffic is driving whose class is allowed: not
+    parked, and not hidden. A hidden one is an actor Mass released to its pool, left standing where
+    it was; adopted, EgoWatch would drop it within a second as released, and when nothing nearby is
+    moving the pool can be most of what's left -- a run of instant handovers."""
     allowed_paths = {e.class_path for e in allowed}
     # The descriptors carry each actor's real class; a handle typed CitySampleVehicleBase is built
     # from each match, carrying that class so is_a() still answers for the real one.
@@ -73,10 +78,30 @@ async def _traffic_vehicles(catalog: VehicleCatalog, allowed: List[VehicleEntry]
             matches.append((CitySampleVehicleBase(d.name, class_path=d.class_path), entry))
     if not matches:
         return []
-    # Every actor's tags in one round trip rather than one per car.
+    # Every actor's tags and visibility in one round trip rather than two per car.
     async with world.batch() as batch:
         tags = [batch.get(lambda h=h: h.Tags) for h, _ in matches]
-    return [(h, e) for (h, e), t in zip(matches, tags) if PARKED_TAG not in t.value]
+        hidden = [batch.get(lambda h=h: h.bHidden) for h, _ in matches]
+    return [(h, e) for (h, e), t, hid in zip(matches, tags, hidden)
+            if PARKED_TAG not in t.value and not hid.value]
+
+
+async def _moving(candidates):
+    """The candidates moving faster than MOVING_SPEED_MPS."""
+    moving = []
+    for handle, entry in candidates:
+        try:
+            v = (await tw.get_current_actor_state(actor=handle.actor)).velocity.linear
+        except Exception:
+            continue
+        if math.hypot(v.x, v.y) > MOVING_SPEED_MPS:
+            moving.append((handle, entry))
+    return moving
+
+
+async def has_moving_candidate(catalog: VehicleCatalog, choice: str, exclude=()) -> bool:
+    """Whether a car acquire() could take is moving right now."""
+    return bool(await _moving(await _traffic_vehicles(catalog, catalog.select(choice), exclude)))
 
 
 async def acquire(catalog: VehicleCatalog, choice: str, rng: random.Random,
@@ -90,15 +115,7 @@ async def acquire(catalog: VehicleCatalog, choice: str, rng: random.Random,
         candidates = await _traffic_vehicles(catalog, allowed, exclude)
         if candidates:
             # Prefer cars that are moving: one waiting at a light can wait a minute or more.
-            moving = []
-            for handle, entry in candidates:
-                try:
-                    v = (await tw.get_current_actor_state(actor=handle.actor)).velocity.linear
-                except Exception:
-                    continue
-                if math.hypot(v.x, v.y) > 2.0:
-                    moving.append((handle, entry))
-            candidates = moving or candidates
+            candidates = await _moving(candidates) or candidates
             # A weighted pick among the vehicle types present, then any car of that type.
             present = {e.id: e for _, e in candidates}
             order = VehicleCatalog.weighted_order(list(present.values()), rng)
@@ -171,24 +188,30 @@ async def release(ego: Ego, sensor_names) -> None:
 class EgoWatch:
     """Polls the ego's state; ``lost`` is set when it is destroyed, hidden (released to Mass's actor
     pool, which leaves it standing where it was), parked, jumps (a pooled actor reused for another
-    car), or has stood still for ``max_stopped_s`` of sim time.
+    car), or has stood still for ``max_stopped_s`` of sim time while another car is moving.
 
     The last is not a failure of Mass but of the data: CitySample's traffic routinely waits a minute
     or more at lights and in jams, in Wall Clock and Fixed Step alike, and a stationary ego records
-    the same frame over and over."""
+    the same frame over and over. But the cars around a red light are stopped too, and trading one
+    for another only restarts the wait, a handover every ``max_stopped_s``. So the ego is dropped
+    only once ``has_alternative`` says a car is moving; until then it keeps the ego and asks again
+    every ALTERNATIVE_CHECK_S."""
 
     def __init__(self, ego: Ego, period_s: float = 1.0, max_jump_m: float = 30.0,
-                 max_stopped_s: float = 30.0):
+                 max_stopped_s: float = 30.0,
+                 has_alternative: Optional[Callable[[], Awaitable[bool]]] = None):
         self.ego = ego
         self.period_s = period_s
         self.max_jump_m = max_jump_m
         self.max_stopped_s = max_stopped_s
+        self.has_alternative = has_alternative
         self.lost = asyncio.Event()
         self.reason = ""
 
     async def run(self) -> None:
         last = None
         moving_at = None   # sim time the ego was last seen moving
+        next_check = 0.0   # wall time the next look for a moving alternative is due
         while not self.lost.is_set():
             await asyncio.sleep(self.period_s)
             try:
@@ -217,9 +240,17 @@ class EgoWatch:
             v = state.velocity.linear
             if moving_at is None or math.hypot(v.x, v.y) > STOPPED_SPEED_MPS:
                 moving_at = state.timestamp_s
-            elif self.max_stopped_s > 0 and state.timestamp_s - moving_at > self.max_stopped_s:
-                self._lose(f"stopped for {state.timestamp_s - moving_at:.0f} s of sim time")
-                return
+            elif (self.max_stopped_s > 0 and state.timestamp_s - moving_at > self.max_stopped_s
+                  and time.monotonic() >= next_check):
+                next_check = time.monotonic() + ALTERNATIVE_CHECK_S
+                try:
+                    alternative = self.has_alternative is None or await self.has_alternative()
+                except Exception:
+                    alternative = False
+                if alternative:
+                    self._lose(f"stopped for {state.timestamp_s - moving_at:.0f} s of sim time, "
+                               f"and another car is moving")
+                    return
 
     def _lose(self, reason: str) -> None:
         self.reason = reason

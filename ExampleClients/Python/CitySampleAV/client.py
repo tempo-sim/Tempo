@@ -357,7 +357,13 @@ class Session:
                 segment_sim = (await tc.get_sim_time()).sim_time
                 segment_wall = time.monotonic()
                 self.start_streams()
-                watch = ego_mod.EgoWatch(self.ego, max_stopped_s=self.args.max_stopped_s)
+                # Leave a stopped ego only for a car that is moving (another stopped one would
+                # just restart the wait), and never for one already lost.
+                current = self.ego.name
+                watch = ego_mod.EgoWatch(
+                    self.ego, max_stopped_s=self.args.max_stopped_s,
+                    has_alternative=lambda: ego_mod.has_moving_candidate(
+                        self.catalog, self.args.vehicle, exclude=[*lost_egos, current]))
                 watch_task = asyncio.create_task(watch.run())
                 stop_task = asyncio.create_task(self.stop.wait())
                 await asyncio.wait({watch_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)

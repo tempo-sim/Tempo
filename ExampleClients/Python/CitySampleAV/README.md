@@ -290,8 +290,13 @@ Fixed Step.
 **Moving cars.** CitySample's traffic often waits a minute or more at lights and in jams. That
 happens in Wall Clock and Fixed Step alike, and a stationary ego records the same frame over and
 over. So once the ego has stood still for `--max-stopped-s` (default 30) of sim time, the client
-moves the rig to another car that is moving. Each handover leaves a gap of about a second in the
-recording; match frames by `time_s`.
+moves the rig to another car that is moving. If no other car is moving (everyone is at the same
+light), it keeps the ego and looks again every few seconds, rather than trading one stopped car for
+another. Each handover leaves a gap of about a second in the recording; match frames by `time_s`.
+
+Besides that, the client moves on only when it has to: when Mass destroys the ego, parks it, reuses
+its actor for another car, or releases it to its actor pool (hiding it where it stands). Pooled
+actors are never picked as the next ego.
 
 ## How it works
 
