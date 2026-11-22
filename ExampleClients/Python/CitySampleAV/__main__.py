@@ -99,6 +99,11 @@ def parse_args(argv=None):
                         "--no-record-depth).")
     g.add_argument("--no-depth-view", dest="depth", action="store_false",
                    help="Don't show camera depth in the viewer (it is still recorded with --record).")
+    g.add_argument("--depth-view-max-m", type=float, default=200.0, metavar="M",
+                   help="Color the viewer's depth images over a fixed 0..M meters (default 200), so "
+                        "colors don't shift from frame to frame; anything farther, the sky included "
+                        "(the sim reads it as 1000 m), saturates. 0 lets the viewer pick the range per "
+                        "image. Recorded depth is unaffected.")
     g.add_argument("--no-bboxes", dest="bboxes", action="store_false",
                    help="Don't show the 2D bounding boxes in the viewer (they are still recorded with "
                         "--record).")

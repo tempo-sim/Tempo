@@ -221,7 +221,7 @@ class Session:
             record_depth = rec is not None and not self.args.no_record_depth
             if self.args.depth or record_depth:
                 self._spawn(image_logger.stream_depth(
-                    s, visualize=viz and self.args.depth,
+                    s, visualize=viz and self.args.depth, view_max_m=self.args.depth_view_max_m,
                     taps=[rec.depth_tap(s.name)] if rec and record_depth else []),
                     f"{s.name}:depth", self.stream_tasks)
             if self.stream_bboxes:

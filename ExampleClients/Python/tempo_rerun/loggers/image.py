@@ -105,13 +105,17 @@ async def stream_color(sensor, *, visualize=True, taps=()):
                _with_taps(log, visualize, taps), label=f"{sensor.key}:color")
 
 
-async def stream_depth(sensor, *, visualize=True, taps=()):
+async def stream_depth(sensor, *, visualize=True, taps=(), view_max_m=None):
+    """`view_max_m`: color depth over a fixed 0..view_max_m meters, farther saturating, instead of
+    the range the viewer estimates from each image, which shifts when the frame's farthest pixel
+    does. Only the colors: the logged values, and taps, keep their true depth."""
     entity = sensor.entity_path
+    depth_range = (0.0, float(view_max_m)) if view_max_m else None
 
     def log(image):
         _log_pose(entity, image.header)
         # Values are already in meters, so one depth unit == one meter.
-        rr.log(f"{entity}/depth", rr.DepthImage(depth_array(image), meter=1.0))
+        rr.log(f"{entity}/depth", rr.DepthImage(depth_array(image), meter=1.0, depth_range=depth_range))
 
     await pump(ts.stream_depth_images(owner=sensor.owner, sensor=sensor.name),
                _with_taps(log, visualize, taps), label=f"{sensor.key}:depth")

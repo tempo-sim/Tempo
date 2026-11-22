@@ -81,6 +81,7 @@ CitySampleAV.py --lidar-color label              # or intensity, distance, insta
 CitySampleAV.py --rig my_rig                     # config/rigs/my_rig.json for every vehicle
 CitySampleAV.py --rig surround                   # five cameras (front, left, right, rear, fisheye) + lidar
 CitySampleAV.py --rate-hz 30                     # every sensor at 30 Hz instead of its JSON rate
+CitySampleAV.py --depth-view-max-m 1000          # color depth out to 1 km in the viewer (default 200 m)
 CitySampleAV.py --night                          # CitySample's night mode, as the HUD's toggle
 CitySampleAV.py --sun-angle 90                   # turn the sun (compass direction only), as the HUD's slider
 CitySampleAV.py --viewport                       # keep rendering the game's own window (off by default)
