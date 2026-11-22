@@ -400,6 +400,16 @@ jobs:
           AUTH+=(-c "http.https://github.com/.extraheader=AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')")
         fi
 
+        # The tree is a clone of the golden one, so every file's inode and ctime differ from what git's
+        # index recorded. A forced checkout over a stale index rewrites every tracked file, giving it a
+        # new mtime, and UBT then rebuilds every module. Refreshed first, the index matches the files
+        # again and the checkout rewrites only those that really differ from the commit. Exits 1 when
+        # a file does differ, which is expected here.
+        refresh_index() {
+          git update-index -q --refresh > /dev/null 2>&1 || true
+          git submodule foreach -q --recursive 'git update-index -q --refresh > /dev/null 2>&1 || true'
+        }
+
         # sync <dir> <repo> <ref> [<submodule path to leave alone>]
         sync() {
           local dir="$1" repo="$2" ref="$3" skip="${4:-}"
@@ -408,6 +418,7 @@ jobs:
           git remote remove origin 2>/dev/null || true
           git remote add origin "https://github.com/$repo.git"
           git "${AUTH[@]}" fetch -q --no-tags origin "$ref"
+          refresh_index
           git checkout -q --force FETCH_HEAD
           git clean -ffdq   # untracked, NOT ignored: build outputs survive
           # A repo without submodules has no .gitmodules, and git config exits 1 for it.
