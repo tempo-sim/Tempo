@@ -68,6 +68,14 @@ def parse_args(argv=None):
                    help="Keep rendering the game's own window. Off by default while collecting: the "
                         "sensors render offscreen either way, and the main view costs GPU time.")
 
+    g = p.add_argument_group("lighting", "CitySample's own World options, as in the in-game HUD.")
+    g.add_argument("--sun-angle", type=float, default=None, metavar="DEG",
+                   help="Turn the sun to this compass direction, in degrees, as the HUD's Sun Rotation "
+                        "slider does; the sky turns with it. Its elevation can't be changed. Default: "
+                        "the level's own.")
+    g.add_argument("--night", action="store_true",
+                   help="Switch to night, as the HUD's Night Mode toggle does.")
+
     g = p.add_argument_group("labels")
     g.add_argument("--label-type", choices=["instance", "semantic"], default="instance",
                    help="instance (default): instance ids, 2D boxes, and semantic images derived from "

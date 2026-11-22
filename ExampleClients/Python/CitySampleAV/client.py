@@ -32,6 +32,7 @@ from tempo_rerun.loggers import world as world_logger
 from tempo_rerun.streaming import STATS
 
 from . import ego as ego_mod
+from . import lighting
 from .config import RigConfig, load_box_classes, load_label_override, load_rig, load_vehicles, load_labels
 from .labels import LabelManager
 from .recorder import Recorder
@@ -327,6 +328,8 @@ class Session:
             level = getattr(TempoCorePb, f"ES_{self.args.scalability.upper()}")
             await tc.set_engine_scalability(scalability=level)
             print(f"  Engine scalability: {self.args.scalability}.")
+        if self.args.sun_angle is not None or self.args.night:
+            await lighting.apply(sun_angle_deg=self.args.sun_angle, night=self.args.night)
         await self.labels.install()
         self._spawn(self.labels.run_mesh_sync(), "label_sync", self.background)
         self._spawn(self._refresh_labels(), "label_maps", self.background)
