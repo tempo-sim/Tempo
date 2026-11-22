@@ -18,7 +18,8 @@ adopts the car: to the actor, and to each of its components. The component tags 
 the labeler resolves a component before its actor, so the van body's mesh would otherwise label it a
 van whatever the actor's tag said.
 
-Label type: Instance by default, which is what 2D bounding boxes need. Its ids are 8-bit, 1..251 for
+Label type: Panoptic by default (``--label-type instance``, Tempo's LT_PANOPTIC), which is what 2D
+bounding boxes need: instance ids for things, class ids for stuff. Its ids are 8-bit, 1..251 for
 everything in view, and a city has thousands of separately labeled road and building meshes. So the
 classes marked ``"instanced": false`` in labels.json (road, building, sky, ...) are "stuff": the
 labeler gives every one of their objects the class's own id, reserved for it, and the 2D boxes skip
@@ -48,6 +49,10 @@ from tempo_sim.unreal import registered_classes
 from .config import LabelClass, LabelOverride
 
 EGO_TAG = "TempoEgo"
+
+# The label-table column marking a class "stuff", newest name first: Tempo main calls it
+# bPanopticInstanced (Panoptic mode); the pre-merge panoptic branch called it bInstanced.
+_STUFF_COLUMNS = ("bPanopticInstanced", "bInstanced")
 
 
 @dataclass
@@ -142,7 +147,7 @@ class LabelManager:
         for c in self.classes:
             row = {"Name": c.name, "Label": c.id}
             if not c.instanced:
-                row["bInstanced"] = False
+                row[_STUFF_COLUMNS[0]] = False
             actor_classes = self._actor_classes(c)
             if actor_classes:
                 row["ActorTypes"] = actor_classes
@@ -156,22 +161,43 @@ class LabelManager:
                 row["SkeletalMeshTypes"] = sorted(skeletal_rows[c.id])
             rows.append(row)
 
-        try:
-            await ts.load_label_table(json=json.dumps(rows))
-        except Exception as exc:
-            if "bInstanced" not in str(exc):
-                raise
-            # A build from before the column: everything is a thing, and ids run out sooner.
-            print("  [labels] this build's labeler has no stuff classes (bInstanced); re-package with a "
-                  "current Tempo for clean instance ids. Loading the table without it.")
-            for row in rows:
-                row.pop("bInstanced", None)
-            await ts.load_label_table(json=json.dumps(rows))
+        # The stuff column a build accepts decides the instance-style mode: Panoptic on a current
+        # Tempo, Instance on a build of the pre-merge panoptic branch (whose Instance mode had
+        # stuff), and plain Instance -- everything a thing, ids running out sooner -- before either.
+        column = await self._load_table(rows)
+        if self.label_type == "semantic":
+            label_type = Labels.LT_SEMANTIC
+        elif column == "bPanopticInstanced":
+            label_type = Labels.LT_PANOPTIC
+        else:
+            label_type = Labels.LT_INSTANCE
+            if column is None:
+                print("  [labels] this build's labeler has no stuff classes; re-package with a current "
+                      "Tempo for clean instance ids. Loaded the table without them.")
         await self._set_label_override()
-        await ts.set_label_type(label_type=Labels.LT_INSTANCE if self.label_type == "instance"
-                                else Labels.LT_SEMANTIC)
+        await ts.set_label_type(label_type=label_type)
         print(f"  Label table: {len(self.classes)} classes, {len(self._assigned)} of "
               f"{len(meshes)} loaded meshes matched ({self.label_type} labels).")
+
+    async def _load_table(self, rows: List[dict]) -> Optional[str]:
+        """Load the table with the first stuff column this build's labeler accepts; returns it, or
+        None if it took none. A table naming a column the labeler lacks is rejected whole, with the
+        column named in the error, which is how an older build is told apart."""
+        for i, column in enumerate(_STUFF_COLUMNS):
+            if i:
+                for row in rows:
+                    if _STUFF_COLUMNS[i - 1] in row:
+                        row[column] = row.pop(_STUFF_COLUMNS[i - 1])
+            try:
+                await ts.load_label_table(json=json.dumps(rows))
+                return column
+            except Exception as exc:
+                if column not in str(exc):
+                    raise
+        for row in rows:
+            row.pop(_STUFF_COLUMNS[-1], None)
+        await ts.load_label_table(json=json.dumps(rows))
+        return None
 
     async def _set_label_override(self) -> None:
         """Name the override pair, or clear it. The sim holds the row names apart from the table and

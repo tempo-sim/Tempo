@@ -136,10 +136,11 @@ at startup with `LoadLabelTable`, so there is no binary asset and nothing change
 rules next.
 
 **Instance ids, stuff and things.** Tempo's label mode is global, for cameras and lidar alike. The
-client runs it in Instance mode: each labeled object gets an id of its own, and the 2D boxes come
-from those. But the ids are 8-bit, only 1–251 for everything in view, and a city has thousands of
-separately labeled road and building meshes. So the classes marked `"instanced": false` in
-`labels.json` are *stuff*, as in panoptic segmentation: road, sidewalk, markings, building,
+client runs it in Panoptic mode (`LT_PANOPTIC`; `--label-type instance`, the default): each labeled
+object gets an id of its own, and the 2D boxes come from those. But the ids are 8-bit, only 1–251 for
+everything in view, and a city has thousands of separately labeled road and building meshes. So the
+classes marked `"instanced": false` in `labels.json` (the table's `bPanopticInstanced` column) are
+*stuff*, as in panoptic segmentation: road, sidewalk, markings, building,
 vegetation, lights, signs, poles, props and sky. Every object of a stuff class shares the class's
 own id, which is reserved for it, and gets no 2D box. The *things* (vehicles, pedestrians, the
 ego) have the rest of the ids to themselves.
