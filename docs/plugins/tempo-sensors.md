@@ -370,7 +370,8 @@ image carries:
 
 In `Instance` and `Panoptic` modes two flags control how instance IDs are reused:
 
-- **Globally Unique Instance Labels** — don't reclaim IDs of destroyed actors.
+- **Globally Unique Instance Labels** — don't reclaim IDs of destroyed actors. Changing the label
+  type, table or an override re-labels live objects, which keep their IDs where they still need one.
 - **Instantaneously Unique Instance Labels** — don't repeat IDs even after exhausting all 251.
 
 Bounding-box requests use the label image to compute an axis-aligned 2D box per ID, attaching the
@@ -385,14 +386,17 @@ scene in three ways. `Panoptic` mode addresses each:
   out and unrelated objects start sharing them. Set a row's `bPanopticInstanced` to `false`
   (default `true`) for a class with no countable objects, such as road, building or sky. Every
   object the row labels then takes the row's own `Label` as its instance ID, so the class costs
-  one ID however many objects it covers.
+  one ID however many objects it covers. (A stuff row with `Label` 0 costs none: its objects stay
+  unlabeled in the image.) Rows that share a `Label` must agree on the flag.
 - **One object is split into several.** A label table can list a vehicle's meshes under the same
   row as the vehicle actor, so that the vehicle is still labeled when something else draws those
   meshes. In `Instance` mode each of those mesh components then gets an ID of its own, and one
   car becomes several "cars", each with its own box. In `Panoptic` mode a component whose class
-  is the same as its actor's takes the actor's ID, or a same-class sibling component's if the
-  actor has a different class or none. A component of a *different* class than its actor (a row
-  of its own for wheels, say) still gets its own ID.
+  is the same as its actor's takes the actor's ID. If the actor has a different class or none,
+  components of one class that are attached one under another share an ID: wheels attached to a
+  body are one car, while same-class components that merely belong to one actor (the cars of a
+  parking-lot actor, each attached to its root) stay separate objects. A component of a
+  *different* class than its actor (a row of its own for wheels, say) still gets its own ID.
 - **Many objects are drawn as one.** An instanced static mesh component draws many copies of a
   mesh — Mass traffic and crowds draw every far-off car or person of a model with one — and they
   all carry the component's one label, so the copies can't be told apart. In `Instance` mode the

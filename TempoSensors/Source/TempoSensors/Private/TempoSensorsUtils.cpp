@@ -163,6 +163,8 @@ TArray<FString> ValidateSemanticLabelTable(const UDataTable* SemanticLabelTable)
 	TMap<FString, FName> ClaimedMeshPaths;
 	TMap<FName, FName> ClaimedActorTags;
 	TMap<FName, FName> ClaimedComponentTags;
+	// The first row to use each Label, and whether it is instanced in Panoptic label mode.
+	TMap<int32, TPair<FName, bool>> LabelInstancing;
 
 	// A row claiming a key a previous row already claimed. BuildLabelMaps resolves the collision by
 	// keeping the first, which means the second row's entry silently does nothing.
@@ -182,6 +184,21 @@ TArray<FString> ValidateSemanticLabelTable(const UDataTable* SemanticLabelTable)
 			// material clamps a larger one, so its pixels would read as the wrong label.
 			Problems.Add(FString::Printf(TEXT("Row '%s' has label ID %d, outside the encodable range 0-%d. The camera would report the wrong label wherever this label is visible."),
 				*RowName.ToString(), Row.Label, GTempoCamera_Max_Label));
+		}
+
+		// Rows sharing a Label are one class in the label image, and in Panoptic label mode the
+		// Label either stands for the whole class or it doesn't.
+		if (const TPair<FName, bool>* FirstRow = LabelInstancing.Find(Row.Label))
+		{
+			if (FirstRow->Value != Row.bPanopticInstanced)
+			{
+				Problems.Add(FString::Printf(TEXT("Rows '%s' and '%s' share label ID %d but disagree on bPanopticInstanced. In Panoptic label mode both would be instanced."),
+					*FirstRow->Key.ToString(), *RowName.ToString(), Row.Label));
+			}
+		}
+		else
+		{
+			LabelInstancing.Add(Row.Label, TPair<FName, bool>(RowName, Row.bPanopticInstanced));
 		}
 
 		for (const TSubclassOf<AActor>& ActorType : Row.ActorTypes)

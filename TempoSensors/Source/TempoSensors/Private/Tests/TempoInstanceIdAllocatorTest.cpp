@@ -172,13 +172,13 @@ bool FTempoInstanceIdAllocatorSetExcludedTest::RunTest(const FString& Parameters
 	TestEqual(TEXT("The held and newly reserved IDs stay out; the released one is back"),
 		Sorted(AllocateMany(Allocator, false, 5)), Expected);
 
-	// Reserving an ID drops its allocations, and releasing it brings it back unallocated.
+	// Reserving an ID sets its allocations aside, and releasing it brings them back with it: an ID
+	// that was never returned must not come out of a reservation free to hand out again.
 	Allocator.SetExcludedIds(TSet<int32>({ Held }));
 	TestFalse(TEXT("A reserved ID can't be shared"), Allocator.Share(Held));
 	Allocator.SetExcludedIds(TSet<int32>());
-	TArray<int32> Released({ Held, Reserved });
-	Released.Sort();
-	TestEqual(TEXT("The two released IDs are the least held"), Sorted(AllocateMany(Allocator, true, 2)), Released);
+	TestEqual(TEXT("Only the ID that was reserved while free is free"), AllocateMany(Allocator, false, 2), TArray<int32>({ Reserved }));
+	TestTrue(TEXT("The ID that was held when reserved is still held"), Allocator.Share(Held));
 
 	return true;
 }

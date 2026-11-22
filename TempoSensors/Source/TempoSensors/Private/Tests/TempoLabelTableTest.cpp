@@ -205,6 +205,21 @@ bool FTempoLabelTableValidationTest::RunTest(const FString& Parameters)
 			{ "Name": "Building", "Label": 7, "ActorTags": [ "Parked" ] }
 		])")).Num() > 0);
 
+	// Rows may share a Label, but the Label is then one class: all things or all stuff.
+	TestEqual(TEXT("Rows sharing a Label and its instancing are fine"),
+		ValidateJson(TEXT("Shared label"), TEXT(R"([
+			{ "Name": "NoLabel", "Label": 0 },
+			{ "Name": "Road", "Label": 1, "bPanopticInstanced": false },
+			{ "Name": "Sidewalk", "Label": 1, "bPanopticInstanced": false }
+		])")).Num(), 0);
+
+	TestTrue(TEXT("Rows sharing a Label but not its instancing are a problem"),
+		ValidateJson(TEXT("Conflicting instancing"), TEXT(R"([
+			{ "Name": "NoLabel", "Label": 0 },
+			{ "Name": "Car", "Label": 5 },
+			{ "Name": "ParkedCarProxy", "Label": 5, "bPanopticInstanced": false }
+		])")).Num() > 0);
+
 	return true;
 }
 
