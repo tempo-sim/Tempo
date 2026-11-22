@@ -195,6 +195,12 @@ FFmpeg 8 dev headers locally). C++ client decode is not yet provided.
   grid; vertical FOV is derived from the elevations plus one beam-spacing of padding.
 - `MinDistance` / `MaxDistance` (cm), `IntensitySaturationDistance` (cm), `MaxAngleOfIncidence`
   (deg) — beyond which a return is dropped.
+- `RangeNoiseStdDev` (cm, default 0 = off): the standard deviation of a Gaussian error added to every
+  reported range, along the beam, so azimuth and elevation are unchanged. It applies to every echo
+  (surface and [participating-media](#participating-media)) before the return mode picks among them.
+  `RangeNoiseStdDevFraction` adds a term that grows with range (0.001 adds 1 cm at 10 m). A noisy
+  range stays within `[MinDistance, MaxDistance]`. The noise is reproducible for a given
+  `RangeNoiseSeed` and `sequence_id`; give two identically configured lidars different seeds.
 
 The output `LidarScanSegment` (one per active tile / segment per scan; `scan_count` tells you how
 many to expect per frame) carries per-return `distances`, `intensities`, `labels`, `azimuths` and
