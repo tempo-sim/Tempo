@@ -127,7 +127,7 @@ your project root works.
     when the player gets into a car. Any other project has none of that source, and it does nothing
     there. Called by `Setup.sh`; pass `-restore` to undo it.
 
-    [:octicons-arrow-right-24: The CitySample source fixes](../guides/citysample.md#patch-citysample)
+    [:octicons-arrow-right-24: The CitySample source fixes](../guides/citysample.md#what-changed-in-your-project)
 
 ## Discovery helpers
 
