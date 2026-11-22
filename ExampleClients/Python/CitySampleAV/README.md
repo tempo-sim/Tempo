@@ -173,7 +173,8 @@ kinds:
   wheels and windows included.
 
 - **Sky reads as `unlabeled` (0).** CitySample draws its sky with a sky atmosphere, which is not a
-  mesh, so the `sky` rule (`SM_SkySphere`) has nothing to match. Treat 0 as sky/background.
+  mesh, so the `sky` rule (`SM_SkySphere`) has nothing to match. Treat 0 as sky/background; the
+  viewer draws it in the sky's blue.
 - **Road markings need a material edit.** CitySample's street markings (lines, arrows, painted text)
   are deferred decals on the `SM_DECAL` meshes, which write no custom depth, so they can't be labeled
   by mesh. The road material (`M_Freeway_Asphalt`) composites them itself, though, and is edited to

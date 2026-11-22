@@ -49,6 +49,7 @@ from tempo_sim.unreal import registered_classes
 from .config import LabelClass, LabelOverride
 
 EGO_TAG = "TempoEgo"
+UNLABELED_COLOR = (115, 170, 225)   # the sky class's color in labels.json
 
 # The label-table column marking a class "stuff", newest name first: Tempo main calls it
 # bPanopticInstanced (Panoptic mode); the pre-merge panoptic branch called it bInstanced.
@@ -102,7 +103,8 @@ class LabelManager:
 
     def annotation_infos(self) -> List[Tuple[int, str, Tuple[int, int, int]]]:
         """(id, name, color) per class, for rerun's AnnotationContext."""
-        return [(0, "unlabeled", (0, 0, 0))] + [(c.id, c.name, c.color) for c in self.classes]
+        # Unlabeled is drawn sky blue: in CitySample nearly all of it is the sky, which is not a mesh.
+        return [(0, "unlabeled", UNLABELED_COLOR)] + [(c.id, c.name, c.color) for c in self.classes]
 
     # -- installing -----------------------------------------------------------------------------
 
