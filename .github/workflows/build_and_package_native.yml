@@ -311,10 +311,13 @@ jobs:
           [ -n "$PIDS" ] || exit 0
           echo "::warning title=Leftover processes::Stopping processes still running from $CI_TREE_ROOT."
           for pid in $PIDS; do tasklist.exe //FI "PID eq $pid" //NH //FO CSV 2>/dev/null; done
-          for pid in $PIDS; do taskkill.exe //F //T //PID "$pid" > /dev/null 2>&1 || true; done
+          # taskkill's own words are kept: "There is no running instance of the task" for a live PID means
+          # the process has begun ExitProcess and Windows refuses to terminate it.
+          for pid in $PIDS; do taskkill.exe //F //T //PID "$pid" 2>&1 || true; done
           sleep 3
-          # One that survives is stuck in its own termination, in the kernel (a thread blocked in a driver),
-          # and keeps its files in the tree open: nothing short of a reboot frees it.
+          # One that survives is usually stuck in its own ExitProcess (an atexit handler waiting on a thread
+          # ExitProcess already killed; TempoCoreBootstrap's Ctrl-C handler exists to prevent that) or in
+          # the kernel. Either way it keeps its files in the tree open, and nothing short of a reboot frees it.
           [ -z "$(tree_pids)" ] || { echo "::error::Processes in $CI_TREE_ROOT survived taskkill /F; the machine needs a reboot."; exit 1; }
           exit 0
         fi
