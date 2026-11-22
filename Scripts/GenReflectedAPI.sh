@@ -231,12 +231,18 @@ if [ -n "${TEMPO_GEN_CPP_API:-}" ] && [ "${TEMPO_GEN_CPP_API}" != "0" ]; then
     echo "The C++ client has not been built (TEMPO_GEN_CPP_API=1 Scripts/Build.sh makes it)" >&2
     exit 1
   fi
+  # Generated afresh into a scratch directory, then synced into the one the compile reads, which
+  # rewrites only the files that changed: their modification times are what keeps the compile
+  # (build_cpp_classes.py, in a build directory it keeps) incremental across runs. The library
+  # takes minutes to build from scratch, and most builds' reflection matches the previous one's.
   CPP_CLASSES_DIR="$SCHEMA_DIR/cpp"
-  rm -rf "$CPP_CLASSES_DIR"
+  CPP_STAGING_DIR="$SCHEMA_DIR/cpp.staging"
+  rm -rf "$CPP_STAGING_DIR"
   echo "Generating tempo::reflected"
   # A compiler can fail here for reasons of its own, out of memory on a small machine for one, which
   # say nothing about the Python and Rust classes already generated from the same schema.
-  if ! "$PYTHON_BIN" "$PYTHON_DIR/gen_cpp_classes.py" "$GENERATE_FROM" "$CPP_CLASSES_DIR" ||
+  if ! "$PYTHON_BIN" "$PYTHON_DIR/gen_cpp_classes.py" "$GENERATE_FROM" "$CPP_STAGING_DIR" ||
+     ! "$PYTHON_BIN" "$PYTHON_DIR/sync_tree.py" "$CPP_STAGING_DIR" "$CPP_CLASSES_DIR" ||
      ! "$PYTHON_BIN" "$PYTHON_DIR/build_cpp_classes.py" "$CPP_CLASSES_DIR" "$CPP_API_DIR" \
          "$SCRIPT_DIR/../TempoCore/Source/ThirdParty/gRPC"; then
     rm -rf "$CPP_API_DIR/include/tempo/reflected"
@@ -244,6 +250,7 @@ if [ -n "${TEMPO_GEN_CPP_API:-}" ] && [ "${TEMPO_GEN_CPP_API}" != "0" ]; then
     echo "Failed to generate the reflected C++ API; the Python and Rust ones were generated" >&2
     exit 3
   fi
+  rm -rf "$CPP_STAGING_DIR"
 else
   echo "Skipping the reflected C++ API (set TEMPO_GEN_CPP_API=1 to generate it)"
 fi

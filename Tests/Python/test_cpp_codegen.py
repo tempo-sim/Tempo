@@ -40,6 +40,7 @@ pytestmark = pytest.mark.codegen
 
 sys.path.insert(0, PYTHON_DIR)
 from gen_naming import build_jobs, cpp_compiler_args, host_platform_name  # noqa: E402
+from sync_tree import sync_tree as sync  # noqa: E402
 
 DEFINES = ["GOOGLE_PROTOBUF_NO_RTTI=1", "GPR_FORBID_UNREACHABLE_CODE=1", "GRPC_ALLOW_EXCEPTIONS=0",
            "PROTOBUF_USE_DLLS", "ABSL_CONSUME_DLL"]
@@ -233,34 +234,6 @@ def run(generated, source):
     assert built.returncode == 0, built.stdout[-4000:] + built.stderr[-4000:]
     result = subprocess.run([os.path.join(build, "snippet")], capture_output=True, text=True)
     return result.stdout, result.stderr, result.returncode
-
-
-def sync(source, destination):
-    """Copy a tree, leaving files that did not change untouched so make does not rebuild them, and
-    removing what the generator did not produce this time, so a source it stopped emitting is not
-    still globbed into the fixture library."""
-    produced = set()
-    for root, _, names in os.walk(source):
-        target_root = os.path.join(destination, os.path.relpath(root, source))
-        os.makedirs(target_root, exist_ok=True)
-        for name in names:
-            src, dst = os.path.join(root, name), os.path.join(target_root, name)
-            produced.add(os.path.normpath(dst))
-            with open(src, "rb") as f:
-                data = f.read()
-            if os.path.exists(dst):
-                with open(dst, "rb") as f:
-                    if f.read() == data:
-                        continue
-            with open(dst, "wb") as f:
-                f.write(data)
-    for root, _, names in os.walk(destination, topdown=False):
-        for name in names:
-            path = os.path.join(root, name)
-            if os.path.normpath(path) not in produced:
-                os.remove(path)
-        if os.path.normpath(root) != os.path.normpath(destination) and not os.listdir(root):
-            os.rmdir(root)
 
 
 # -- the surface exists and is typed -------------------------------------------------------------

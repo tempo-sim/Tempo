@@ -10,6 +10,12 @@ vendored gRPC (TempoCore/Source/ThirdParty/gRPC), for its headers.
 A second archive rather than more of libtempo, because the two are built at different times:
 libtempo at prebuild, from the protos, and this at package time, from the packaged build's own
 reflection (TYPED_WORLD_API_PLAN.md §23.4).
+
+The build directory is `<generated-dir>-build`, beside the generated one rather than in it, and it
+is kept from one run to the next, so a run recompiles only the sources whose modification time
+moved. Generate into a scratch directory and sync it into `<generated-dir>` (sync_tree.py) to keep
+an unchanged file's time, as GenReflectedAPI.sh does. A build directory CMake will not configure
+again (one made by another generator or compiler) is discarded and made afresh.
 """
 
 import os
@@ -24,15 +30,18 @@ ARCHIVE_STEM = "tempo_reflected"
 
 
 def build(generated, api_dir, grpc_dir):
-    build_dir = os.path.join(generated, "cmake")
-    if os.path.exists(build_dir):
-        shutil.rmtree(build_dir)
+    build_dir = generated.rstrip("/\\") + "-build"
     configure = ["cmake", "-S", generated, "-B", build_dir, "-DCMAKE_BUILD_TYPE=Release",
                  "-DTEMPO_API_DIR=" + api_dir, "-DTEMPO_GRPC_DIR=" + grpc_dir,
                  "-DTEMPO_BUILD_JOBS=" + str(build_jobs())] + cpp_compiler_args()
     if platform.system() == "Windows" and shutil.which("ninja"):
         configure += ["-G", "Ninja"]
-    subprocess.run(configure, check=True)
+    if subprocess.run(configure).returncode != 0:
+        if not os.path.exists(build_dir):
+            raise RuntimeError("cmake could not configure {}".format(generated))
+        print("Configuring the kept build directory failed; configuring a fresh one", file=sys.stderr)
+        shutil.rmtree(build_dir)
+        subprocess.run(configure, check=True)
     subprocess.run(["cmake", "--build", build_dir, "--config", "Release", "--parallel", str(build_jobs())],
                    check=True)
 

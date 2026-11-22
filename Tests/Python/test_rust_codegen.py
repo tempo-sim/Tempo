@@ -73,28 +73,12 @@ def _sync(source, destination):
 
     So that cargo, which goes by modification time, rebuilds only what changed between runs.
     """
-    source, destination = str(source), str(destination)
-    wanted = set()
-    for directory, _, files in os.walk(source):
-        relative = os.path.relpath(directory, source)
-        for name in files:
-            path = os.path.normpath(os.path.join(relative, name))
-            wanted.add(path)
-            target = os.path.join(destination, path)
-            with open(os.path.join(directory, name), "rb") as f:
-                content = f.read()
-            if os.path.exists(target):
-                with open(target, "rb") as f:
-                    if f.read() == content:
-                        continue
-            os.makedirs(os.path.dirname(target), exist_ok=True)
-            with open(target, "wb") as f:
-                f.write(content)
-    for directory, _, files in os.walk(destination):
-        for name in files:
-            path = os.path.normpath(os.path.relpath(os.path.join(directory, name), destination))
-            if path not in wanted:
-                os.remove(os.path.join(directory, name))
+    sys.path.insert(0, PYTHON_DIR)
+    try:
+        from sync_tree import sync_tree
+    finally:
+        sys.path.remove(PYTHON_DIR)
+    sync_tree(str(source), str(destination))
 
 
 def tempo_sim_copy(name):
