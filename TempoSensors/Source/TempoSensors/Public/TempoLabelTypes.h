@@ -24,6 +24,16 @@ struct FSemanticLabel: public FTableRowBase
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	int32 Label = 0;
 
+	// In Panoptic label mode, whether each object labeled with this row gets an instance ID of its
+	// own (a "thing": a car, a pedestrian), or every one of them shares this row's Label as its
+	// instance ID (a "stuff" class: road, building, sky). The label image is 8 bits, so instance IDs
+	// are scarce (GTempoCamera_Max_Label of them), and a scene with many separately labeled stuff
+	// components -- a city's buildings and roads, mesh by mesh -- would otherwise use them all up
+	// and force unrelated objects to share one. Ignored in the other label modes: in Instance mode
+	// every labeled object gets an instance ID whatever this says.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bPanopticInstanced = true;
+
 	// The Actor types which should be tagged with this label.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TSet<TSubclassOf<AActor>> ActorTypes;

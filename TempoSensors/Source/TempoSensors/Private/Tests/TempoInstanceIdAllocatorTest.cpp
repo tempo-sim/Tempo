@@ -125,4 +125,93 @@ bool FTempoInstanceIdAllocatorTeardownOrderTest::RunTest(const FString& Paramete
 	return true;
 }
 
+// The labeler reserves every class's Label, which doubles as an instance ID standing for the whole
+// class. A reserved ID must never be handed out, shared or not.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoInstanceIdAllocatorExcludedTest,
+	"Tempo.Sensors.InstanceIdAllocator.Excluded", TempoInstanceIdAllocatorTestFlags)
+bool FTempoInstanceIdAllocatorExcludedTest::RunTest(const FString& Parameters)
+{
+	FInstanceIdAllocator Allocator(1, 5, TSet<int32>({ 2, 4 }));
+
+	const TArray<int32> Ids = AllocateMany(Allocator, false, 6);
+	TestEqual(TEXT("Only unreserved IDs go out exclusively"), Sorted(Ids), TArray<int32>({ 1, 3, 5 }));
+
+	const TArray<int32> SharedIds = AllocateMany(Allocator, true, 6);
+	TestFalse(TEXT("Sharing never hands out reserved ID 2"), SharedIds.Contains(2));
+	TestFalse(TEXT("Sharing never hands out reserved ID 4"), SharedIds.Contains(4));
+	TestEqual(TEXT("Sharing rounds cover the unreserved IDs evenly"), Sorted(SharedIds), TArray<int32>({ 1, 1, 3, 3, 5, 5 }));
+
+	// Everything excluded leaves nothing to hand out.
+	FInstanceIdAllocator Empty(1, 2, TSet<int32>({ 1, 2 }));
+	TestFalse(TEXT("A fully reserved range refuses exclusive allocation"), Empty.Allocate(false).IsSet());
+	TestFalse(TEXT("A fully reserved range refuses shared allocation"), Empty.Allocate(true).IsSet());
+
+	return true;
+}
+
+// The labeler changes its reservations when the label table or the panoptic setting does, between
+// un-labeling the world and re-labeling it. IDs it never handed back (Globally Unique Instance
+// Labels) must stay held across that.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoInstanceIdAllocatorSetExcludedTest,
+	"Tempo.Sensors.InstanceIdAllocator.SetExcluded", TempoInstanceIdAllocatorTestFlags)
+bool FTempoInstanceIdAllocatorSetExcludedTest::RunTest(const FString& Parameters)
+{
+	FInstanceIdAllocator Allocator(1, 5, TSet<int32>({ 2 }));
+
+	// Hold one ID and never return it.
+	const int32 Held = Allocator.Allocate(false).Get(-1);
+	TestTrue(TEXT("Held ID is unreserved"), Held != -1 && Held != 2);
+
+	// Reserve a different ID, and one outside the range, which is ignored; 2 comes back.
+	const int32 Reserved = Held == 4 ? 5 : 4;
+	Allocator.SetExcludedIds(TSet<int32>({ Reserved, 99 }));
+
+	TArray<int32> Expected({ 1, 2, 3, 4, 5 });
+	Expected.Remove(Held);
+	Expected.Remove(Reserved);
+	TestEqual(TEXT("The held and newly reserved IDs stay out; the released one is back"),
+		Sorted(AllocateMany(Allocator, false, 5)), Expected);
+
+	// Reserving an ID sets its allocations aside, and releasing it brings them back with it: an ID
+	// that was never returned must not come out of a reservation free to hand out again.
+	Allocator.SetExcludedIds(TSet<int32>({ Held }));
+	TestFalse(TEXT("A reserved ID can't be shared"), Allocator.Share(Held));
+	Allocator.SetExcludedIds(TSet<int32>());
+	TestEqual(TEXT("Only the ID that was reserved while free is free"), AllocateMany(Allocator, false, 2), TArray<int32>({ Reserved }));
+	TestTrue(TEXT("The ID that was held when reserved is still held"), Allocator.Share(Held));
+
+	return true;
+}
+
+// The labeler shares one ID across the components of one object (a car's body and wheels), each of
+// which returns its own allocation when it goes.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoInstanceIdAllocatorShareTest,
+	"Tempo.Sensors.InstanceIdAllocator.Share", TempoInstanceIdAllocatorTestFlags)
+bool FTempoInstanceIdAllocatorShareTest::RunTest(const FString& Parameters)
+{
+	FInstanceIdAllocator Allocator(1, 3, TSet<int32>({ 2 }));
+
+	TestFalse(TEXT("Can't share an ID nobody holds"), Allocator.Share(1));
+	TestFalse(TEXT("Can't share a reserved ID"), Allocator.Share(2));
+
+	const int32 Id = Allocator.Allocate(false).Get(-1);
+	TestEqual(TEXT("First ID"), Id, 1);
+	TestTrue(TEXT("Shares a live ID"), Allocator.Share(Id));
+	TestTrue(TEXT("Shares it again"), Allocator.Share(Id));
+
+	// A shared ID counts as more held than a fresh one, so the next allocation is the other ID.
+	TestEqual(TEXT("Next allocation avoids the shared ID"), Allocator.Allocate(true).Get(-1), 3);
+
+	// Three holders: the ID stays live until all three have returned it.
+	Allocator.Return(Id);
+	Allocator.Return(Id);
+	TestTrue(TEXT("Still live after two of three returns"), Allocator.Share(Id));
+	Allocator.Return(Id);
+	Allocator.Return(Id);
+	TestFalse(TEXT("Free once every holder has returned it"), Allocator.Share(Id));
+	TestEqual(TEXT("And handed out exclusively again"), Allocator.Allocate(false).Get(-1), Id);
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

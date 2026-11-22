@@ -20,8 +20,15 @@ enum EMeasurementType: uint8
 UENUM(BlueprintType)
 enum ELabelType : uint8
 {
+	// Every object of a class carries the class's Label.
 	Semantic = 0,
-	Instance = 1
+	// Every labeled Actor, and every component that resolves a label of its own, carries an instance
+	// ID of its own.
+	Instance = 1,
+	// Instance IDs for things and class Labels for stuff: as Instance, but an instance ID names one
+	// object, and what is no one object carries its class's Label instead (see
+	// FSemanticLabel::bPanopticInstanced).
+	Panoptic = 2
 };
 
 UENUM(BlueprintType)

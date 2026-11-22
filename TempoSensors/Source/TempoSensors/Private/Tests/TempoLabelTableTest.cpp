@@ -48,7 +48,8 @@ bool FTempoLabelTableImportTest::RunTest(const FString& Parameters)
 			"ActorTags": [ "HeroVehicle" ],
 			"SkeletalMeshTypes": [ "/Engine/EngineMeshes/SkeletalCube.SkeletalCube" ],
 			"ComponentTags": [ "Chassis", "Wheels" ]
-		}
+		},
+		{ "Name": "Road", "Label": 1, "bPanopticInstanced": false }
 	])");
 
 	TArray<FString> Problems;
@@ -86,6 +87,15 @@ bool FTempoLabelTableImportTest::RunTest(const FString& Parameters)
 
 	TestEqual(TEXT("Omitted StaticMeshTypes defaults to empty"), NoLabel->StaticMeshTypes.Num(), 0);
 	TestEqual(TEXT("Omitted ActorTypes defaults to empty"), NoLabel->ActorTypes.Num(), 0);
+
+	// A row is instanced unless it says otherwise, so tables written before the column keep their
+	// meaning.
+	TestTrue(TEXT("Omitted bPanopticInstanced defaults to instanced"), Vehicle->bPanopticInstanced);
+	const FSemanticLabel* Road = Table->FindRow<FSemanticLabel>(TEXT("Road"), TEXT(""), false);
+	if (TestNotNull(TEXT("Road row imported"), Road))
+	{
+		TestFalse(TEXT("bPanopticInstanced false imported"), Road->bPanopticInstanced);
+	}
 
 	return true;
 }
@@ -195,6 +205,21 @@ bool FTempoLabelTableValidationTest::RunTest(const FString& Parameters)
 			{ "Name": "Building", "Label": 7, "ActorTags": [ "Parked" ] }
 		])")).Num() > 0);
 
+	// Rows may share a Label, but the Label is then one class: all things or all stuff.
+	TestEqual(TEXT("Rows sharing a Label and its instancing are fine"),
+		ValidateJson(TEXT("Shared label"), TEXT(R"([
+			{ "Name": "NoLabel", "Label": 0 },
+			{ "Name": "Road", "Label": 1, "bPanopticInstanced": false },
+			{ "Name": "Sidewalk", "Label": 1, "bPanopticInstanced": false }
+		])")).Num(), 0);
+
+	TestTrue(TEXT("Rows sharing a Label but not its instancing are a problem"),
+		ValidateJson(TEXT("Conflicting instancing"), TEXT(R"([
+			{ "Name": "NoLabel", "Label": 0 },
+			{ "Name": "Car", "Label": 5 },
+			{ "Name": "ParkedCarProxy", "Label": 5, "bPanopticInstanced": false }
+		])")).Num() > 0);
+
 	return true;
 }
 
@@ -214,7 +239,8 @@ bool FTempoLabelTableRoundTripTest::RunTest(const FString& Parameters)
 			"ActorTags": [ "HeroVehicle", "Parked" ],
 			"SkeletalMeshTypes": [ "/Engine/EngineMeshes/SkeletalCube.SkeletalCube" ],
 			"ComponentTags": [ "Chassis" ]
-		}
+		},
+		{ "Name": "Road", "Label": 1, "bPanopticInstanced": false }
 	])");
 
 	TArray<FString> Problems;
@@ -245,6 +271,12 @@ bool FTempoLabelTableRoundTripTest::RunTest(const FString& Parameters)
 		Vehicle->ActorTags.Contains(TEXT("HeroVehicle")) && Vehicle->ActorTags.Contains(TEXT("Parked")));
 	TestTrue(TEXT("Component tag survives"), Vehicle->ComponentTags.Contains(TEXT("Chassis")));
 	TestEqual(TEXT("Skeletal mesh type survives"), Vehicle->SkeletalMeshTypes.Num(), 1);
+	TestTrue(TEXT("Instanced row survives"), Vehicle->bPanopticInstanced);
+	const FSemanticLabel* Road = Reimported->FindRow<FSemanticLabel>(TEXT("Road"), TEXT(""), false);
+	if (TestNotNull(TEXT("Road row survives"), Road))
+	{
+		TestFalse(TEXT("Non-instanced row survives"), Road->bPanopticInstanced);
+	}
 
 	// A second export of the same content must be byte-identical, or a client diffing two fetches
 	// would see spurious changes from TSet and row map iteration order.

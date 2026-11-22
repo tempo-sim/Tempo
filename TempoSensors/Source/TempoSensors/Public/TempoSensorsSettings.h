@@ -105,11 +105,11 @@ private:
 	TEnumAsByte<ELabelType> LabelType = ELabelType::Semantic;
 
 	// Whether to reclaim instance labels for later use when labeled objects are destroyed.
-	UPROPERTY(EditAnywhere, Config, Category="Labels", meta=(EditCondition="LabelType == ELabelType::Instance"))
+	UPROPERTY(EditAnywhere, Config, Category="Labels", meta=(EditCondition="LabelType != ELabelType::Semantic"))
 	bool bGloballyUniqueInstanceLabels = false;
 
 	// Whether to reuse instance labels after exhausting our 251 unique labels.
-	UPROPERTY(EditAnywhere, Config, Category="Labels", meta=(EditCondition="LabelType == ELabelType::Instance"))
+	UPROPERTY(EditAnywhere, Config, Category="Labels", meta=(EditCondition="LabelType != ELabelType::Semantic"))
 	bool bInstantaneouslyUniqueInstanceLabels = false;
 
 	// The post process material that should be used by TempoCamera when not capturing the depth image.
