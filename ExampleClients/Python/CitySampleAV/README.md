@@ -43,8 +43,13 @@ pip install -r Plugins/Tempo/ExampleClients/Python/CitySampleAV/requirements.txt
 Let the client start the game:
 
 ```bash
-python Plugins/Tempo/ExampleClients/Python/CitySampleAV.py --launch Packaged/Windows/CitySample.exe
+python Plugins/Tempo/ExampleClients/Python/CitySampleAV.py --launch
 ```
+
+With no path, `--launch` starts the build `Scripts/Package.sh` left in the project's `Packaged/`
+folder for this platform (`Packaged/Windows/*.exe`, `Packaged/Mac/*.app` or `Packaged/Linux/*.sh`),
+Development or Shipping, the newest if there are several. It also takes a path: an executable, a
+Mac `.app`, or another `Packaged/` folder. `--mute` starts it with `-nosound`.
 
 or start it yourself, offscreen, and then run the client without `--launch`:
 
@@ -78,6 +83,10 @@ CitySampleAV.py --rig surround                   # five cameras (front, left, ri
 CitySampleAV.py --rate-hz 30                     # every sensor at 30 Hz instead of its JSON rate
 CitySampleAV.py --viewport                       # keep rendering the game's own window (off by default)
 CitySampleAV.py --instance-view --no-depth-view  # show each camera's instance ids instead of its depth
+CitySampleAV.py --no-depth                       # no camera depth at all: not streamed, shown or recorded
+CitySampleAV.py --no-labels                      # no camera label images: not streamed, shown or recorded
+CitySampleAV.py --no-bboxes                      # hide the 2D boxes in the viewer (still recorded)
+CitySampleAV.py --launch --mute                  # start the packaged game without sound
 CitySampleAV.py --viewer-memory-limit 8GB        # keep more history in the viewer (default 2GB)
 CitySampleAV.py --coverage                       # on exit, list meshes no label rule matched
 ```
@@ -178,9 +187,9 @@ actors.jsonl                 3D ground truth: nearby moving actors' poses, bound
 <sensor>/index.jsonl         per frame: frame number (NNNNNN), the sensor's own sequence id, sim
                              time, sensor pose in the world. Frame numbers run on across egos.
 <camera>/color/NNNNNN.png
-<camera>/label/NNNNNN.png    8-bit semantic class ids
+<camera>/label/NNNNNN.png    8-bit semantic class ids (--no-labels skips label/ and instance/)
 <camera>/instance/NNNNNN.png 8-bit instance ids (a stuff class's is its class id)
-<camera>/depth/NNNNNN.npy    float32 meters (--no-record-depth skips)
+<camera>/depth/NNNNNN.npy    float32 meters (--no-record-depth or --no-depth skips)
 <camera>/bbox/NNNNNN.json    2D boxes of the box classes: inclusive pixel min/max, instance and class
 <lidar>/NNNNNN.npz           xyz (sensor frame), distance, intensity, label (class), instance, ring,
                              azimuth, elevation

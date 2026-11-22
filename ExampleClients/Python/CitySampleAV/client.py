@@ -89,6 +89,10 @@ class Session:
             Recorder(args.record, workers=args.record_workers, png_level=args.png_level)
             if args.record else None)
         self.visualize = not args.no_viz
+        # 2D boxes need Instance mode. --no-bboxes only keeps them out of the viewer: with --record
+        # they are still streamed and written.
+        self.show_bboxes = self.remap is not None and args.bboxes
+        self.stream_bboxes = self.remap is not None and (self.show_bboxes or self.recorder is not None)
         self.stream_tasks: List[asyncio.Task] = []
         self.background: List[asyncio.Task] = []
         self._ego: Optional[ego_mod.Ego] = None
@@ -113,13 +117,15 @@ class Session:
             if s.is_lidar:
                 active[s.key] = {"points"}
             else:
-                kinds = {"color", "label"}
+                kinds = {"color"}
+                if self.args.labels:
+                    kinds.add("label")
+                    if self.remap is not None and self.args.instance_view:
+                        kinds.add("instance")
                 if self.args.depth:
                     kinds.add("depth")
-                if self.remap is not None:
+                if self.show_bboxes:
                     kinds.add("bbox")
-                    if self.args.instance_view:
-                        kinds.add("instance")
                 active[s.key] = kinds
         return active
 
@@ -159,7 +165,7 @@ class Session:
                 if abs(ratio - round(ratio)) > 1e-6:
                     print(f"  ! {m.name} at {m.sensor.rate_hz:g} Hz doesn't divide the {self.args.step_hz} Hz "
                           f"step; it captures on the nearest steps, so its intervals will vary.")
-        mounted = await mount_rig(ego.vehicle, rig, with_bboxes=self.remap is not None)
+        mounted = await mount_rig(ego.vehicle, rig, with_bboxes=self.stream_bboxes)
         for s in mounted.infos:
             s.entity = sensor_entity(s.name)
         self._ego, self._mounted = ego, mounted
@@ -204,29 +210,31 @@ class Session:
             self._spawn(image_logger.stream_color(
                 s, visualize=viz, taps=[rec.color_tap(s.name)] if rec else []), f"{s.name}:color",
                 self.stream_tasks)
-            self._spawn(image_logger.stream_label(
-                s, remap=self.remap, visualize=viz, log_instance=self.args.instance_view,
-                taps=[rec.label_tap(s.name, self.remap)] if rec else []),
-                f"{s.name}:label", self.stream_tasks)
+            if self.args.labels:
+                self._spawn(image_logger.stream_label(
+                    s, remap=self.remap, visualize=viz, log_instance=self.args.instance_view,
+                    taps=[rec.label_tap(s.name, self.remap)] if rec else []),
+                    f"{s.name}:label", self.stream_tasks)
             record_depth = rec is not None and not self.args.no_record_depth
             if self.args.depth or record_depth:
                 self._spawn(image_logger.stream_depth(
                     s, visualize=viz and self.args.depth,
                     taps=[rec.depth_tap(s.name)] if rec and record_depth else []),
                     f"{s.name}:depth", self.stream_tasks)
-            if self.remap is not None:
+            if self.stream_bboxes:
                 self._spawn(image_logger.stream_bbox(
-                    s, classes=self.box_ids, visualize=viz,
+                    s, classes=self.box_ids, visualize=viz and self.show_bboxes,
                     taps=[rec.bbox_tap(s.name, self.box_ids)] if rec else []), f"{s.name}:bbox",
                     self.stream_tasks)
 
         self._spawn(world_logger.stream_ego(
-            self.ego.name, entity=EGO_ENTITY, visualize=viz, taps=[rec.ego_tap()] if rec else []),
+            self.ego.name, entity=EGO_ENTITY, visualize=viz, show_labels=False,
+            taps=[rec.ego_tap()] if rec else []),
             "ego", self.stream_tasks)
         if self.args.ground_truth_radius_m > 0:
             self._spawn(world_logger.stream_ground_truth(
                 self.ego.name, search_radius_m=self.args.ground_truth_radius_m, exclude=[self.ego.name],
-                classify=self._box_class, visualize=viz,
+                classify=self._box_class, visualize=viz, show_labels=False,
                 taps=[rec.actors_tap(self.actor_labels.semantic)] if rec else []),
                 "ground_truth", self.stream_tasks)
 

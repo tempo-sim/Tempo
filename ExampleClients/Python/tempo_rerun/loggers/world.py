@@ -24,7 +24,7 @@ from .._compat import set_sim_time
 from ..streaming import pump
 
 
-def _log_actor_state(state, entity=None, class_id=None):
+def _log_actor_state(state, entity=None, class_id=None, show_labels=True):
     entity = entity or conv.ground_truth_entity(state.name)
     center, half = conv.box_center_half(state.local_bounds)
     rr.log(entity, conv.transform_to_rerun(state.transform))
@@ -33,18 +33,20 @@ def _log_actor_state(state, entity=None, class_id=None):
     # ego) would be drawn centered on the actor's pivot instead: half a car height too low.
     # A class id colors the box by the AnnotationContext, as the label images are.
     rr.log(f"{entity}/box", rr.Boxes3D(centers=[center], half_sizes=[half], labels=[state.name],
-                                       class_ids=[class_id] if class_id is not None else None))
+                                       class_ids=[class_id] if class_id is not None else None,
+                                       show_labels=show_labels))
 
 
-async def stream_ego(track_actor, *, entity=None, visualize=True, taps=()):
+async def stream_ego(track_actor, *, entity=None, visualize=True, taps=(), show_labels=True):
     """Stream the tracked actor itself (the near-query may not include its center).
-    `entity` overrides where it is logged (default: its ground-truth entity)."""
+    `entity` overrides where it is logged (default: its ground-truth entity). `show_labels` False
+    draws its box without the actor's name."""
     taps = tuple(taps)
 
     def handle(state):
         if visualize:
             set_sim_time(conv.SIM_TIME, state.timestamp_s)
-            _log_actor_state(state, entity)
+            _log_actor_state(state, entity, show_labels=show_labels)
         for tap in taps:
             tap(state)
 
@@ -52,10 +54,11 @@ async def stream_ego(track_actor, *, entity=None, visualize=True, taps=()):
 
 
 async def stream_ground_truth(track_actor, *, search_radius_m=200.0, include_static=False,
-                              exclude=(), classify=None, visualize=True, taps=()):
+                              exclude=(), classify=None, visualize=True, taps=(), show_labels=True):
     """Stream the actors near `track_actor`. `exclude` names actors not to draw (the ego, which
     stream_ego draws). `classify`, if given, maps an actor name to a class id to color its box by,
-    or None to not draw it. Taps receive the whole ActorStates message, unfiltered."""
+    or None to not draw it. `show_labels` False draws the boxes without the actors' names. Taps
+    receive the whole ActorStates message, unfiltered."""
     taps = tuple(taps)
     exclude = set(exclude)
     shown = [False]     # whether the last set logged had any boxes
@@ -80,7 +83,8 @@ async def stream_ground_truth(track_actor, *, search_radius_m=200.0, include_sta
             # interpreter lock against the camera handlers, and 60 of them took half a second a
             # frame, so most frames' boxes were dropped. Each frame's set also replaces the last
             # whole, so an actor that left needs no Clear.
-            rr.log(GROUND_TRUTH_ENTITY, _boxes(kept, class_ids if classify is not None else None))
+            rr.log(GROUND_TRUTH_ENTITY, _boxes(kept, class_ids if classify is not None else None,
+                                               show_labels=show_labels))
             shown[0] = bool(kept)
         for tap in taps:
             tap(states)
@@ -111,7 +115,7 @@ async def stream_ground_truth(track_actor, *, search_radius_m=200.0, include_sta
 GROUND_TRUTH_ENTITY = f"{conv.WORLD}/ground_truth"
 
 
-def _boxes(states, class_ids=None) -> rr.Boxes3D:
+def _boxes(states, class_ids=None, show_labels=True) -> rr.Boxes3D:
     """The actors' oriented boxes in the world frame: the local box's center placed by the actor's
     transform, and the actor's rotation, as _log_actor_state draws one through a Transform3D."""
     n = len(states)
@@ -126,7 +130,7 @@ def _boxes(states, class_ids=None) -> rr.Boxes3D:
         halves[i] = half
         quats[i] = q
     return rr.Boxes3D(centers=centers, half_sizes=halves, quaternions=quats,
-                      labels=[s.name for s in states], class_ids=class_ids)
+                      labels=[s.name for s in states], class_ids=class_ids, show_labels=show_labels)
 
 
 def _rotate(q, v):

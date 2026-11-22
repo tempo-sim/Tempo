@@ -11,10 +11,10 @@ Layout (one directory per run):
                                    pose, local bounds, semantic class
     <sensor>/index.jsonl           per frame: frame number, sim time, sensor pose in the world
     <camera>/color/<seq>.png       RGB
-    <camera>/label/<seq>.png       8-bit semantic class ids
+    <camera>/label/<seq>.png       8-bit semantic class ids (--no-labels skips label/ and instance/)
     <camera>/instance/<seq>.png    8-bit instance ids (Instance mode, the default); a stuff class's
                                    instance id is its class id
-    <camera>/depth/<seq>.npy       float32 meters, along the optical axis (--no-record-depth skips)
+    <camera>/depth/<seq>.npy       float32 meters, along the optical axis (--no-record-depth / --no-depth skip)
     <camera>/bbox/<seq>.json       2D boxes of the box classes (Instance mode)
     <lidar>/<seq>.npz              xyz (sensor frame), distance, intensity, label (semantic),
                                    instance (Instance mode), ring, azimuth, elevation; `complete`

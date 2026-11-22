@@ -8,11 +8,14 @@ import asyncio
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 import tempo_sim
 
 from tempo_rerun.loggers.lidar import LIDAR_SIGNALS
+
+# What --launch means given no EXE: find the packaged build.
+AUTO = "<auto>"
 
 
 def parse_args(argv=None):
@@ -23,9 +26,13 @@ def parse_args(argv=None):
     g = p.add_argument_group("sim")
     g.add_argument("--ip", default="localhost", help="Tempo server address (default: localhost).")
     g.add_argument("--port", type=int, default=10001, help="Tempo server port (default: 10001).")
-    g.add_argument("--launch", metavar="EXE", default="",
-                   help="Start this packaged CitySample executable first, and stop it on exit. It "
-                        "starts with -RenderOffScreen (no window) unless --viewport is given.")
+    g.add_argument("--launch", metavar="EXE", nargs="?", const=AUTO, default=None,
+                   help="Start the packaged game first, and stop it on exit. With no EXE, the build in "
+                        "the project's Packaged/ folder (Development or Shipping) for this platform; "
+                        "EXE may be an executable, a Mac .app, or a Packaged/ folder. It starts with "
+                        "-RenderOffScreen (no window) unless --viewport is given.")
+    g.add_argument("--mute", action="store_true",
+                   help="With --launch, start the game with -nosound.")
 
     g = p.add_argument_group("vehicle and sensors")
     g.add_argument("--vehicle", default="random",
@@ -64,6 +71,9 @@ def parse_args(argv=None):
     g.add_argument("--label-type", choices=["instance", "semantic"], default="instance",
                    help="instance (default): instance ids, 2D boxes, and semantic images derived from "
                         "them client-side. semantic: semantic ids straight from the sim, no 2D boxes.")
+    g.add_argument("--no-labels", dest="labels", action="store_false",
+                   help="Don't stream or record the cameras' label images (semantic and instance). "
+                        "The lidar's labels and the 2D boxes are unaffected.")
     g.add_argument("--coverage", action="store_true",
                    help="On exit, list the loaded meshes no label rule matched, most common first.")
 
@@ -75,8 +85,14 @@ def parse_args(argv=None):
                    help="Also save the Rerun recording to this .rrd file.")
     g.add_argument("--record", default="", metavar="DIR",
                    help="Record a dataset (images, labels, lidar, poses, calibration) to DIR.")
+    g.add_argument("--no-depth", action="store_true",
+                   help="Don't stream or record camera depth at all (both --no-depth-view and "
+                        "--no-record-depth).")
     g.add_argument("--no-depth-view", dest="depth", action="store_false",
                    help="Don't show camera depth in the viewer (it is still recorded with --record).")
+    g.add_argument("--no-bboxes", dest="bboxes", action="store_false",
+                   help="Don't show the 2D bounding boxes in the viewer (they are still recorded with "
+                        "--record).")
     g.add_argument("--instance-view", action="store_true",
                    help="Also show the raw instance-id image of each camera in the viewer.")
     g.add_argument("--viewer-memory-limit", default="2GB", metavar="SIZE",
@@ -101,14 +117,81 @@ def parse_args(argv=None):
                    help="Stop after this many seconds of sim time, once streaming has begun: with "
                         "Fixed Step at 10 Hz, 60 means 600 frames of every sensor.")
     g.add_argument("--app-id", default="tempo_citysample_av", help="Rerun application id.")
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    if args.no_depth:
+        args.depth, args.no_record_depth = False, True
+    return args
 
 
-def launch(exe: str, window: bool) -> subprocess.Popen:
-    path = Path(exe)
-    if not path.is_file():
-        sys.exit(f"--launch: no such file {exe}")
-    print(f"  Launching {path.name} ...")
+_PLATFORM_DIR = {"win32": "Windows", "darwin": "Mac"}.get(sys.platform, "Linux")
+
+
+def _project_packaged_dirs():
+    """Packaged/ folders to look in: the host project's (the nearest folder above this file with a
+    .uproject), then the current directory's."""
+    for parent in Path(__file__).resolve().parents:
+        if any(parent.glob("*.uproject")):
+            yield parent / "Packaged"
+            break
+    yield Path.cwd() / "Packaged"
+
+
+def _app_binary(app: Path) -> Optional[Path]:
+    """The executable inside a Mac .app: the one named after the bundle, or else any."""
+    macos = app / "Contents" / "MacOS"
+    named = macos / app.stem
+    if named.is_file():
+        return named
+    found = sorted(f for f in macos.glob("*") if f.is_file()) if macos.is_dir() else []
+    return found[0] if found else None
+
+
+def _builds_in(packaged: Path) -> List[Path]:
+    """Every top-level launcher Package.sh leaves for this platform, newest first. A Development
+    and a Shipping package of one project differ in name (Shipping's carries -<Platform>-Shipping
+    on some platforms), so take whatever is there."""
+    folder = packaged / _PLATFORM_DIR
+    if not folder.is_dir():
+        return []
+    if _PLATFORM_DIR == "Mac":
+        found = [b for b in map(_app_binary, folder.glob("*.app")) if b is not None]
+    else:
+        found = [f for f in folder.glob("*.exe" if _PLATFORM_DIR == "Windows" else "*.sh") if f.is_file()]
+    return sorted(found, key=lambda f: f.stat().st_mtime, reverse=True)
+
+
+def find_build(exe: str) -> Path:
+    """The executable --launch starts, from what it was given."""
+    if exe != AUTO:
+        path = Path(exe).expanduser()
+        if path.suffix == ".app" and path.is_dir():
+            binary = _app_binary(path)
+            if binary is None:
+                sys.exit(f"--launch: no executable in {path}/Contents/MacOS")
+            return binary
+        if path.is_dir():               # a Packaged/ folder
+            builds = _builds_in(path)
+            if not builds:
+                sys.exit(f"--launch: no packaged {_PLATFORM_DIR} build in {path}")
+            return builds[0]
+        if not path.is_file():
+            sys.exit(f"--launch: no such file {exe}")
+        return path
+    searched = []
+    for packaged in _project_packaged_dirs():
+        searched.append(str(packaged / _PLATFORM_DIR))
+        builds = _builds_in(packaged)
+        if builds:
+            if len(builds) > 1:
+                print(f"  {len(builds)} builds in {packaged / _PLATFORM_DIR}; launching the newest.")
+            return builds[0]
+    sys.exit("--launch: no packaged build found in " + " or ".join(searched) + ".\n"
+             "Package the project (Plugins/Tempo/Scripts/Package.sh), or pass --launch EXE.")
+
+
+def launch(exe: str, window: bool, mute: bool = False) -> subprocess.Popen:
+    path = find_build(exe)
+    print(f"  Launching {path} ...")
     # Its own process group (or session), so stop() can take down the children with it: a packaged
     # game's top-level executable is a bootstrap that starts the real one as a child.
     extra: Dict[str, Any] = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
@@ -116,7 +199,8 @@ def launch(exe: str, window: bool) -> subprocess.Popen:
     # Without --viewport the game's window would only ever be black, so don't open one: the sensors
     # render offscreen either way.
     display = ["-windowed", "-ResX=1280", "-ResY=720"] if window else ["-RenderOffScreen"]
-    return subprocess.Popen([str(path), "-DisableSandboxIntro", *display],
+    sound = ["-nosound"] if mute else []
+    return subprocess.Popen([str(path), "-DisableSandboxIntro", *display, *sound],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **extra)
 
 
@@ -154,13 +238,15 @@ async def amain(args) -> None:
         raise
     await tempo_sim.set_server(address=args.ip, port=args.port)
     print(f"\n=== CitySample AV ===\nConnecting to {args.ip}:{args.port} ...")
-    session = Session(args, launched=bool(args.launch))
+    session = Session(args, launched=args.launch is not None)
     await session.run()
 
 
 def main(argv=None) -> None:
     args = parse_args(argv)
-    sim = launch(args.launch, window=args.viewport) if args.launch else None
+    if args.mute and args.launch is None:
+        print("  --mute has no effect without --launch: the client didn't start the sim.")
+    sim = launch(args.launch, window=args.viewport, mute=args.mute) if args.launch is not None else None
     try:
         asyncio.run(amain(args))
     except KeyboardInterrupt:
