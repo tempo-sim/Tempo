@@ -154,6 +154,7 @@ void UTempoSensorsSettings::PostEditChangeProperty(FPropertyChangedEvent& Proper
 
 	const FName PropertyChangedName = PropertyChangedEvent.Property->GetFName();
 	if (PropertyChangedName == GET_MEMBER_NAME_CHECKED(UTempoSensorsSettings, LabelType)
+		|| PropertyChangedName == GET_MEMBER_NAME_CHECKED(UTempoSensorsSettings, bPanopticInstanceLabels)
 		|| PropertyChangedName == GET_MEMBER_NAME_CHECKED(UTempoSensorsSettings, SemanticLabelTable))
 	{
 		TempoSensorsLabelSettingsChangedEvent.Broadcast();

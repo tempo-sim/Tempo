@@ -41,6 +41,7 @@ public:
 	ELabelType GetLabelType() const { return LabelType; }
 	bool GetGloballyUniqueInstanceLabels() const { return bGloballyUniqueInstanceLabels; }
 	bool GetInstantaneouslyUniqueInstanceLabels() const { return bInstantaneouslyUniqueInstanceLabels; }
+	bool GetPanopticInstanceLabels() const { return bPanopticInstanceLabels; }
 	// Supersede the configured SemanticLabelTable with a table built at runtime. Pass nullptr to fall
 	// back to the configured asset — UTempoActorLabeler::Deinitialize does that at world teardown,
 	// so a table loaded over the API is scoped to the world it was loaded into rather than to this
@@ -111,6 +112,16 @@ private:
 	// Whether to reuse instance labels after exhausting our 251 unique labels.
 	UPROPERTY(EditAnywhere, Config, Category="Labels", meta=(EditCondition="LabelType == ELabelType::Instance"))
 	bool bInstantaneouslyUniqueInstanceLabels = false;
+
+	// Whether an instance label names one object rather than one labeled component. When set, a
+	// component that resolves a label of its own shares its Actor's instance label if they are the
+	// same class (a car's wheels and windows are the car), or a same-class sibling component's. And an
+	// instanced static mesh component, which draws many objects at once (Mass traffic and crowds draw
+	// far-off cars and people so), takes its class's Label as its instance label rather than one 2D
+	// bounding box spanning every copy. That reserves every label table row's Label: none is given
+	// to an object as its instance label, and none gets a 2D bounding box.
+	UPROPERTY(EditAnywhere, Config, Category="Labels", meta=(EditCondition="LabelType == ELabelType::Instance"))
+	bool bPanopticInstanceLabels = false;
 
 	// The post process material that should be used by TempoCamera when not capturing the depth image.
 	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=( AllowedClasses="/Script/Engine.BlendableInterface", Keywords="PostProcess" ))

@@ -22,8 +22,13 @@ struct FInstanceIdAllocator
 {
 	FInstanceIdAllocator() = default;
 	// ExcludedIds are left out of the range: never handed out, and never expected back. The labeler
-	// reserves every class's own label this way.
-	FInstanceIdAllocator(int32 MinIdIn, int32 MaxIdIn, const TSet<int32>& ExcludedIds = TSet<int32>());
+	// reserves the labels that stand for a whole class this way.
+	FInstanceIdAllocator(int32 MinIdIn, int32 MaxIdIn, const TSet<int32>& ExcludedIdsIn = TSet<int32>());
+
+	// Replaces the excluded IDs, leaving every other ID's allocations as they are. A newly excluded
+	// ID drops whatever allocations it had, so call this when nothing holds one; an ID no longer
+	// excluded comes back unallocated.
+	void SetExcludedIds(const TSet<int32>& ExcludedIdsIn);
 
 	// The ID with the fewest live allocations. Unset when every ID is already held and
 	// bAllowSharedIds is false, or the range is empty.
@@ -42,10 +47,13 @@ private:
 	int32 MinId = 0;
 	int32 MaxId = -1;
 	// IdsByLiveCount[N] is the set of IDs with exactly N live allocations. Every ID in
-	// [MinId, MaxId] is in exactly one of these sets at all times: Allocate moves it from its set
-	// to the next one up, Return from its set to the next one down. Index 0 always exists; higher
-	// sets are added as IDs come to be shared and trimmed once no ID is shared that many times.
+	// [MinId, MaxId] that is not excluded is in exactly one of these sets at all times: Allocate
+	// moves it from its set to the next one up, Return from its set to the next one down. Index 0
+	// always exists; higher sets are added as IDs come to be shared and trimmed once no ID is shared
+	// that many times.
 	TArray<TSet<int32>> IdsByLiveCount;
+	// The IDs of [MinId, MaxId] in none of those sets.
+	TSet<int32> ExcludedIds;
 };
 
 USTRUCT()
@@ -134,10 +142,11 @@ public:
 
 	TMap<uint8, uint8> GetInstanceToSemanticIdMap() const;
 
-	// The instance IDs that stand for a whole class rather than one object: each class's own Label.
-	// It is shared by every object of a non-instanced (stuff) class, and by the instanced mesh
-	// components of an instanced class, each of which draws many objects. The camera reports no 2D
-	// bounding boxes for them.
+	// The instance IDs that stand for a whole class rather than one object, for which the camera
+	// reports no 2D bounding boxes: the Label of every non-instanced (stuff) row, shared by every
+	// object of the class, and, with the Panoptic Instance Labels setting, of every other row too,
+	// shared by the class's instanced mesh components, each of which draws many objects. Empty
+	// outside Instance label mode, where the label image holds no instance IDs.
 	TSet<uint8> GetClassInstanceIds() const;
 
 	// The value the labeler writes into the stencil for an Actor's primitives, its instance or
@@ -207,12 +216,18 @@ protected:
 	// non-instanced (stuff), shared by all of them, and otherwise a freshly allocated one.
 	TOptional<int32> InstanceIdForSemanticId(int32 SemanticId);
 
-	// The instance ID for a component that resolves a label of its own, given its owning Actor's.
-	// A component is part of its Actor's object when they share a class: it takes the Actor's ID, or,
-	// when the Actor has none of that class, the one a sibling component of the class already holds.
-	// An instanced static mesh component of a class draws many objects in one, so it takes the
-	// class's own ID, as stuff does.
+	// The instance ID for a component that resolves a label of its own, given its owning Actor's:
+	// the class's own Label for a non-instanced (stuff) class, and otherwise a freshly allocated one.
+	// With the Panoptic Instance Labels setting a component is instead part of its Actor's object
+	// when they share a class: it takes the Actor's ID, or, when the Actor has none of that class,
+	// the one a sibling component of the class already holds. And an instanced static mesh component
+	// of a class draws many objects in one, so it takes the class's own ID, as stuff does.
 	TOptional<int32> InstanceIdForComponent(const UPrimitiveComponent* Component, int32 SemanticId, const FInstanceSemanticIdPair& ActorIdPair);
+
+	// Re-derive which Labels stand for a whole class from the label maps and the Panoptic Instance
+	// Labels setting, and reserve them in the instance ID allocator. Only while nothing is labeled:
+	// an object holding one of them as its own ID would keep it.
+	void ReserveClassInstanceIds();
 
 	// Re-derive everything cached from the semantic label table, then re-label the world from
 	// scratch. Bound to the settings' label-settings-changed event.
@@ -248,10 +263,16 @@ protected:
 	UPROPERTY(VisibleAnywhere)
 	TSet<int32> NonInstancedSemanticIds;
 
-	// Every row's Label but 0's. Reserved in the instance ID allocator, so in Instance mode each
-	// always means its class (see GetClassInstanceIds).
+	// The Labels reserved in the instance ID allocator, so in Instance mode each always means its
+	// class (see GetClassInstanceIds): the non-instanced rows', and every row's but 0's when
+	// bPanopticInstanceLabels.
 	UPROPERTY(VisibleAnywhere)
 	TSet<int32> ClassInstanceIds;
+
+	// The Panoptic Instance Labels setting as of the last ReserveClassInstanceIds, so the labels the
+	// world is wearing and the reservations they were allocated around can't disagree.
+	UPROPERTY(VisibleAnywhere)
+	bool bPanopticInstanceLabels = false;
 
 	UPROPERTY()
 	TMap<const UObject*, FInstanceSemanticIdPair> LabeledObjects;

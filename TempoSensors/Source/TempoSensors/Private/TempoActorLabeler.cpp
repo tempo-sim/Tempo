@@ -28,17 +28,53 @@
 #include "NiagaraMeshRendererProperties.h"
 #include "NiagaraSystem.h"
 
-FInstanceIdAllocator::FInstanceIdAllocator(int32 MinIdIn, int32 MaxIdIn, const TSet<int32>& ExcludedIds)
+FInstanceIdAllocator::FInstanceIdAllocator(int32 MinIdIn, int32 MaxIdIn, const TSet<int32>& ExcludedIdsIn)
 	: MinId(MinIdIn), MaxId(MaxIdIn)
 {
 	TSet<int32>& UnallocatedIds = IdsByLiveCount.AddDefaulted_GetRef();
 	for (int32 Id = MinId; Id <= MaxId; ++Id)
 	{
+		UnallocatedIds.Add(Id);
+	}
+	SetExcludedIds(ExcludedIdsIn);
+}
+
+void FInstanceIdAllocator::SetExcludedIds(const TSet<int32>& ExcludedIdsIn)
+{
+	TSet<int32> NewExcludedIds;
+	for (const int32 Id : ExcludedIdsIn)
+	{
+		if (Id < MinId || Id > MaxId)
+		{
+			continue;
+		}
+		NewExcludedIds.Add(Id);
 		if (!ExcludedIds.Contains(Id))
 		{
-			UnallocatedIds.Add(Id);
+			for (TSet<int32>& Ids : IdsByLiveCount)
+			{
+				if (Ids.Remove(Id) > 0)
+				{
+					break;
+				}
+			}
 		}
 	}
+
+	for (const int32 Id : ExcludedIds)
+	{
+		if (!NewExcludedIds.Contains(Id))
+		{
+			IdsByLiveCount[0].Add(Id);
+		}
+	}
+
+	while (IdsByLiveCount.Num() > 1 && IdsByLiveCount.Last().IsEmpty())
+	{
+		IdsByLiveCount.Pop();
+	}
+
+	ExcludedIds = MoveTemp(NewExcludedIds);
 }
 
 TOptional<int32> FInstanceIdAllocator::Allocate(bool bAllowSharedIds)
@@ -803,6 +839,7 @@ void UTempoActorLabeler::OnWorldBeginPlay(UWorld& InWorld)
 
 	// Parse the label table into a more convenient structure.
 	BuildLabelMaps();
+	ReserveClassInstanceIds();
 
 	// Label all actors *after* BeginPlay (UWorldSubsystem::OnWorldBeginPlay is called *before* BeginPlay).
 	GetWorld()->OnWorldBeginPlay.AddUObject(this, &UTempoActorLabeler::LabelAllActors);
@@ -919,11 +956,6 @@ void UTempoActorLabeler::BuildLabelMaps()
 	ActorTagLabels.Reset();
 	SemanticIds.Reset();
 	NonInstancedSemanticIds.Reset();
-	ClassInstanceIds.Reset();
-	// Every object has given its instance ID back by now (OnLabelSettingsChanged un-labels the world
-	// first, and the first build precedes any labeling), so the allocator can start over with this
-	// table's reservations.
-	InstanceIdAllocator = FInstanceIdAllocator(1, GTempoCamera_Max_Label);
 
 	// A table set in the editor never passes through LoadLabelTable's check, so report the same
 	// problems here. Building the maps anyway is deliberate: whatever the table gets right still
@@ -991,20 +1023,34 @@ void UTempoActorLabeler::BuildLabelMaps()
 
 		SemanticIds.Add(Label, Value.Label);
 
-		// 0 is "unlabeled" and never an instance ID, so there is nothing to reserve for it.
-		if (Value.Label > 0)
+		// 0 is "unlabeled" and never an instance ID, so it can't stand for a class.
+		if (!Value.bInstanced && Value.Label > 0)
 		{
-			ClassInstanceIds.Add(Value.Label);
-			if (!Value.bInstanced)
-			{
-				NonInstancedSemanticIds.Add(Value.Label);
-			}
+			NonInstancedSemanticIds.Add(Value.Label);
 		}
 	});
+}
 
-	// Reserve every class's Label, so an object can never be given one as its own instance ID: in
-	// Instance mode a class's Label always means the whole class.
-	InstanceIdAllocator = FInstanceIdAllocator(1, GTempoCamera_Max_Label, ClassInstanceIds);
+void UTempoActorLabeler::ReserveClassInstanceIds()
+{
+	bPanopticInstanceLabels = GetDefault<UTempoSensorsSettings>()->GetPanopticInstanceLabels();
+
+	ClassInstanceIds = NonInstancedSemanticIds;
+	if (bPanopticInstanceLabels)
+	{
+		for (const auto& [LabelName, SemanticId] : SemanticIds)
+		{
+			if (SemanticId > 0)
+			{
+				ClassInstanceIds.Add(SemanticId);
+			}
+		}
+	}
+
+	// An object can never be given a reserved Label as its own instance ID, so in Instance mode it
+	// always means the whole class. Reserving in place, rather than starting the allocator over,
+	// keeps the IDs that Globally Unique Instance Labels has retired retired.
+	InstanceIdAllocator.SetExcludedIds(ClassInstanceIds);
 }
 
 TOptional<int32> UTempoActorLabeler::InstanceIdForSemanticId(int32 SemanticId)
@@ -1018,16 +1064,21 @@ TOptional<int32> UTempoActorLabeler::InstanceIdForSemanticId(int32 SemanticId)
 
 TOptional<int32> UTempoActorLabeler::InstanceIdForComponent(const UPrimitiveComponent* Component, int32 SemanticId, const FInstanceSemanticIdPair& ActorIdPair)
 {
+	if (NonInstancedSemanticIds.Contains(SemanticId))
+	{
+		return SemanticId;
+	}
+
+	if (!bPanopticInstanceLabels)
+	{
+		return AllocateInstanceId();
+	}
+
 	// One component drawing many objects -- Mass traffic and crowds draw every far-off car or person
 	// of a model this way -- can't tell them apart in a stencil, so give it the class rather than a
 	// single instance (whose 2D box would span every copy). An override to an ID the table doesn't
 	// define has no class ID to share, and keeps an instance of its own.
 	if (Cast<UInstancedStaticMeshComponent>(Component) && ClassInstanceIds.Contains(SemanticId))
-	{
-		return SemanticId;
-	}
-
-	if (NonInstancedSemanticIds.Contains(SemanticId))
 	{
 		return SemanticId;
 	}
@@ -1063,6 +1114,12 @@ TOptional<int32> UTempoActorLabeler::InstanceIdForComponent(const UPrimitiveComp
 TSet<uint8> UTempoActorLabeler::GetClassInstanceIds() const
 {
 	TSet<uint8> Ids;
+	// In Semantic mode the label image holds each class's Label as just that, and every one of them
+	// gets its bounding box.
+	if (GetDefault<UTempoSensorsSettings>()->GetLabelType() != ELabelType::Instance)
+	{
+		return Ids;
+	}
 	for (const int32 Id : ClassInstanceIds)
 	{
 		Ids.Add(static_cast<uint8>(Id));
@@ -1290,10 +1347,11 @@ void UTempoActorLabeler::LabelComponent(UPrimitiveComponent* Component, FInstanc
 		return;
 	}
 
-	// No component label found. Label with its owning Actor's label -- but an instanced static mesh
-	// component draws many objects, so it takes the class (see InstanceIdForComponent).
+	// No component label found. Label with its owning Actor's label -- but with panoptic instance
+	// labels an instanced static mesh component draws many objects, so it takes the class (see
+	// InstanceIdForComponent).
 	FInstanceSemanticIdPair IdPair = ActorIdPair;
-	if (Cast<UInstancedStaticMeshComponent>(Component) && ClassInstanceIds.Contains(ActorIdPair.SemanticId))
+	if (bPanopticInstanceLabels && Cast<UInstancedStaticMeshComponent>(Component) && ClassInstanceIds.Contains(ActorIdPair.SemanticId))
 	{
 		IdPair.InstanceId = ActorIdPair.SemanticId;
 	}
@@ -1543,6 +1601,9 @@ void UTempoActorLabeler::OnLabelSettingsChanged()
 				*OverridableLabelRowName.ToString(), *GetDefault<UTempoSensorsSettings>()->GetOverridingLabelRowName().ToString());
 		}
 	}
+
+	// Nothing is labeled at this point, so the reservations can follow the new table and setting.
+	ReserveClassInstanceIds();
 
 	LabelAllActors();
 }

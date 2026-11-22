@@ -29,10 +29,10 @@ struct FSemanticLabel: public FTableRowBase
 	// road, building, sky). Matters only in Instance label mode. The label image is 8 bits, so
 	// instance IDs are scarce (GTempoCamera_Max_Label of them), and a scene with many separately
 	// labeled stuff components -- a city's buildings and roads, mesh by mesh -- would otherwise use
-	// them all up and force unrelated objects to share one. Every row's Label is reserved: no object
-	// is ever given one as its own instance ID, so it always means that class, and the camera reports
-	// no 2D bounding boxes for it. A thing class's Label goes to its instanced static mesh components,
-	// each of which draws many objects (Mass traffic and crowds draw far-off cars and people so).
+	// them all up and force unrelated objects to share one. A non-instanced row's Label is reserved:
+	// no object is ever given one as its own instance ID, so it always means that class, and the
+	// camera reports no 2D bounding boxes for it. (The Panoptic Instance Labels setting reserves an
+	// instanced row's Label too, for the class's instanced static mesh components.)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bInstanced = true;
 

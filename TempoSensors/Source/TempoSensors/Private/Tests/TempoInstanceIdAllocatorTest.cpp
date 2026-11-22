@@ -149,6 +149,40 @@ bool FTempoInstanceIdAllocatorExcludedTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// The labeler changes its reservations when the label table or the panoptic setting does, between
+// un-labeling the world and re-labeling it. IDs it never handed back (Globally Unique Instance
+// Labels) must stay held across that.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoInstanceIdAllocatorSetExcludedTest,
+	"Tempo.Sensors.InstanceIdAllocator.SetExcluded", TempoInstanceIdAllocatorTestFlags)
+bool FTempoInstanceIdAllocatorSetExcludedTest::RunTest(const FString& Parameters)
+{
+	FInstanceIdAllocator Allocator(1, 5, TSet<int32>({ 2 }));
+
+	// Hold one ID and never return it.
+	const int32 Held = Allocator.Allocate(false).Get(-1);
+	TestTrue(TEXT("Held ID is unreserved"), Held != -1 && Held != 2);
+
+	// Reserve a different ID, and one outside the range, which is ignored; 2 comes back.
+	const int32 Reserved = Held == 4 ? 5 : 4;
+	Allocator.SetExcludedIds(TSet<int32>({ Reserved, 99 }));
+
+	TArray<int32> Expected({ 1, 2, 3, 4, 5 });
+	Expected.Remove(Held);
+	Expected.Remove(Reserved);
+	TestEqual(TEXT("The held and newly reserved IDs stay out; the released one is back"),
+		Sorted(AllocateMany(Allocator, false, 5)), Expected);
+
+	// Reserving an ID drops its allocations, and releasing it brings it back unallocated.
+	Allocator.SetExcludedIds(TSet<int32>({ Held }));
+	TestFalse(TEXT("A reserved ID can't be shared"), Allocator.Share(Held));
+	Allocator.SetExcludedIds(TSet<int32>());
+	TArray<int32> Released({ Held, Reserved });
+	Released.Sort();
+	TestEqual(TEXT("The two released IDs are the least held"), Sorted(AllocateMany(Allocator, true, 2)), Released);
+
+	return true;
+}
+
 // The labeler shares one ID across the components of one object (a car's body and wheels), each of
 // which returns its own allocation when it goes.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoInstanceIdAllocatorShareTest,
