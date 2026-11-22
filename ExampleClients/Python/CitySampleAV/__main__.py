@@ -46,6 +46,10 @@ def parse_args(argv=None):
                         "seconds of sim time (CitySample's traffic often waits a minute or more at "
                         "lights). While no other car is moving it keeps the ego and keeps looking. "
                         "0 keeps the same car however long it waits. Default 30.")
+    g.add_argument("--lidar-range-noise-m", type=float, default=None, metavar="M",
+                   help="Standard deviation, in meters, of the Gaussian error added along each lidar "
+                        "beam, overriding every lidar's range_noise_stddev_m (3 cm in the shipped "
+                        "configs). 0 makes the lidars noiseless.")
     g.add_argument("--rate-hz", type=float, default=0.0,
                    help="Capture every sensor at this rate instead of its JSON rate_hz. In Fixed Step "
                         "(the default) every sensor runs at --step-hz unless this is given.")

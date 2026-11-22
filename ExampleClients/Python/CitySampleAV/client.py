@@ -33,7 +33,8 @@ from tempo_rerun.streaming import STATS
 
 from . import ego as ego_mod
 from . import lighting
-from .config import RigConfig, load_box_classes, load_label_override, load_rig, load_vehicles, load_labels
+from .config import (LidarConfig, RigConfig, load_box_classes, load_label_override, load_rig, load_vehicles,
+                     load_labels)
 from .labels import LabelManager
 from .recorder import Recorder
 from .rig import MountedRig, mount_rig
@@ -162,6 +163,15 @@ class Session:
         if rate > 0:
             rig = replace(rig, mounts=[replace(m, sensor=replace(m.sensor, rate_hz=float(rate)))
                                        for m in rig.mounts])
+        noise = self.args.lidar_range_noise_m
+        if noise is not None:
+            if noise < 0:
+                raise ValueError("--lidar-range-noise-m can't be negative")
+            rig = replace(rig, mounts=[
+                replace(m, sensor=replace(m.sensor, range_noise_stddev_m=noise,
+                                          range_noise_stddev_fraction=0.0 if noise == 0 else
+                                          m.sensor.range_noise_stddev_fraction))
+                if isinstance(m.sensor, LidarConfig) else m for m in rig.mounts])
         if self.fixed_step:
             for m in rig.mounts:
                 ratio = self.args.step_hz / m.sensor.rate_hz

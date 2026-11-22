@@ -79,6 +79,10 @@ def apply_lidar(lidar: TempoLidar, cfg: LidarConfig) -> None:
         lidar.VerticalBeams = cfg.vertical_beams
         lidar.VerticalFOV = cfg.vertical_fov_deg                   # degrees
     lidar.bSimulateParticipatingMedia = cfg.participating_media
+    # Written only when asked for, so a noiseless config still works on a build from before them.
+    if cfg.range_noise_stddev_m > 0 or cfg.range_noise_stddev_fraction > 0:
+        lidar.RangeNoiseStdDev = cfg.range_noise_stddev_m * CM_PER_M      # cm
+        lidar.RangeNoiseStdDevFraction = cfg.range_noise_stddev_fraction  # of the range
     _apply_passthrough(lidar, cfg.unreal_properties)
 
 

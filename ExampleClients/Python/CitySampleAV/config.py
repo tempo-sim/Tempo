@@ -117,6 +117,10 @@ class LidarConfig:
     elevations_deg: Tuple[float, ...] = ()     # non-empty: a BeamCalibration, replacing the grid
     # Attenuate and backscatter in dust, smoke and fog. Costs GPU time; off when the scene has none.
     participating_media: bool = True
+    # Gaussian error along each beam: a standard deviation of range_noise_stddev_m plus
+    # range_noise_stddev_fraction of the range. 0 and 0: noiseless.
+    range_noise_stddev_m: float = 0.0
+    range_noise_stddev_fraction: float = 0.0
     unreal_properties: Dict[str, object] = field(default_factory=dict)
 
 
@@ -165,6 +169,11 @@ def load_sensor(name: str, config_dir: Path = CONFIG_DIR) -> SensorConfig:
         rng = _vec(data, "range_m", path, 2)
         if not 0 <= rng[0] < rng[1]:
             raise ConfigError(f"{path}: 'range_m' should be [min, max] with 0 <= min < max")
+        noise_m = _get(data, "range_noise_stddev_m", path, float, 0.0)
+        noise_fraction = _get(data, "range_noise_stddev_fraction", path, float, 0.0)
+        if noise_m < 0 or noise_fraction < 0:
+            raise ConfigError(f"{path}: 'range_noise_stddev_m' and 'range_noise_stddev_fraction' "
+                              f"can't be negative")
         return LidarConfig(name=name, rate_hz=rate,
                            horizontal_beams=_get(data, "horizontal_beams", path, int),
                            horizontal_fov_deg=_get(data, "horizontal_fov_deg", path, float, 360.0),
@@ -173,6 +182,8 @@ def load_sensor(name: str, config_dir: Path = CONFIG_DIR) -> SensorConfig:
                            vertical_fov_deg=_get(data, "vertical_fov_deg", path, float, 0.0),
                            elevations_deg=elevations,
                            participating_media=_get(data, "participating_media", path, bool, True),
+                           range_noise_stddev_m=noise_m,
+                           range_noise_stddev_fraction=noise_fraction,
                            unreal_properties=passthrough)
 
     raise ConfigError(f"{path}: 'type' must be 'camera' or 'lidar', got {kind!r}")
