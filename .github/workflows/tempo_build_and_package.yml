@@ -43,11 +43,11 @@ jobs:
       allow_unsafe_pr_checkout: true
       gen_rust_api: true
       gen_cpp_api: true
-      # The reflected API's test jobs below need it in the package; a package without them is
-      # a failure here, not four misleading ones there.
+      # The reflected API's tests below need it in the package; a package without them is
+      # a failure here, not several misleading ones there.
       require_reflected_api: true
       automation_test_filter: Tempo.
-      # Upload the packaged build so the Python API test jobs below can fan out against it.
+      # Upload the packaged build for the test jobs below.
       upload_artifact: true
     secrets: inherit
 
@@ -74,16 +74,14 @@ jobs:
       unreal_version: ${{ matrix.unreal_version }}
       cancel_only: true
 
-  # Fan-out (Python): one parallel job per (Unreal version x group). Each downloads the single
-  # packaged artifact produced above, installs the generated tempo-sim wheel from it, launches the
-  # packaged sim headless, and runs that group's pytest markers. Build once, test in parallel.
-  #
-  # NOTE: the "sensors" group is intentionally NOT here — sensor-data APIs need a GPU, and it runs
-  # in the native job (tempo_build_and_test_native.yml) instead. To run it here too, add "sensors" to the matrix below AND give
-  # it a GPU runner + render:true (e.g. via matrix `include`), since this matrix's jobs run on the
-  # GPU-less default runner.
-  test_packaged_python_api:
-    name: Test Packaged Python API
+  # One job per Unreal version runs every group, in sequence, against the package built above. A group
+  # takes a minute or two, and a job's checkout, 1.3 GB download and toolchain setup about as long, so a
+  # job per group spent most of its time setting up. It is still a job of its own, so a flaky group
+  # reruns against the uploaded package instead of rebuilding it. The groups are the native jobs'
+  # (tempo_build_and_test_native.yml), less sensors, which needs a GPU these runners don't have. The
+  # socket line covers the transport; the API behavior it exercises is python-core's.
+  test_packaged:
+    name: Test Packaged APIs
     needs: build_and_package
     permissions:
       contents: read
@@ -91,111 +89,57 @@ jobs:
       fail-fast: false
       matrix:
         unreal_version: [ "5.7", "5.8" ]
-        group: [ "contract", "core", "world", "movement" ]
-        # The codegen group tests this repository's own tooling -- the reflected API generators for
-        # all three clients, the runtime that serves the Python one, and the schema tools -- against
-        # a fixture schema. It needs no sim, so one entry rather than one per engine version:
-        # nothing it checks depends on the engine. It rides this job to inherit the fork-PR gating
-        # and checkout handling below; from the artifact it takes only the tempo-sim wheel, for the
-        # generated proto modules a checkout lacks until it has been built.
-        include:
-          - unreal_version: "5.8"
-            group: "codegen"
     uses: ./.github/workflows/test_packaged.yml
     with:
       # Must match the name build_and_package.yml uploads:
       # "<repo>-<platform>-<unreal_version>-<release_id>", with release_id defaulting to the sha.
       artifact_name: ${{ format('{0}-ubuntu-24.04-{1}-{2}', github.event.repository.name, matrix.unreal_version, github.sha) }}
-      name: python-${{ matrix.group }}
-      test_command: Scripts/TestPythonAPI.sh ${{ matrix.group }}
+      name: api
+      test_commands: |
+        python-contract: Scripts/TestPythonAPI.sh contract
+        python-core: Scripts/TestPythonAPI.sh core
+        python-world: Scripts/TestPythonAPI.sh world
+        python-movement: Scripts/TestPythonAPI.sh movement
+        python-core-socket: TEMPO_SERVER_SOCKET=$TEMPO_CI_SOCKET Scripts/TestPythonAPI.sh core
+        rust-contract: Scripts/TestRustAPI.sh contract
+        rust-integration: Scripts/TestRustAPI.sh integration
+        rust-typed: Scripts/TestRustAPI.sh typed
+        cpp-contract: Scripts/TestCppAPI.sh contract
+        cpp-integration: Scripts/TestCppAPI.sh integration
+        cpp-typed: Scripts/TestCppAPI.sh typed
       unreal_version: ${{ matrix.unreal_version }}
       runner: ubuntu-24.04
-      # The Rust half of the codegen group compiles what the Rust generator emits, and skips
-      # without cargo; the other groups have no use for it.
-      setup_rust: ${{ matrix.group == 'codegen' }}
-      # Its C++ half compiles and links against the packaged C++ client, which on Linux takes clang
-      # and libc++ (cpp_api_template/TempoConfig.cmake).
-      apt_packages: ${{ matrix.group == 'codegen' && 'clang libc++-dev libc++abi-dev' || '' }}
+      setup_rust: true
+      # On Linux the C++ client is compiled with clang against libc++, the standard library the
+      # shared tempogrpc library is built with.
+      apt_packages: clang libc++-dev libc++abi-dev
       checkout_path: TempoSample/Plugins/Tempo
       allow_unsafe_pr_checkout: true
       # Gate fork PRs behind manual approval, same as the build job (this job runs PR code).
       environment: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository && 'fork-pr-environment' || '' }}
     secrets: inherit
 
-  # Fan-out (Unix domain socket): the same artifact and the same tests, with the sim listening on a
-  # socket instead of a port. One group is enough to cover the transport itself - the API behavior
-  # it exercises is already covered by the port-based jobs above.
-  test_packaged_socket_transport:
-    name: Test Packaged Socket Transport
+  # The codegen group tests this repository's own tooling -- the reflected API generators for all three
+  # clients, the runtime that serves the Python one, and the schema tools -- against a fixture schema.
+  # It needs no sim, so one job rather than one per engine version: nothing it checks depends on the
+  # engine. Not a line of the job above because it is the slowest group (~9 minutes) and would set that
+  # job's pace. From the artifact it takes only the tempo-sim wheel, for the generated proto modules a
+  # checkout lacks until it has been built.
+  test_codegen:
+    name: Test Codegen
     needs: build_and_package
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        unreal_version: [ "5.7", "5.8" ]
     uses: ./.github/workflows/test_packaged.yml
     with:
-      artifact_name: ${{ format('{0}-ubuntu-24.04-{1}-{2}', github.event.repository.name, matrix.unreal_version, github.sha) }}
-      name: python-core-socket
-      test_command: Scripts/TestPythonAPI.sh core
-      # Short on purpose: an AF_UNIX path cannot exceed ~104 bytes.
-      server_socket: /tmp/tempo-ci.sock
-      unreal_version: ${{ matrix.unreal_version }}
+      artifact_name: ${{ format('{0}-ubuntu-24.04-5.8-{1}', github.event.repository.name, github.sha) }}
+      name: python-codegen
+      test_command: Scripts/TestPythonAPI.sh codegen
+      unreal_version: "5.8"
       runner: ubuntu-24.04
-      checkout_path: TempoSample/Plugins/Tempo
-      allow_unsafe_pr_checkout: true
-      environment: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository && 'fork-pr-environment' || '' }}
-    secrets: inherit
-
-  # Fan-out (Rust): the same artifact, the same sim, exercised through the generated Rust client.
-  # "contract" compiles the crate (surface check, no sim); "integration" runs against a live sim;
-  # "typed" drives the reflected API, whose crate the packaged build has to contain --
-  # which it does, because the package job sets TEMPO_GEN_RUST_API.
-  test_packaged_rust_api:
-    name: Test Packaged Rust API
-    needs: build_and_package
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        unreal_version: [ "5.7", "5.8" ]
-        group: [ "contract", "integration", "typed" ]
-    uses: ./.github/workflows/test_packaged.yml
-    with:
-      artifact_name: ${{ format('{0}-ubuntu-24.04-{1}-{2}', github.event.repository.name, matrix.unreal_version, github.sha) }}
-      name: rust-${{ matrix.group }}
-      test_command: Scripts/TestRustAPI.sh ${{ matrix.group }}
-      unreal_version: ${{ matrix.unreal_version }}
-      runner: ubuntu-24.04
-      python_version: ''     # Rust groups don't need Python
+      # The Rust half compiles what the Rust generator emits, and skips without cargo; the C++ half
+      # compiles and links against the packaged C++ client, which on Linux takes clang and libc++.
       setup_rust: true
-      checkout_path: TempoSample/Plugins/Tempo
-      allow_unsafe_pr_checkout: true
-      environment: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository && 'fork-pr-environment' || '' }}
-    secrets: inherit
-
-  test_packaged_cpp_api:
-    name: Test Packaged C++ API
-    needs: build_and_package
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        unreal_version: [ "5.7", "5.8" ]
-        group: [ "contract", "integration", "typed" ]
-    uses: ./.github/workflows/test_packaged.yml
-    with:
-      artifact_name: ${{ format('{0}-ubuntu-24.04-{1}-{2}', github.event.repository.name, matrix.unreal_version, github.sha) }}
-      name: cpp-${{ matrix.group }}
-      test_command: Scripts/TestCppAPI.sh ${{ matrix.group }}
-      unreal_version: ${{ matrix.unreal_version }}
-      runner: ubuntu-24.04
-      python_version: ''     # C++ groups need only cmake and a compiler
-      # On Linux the C++ client is compiled with clang against libc++, the standard library the
-      # shared tempogrpc library is built with.
       apt_packages: clang libc++-dev libc++abi-dev
       checkout_path: TempoSample/Plugins/Tempo
       allow_unsafe_pr_checkout: true

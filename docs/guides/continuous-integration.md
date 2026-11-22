@@ -37,10 +37,12 @@ minute or two, and is never published.
 
 ## Running the test suites
 
-`tempo_build_and_package.yml` builds and packages **once**, uploads the artifact, then fans out to
-the reusable `test_packaged.yml` — parallel jobs per (Unreal version × test group), across both the
-Python and Rust clients. Each job downloads the same artifact, so the expensive build runs once
-while tests run in parallel.
+`tempo_build_and_package.yml` builds and packages **once**, uploads the artifact, then calls the
+reusable `test_packaged.yml` once per Unreal version. That job downloads the artifact and runs
+every Python, Rust and C++ test group in sequence (its `test_commands`), reporting each group in
+the job summary; one failing group doesn't stop the rest. The tests are a job of their own, so a
+flaky one can be rerun without rebuilding the package. The `codegen` group, which needs no sim,
+runs in a job beside them.
 
 [:octicons-arrow-right-24: Testing](testing.md)
 

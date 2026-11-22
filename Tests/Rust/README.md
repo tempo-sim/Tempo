@@ -1,8 +1,8 @@
 # Tempo Rust API tests
 
 The Rust analog of `Tests/Python/` — end-to-end tests for the generated `tempo-sim` **Rust** client
-(tonic/prost), run against a **packaged** Tempo build. They run as a parallel fan-out dimension
-alongside the Python tests in CI.
+(tonic/prost), run against a **packaged** Tempo build. In CI they run in the same
+job as the Python tests, against the same package.
 
 ## Groups
 

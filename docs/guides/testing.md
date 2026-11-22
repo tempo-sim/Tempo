@@ -31,7 +31,7 @@ the packaged launcher, and runs pytest. JUnit reports land in `Saved/PythonTestR
 
 ### Groups
 
-Each pytest marker is also a CI fan-out group.
+Each pytest marker is also a CI test group.
 
 | Marker | Needs a running sim? | Covers |
 |---|---|---|
@@ -98,8 +98,9 @@ cargo log to `Saved/RustTestReport/`.
 ## Testing your own project's API
 
 `test_packaged.yml` is language-agnostic and reusable by downstream projects. To test your own
-project's custom API surface, call it with your own `test_command` — for example, reusing this
-runner but pointing it at your tests:
+project's custom API surface, call it with your own `test_command`, or a `test_commands` list of
+`<name>: <command>` lines to run several groups in one job — for example, reusing this runner but
+pointing it at your tests:
 
 ```bash
 TEMPO_PYTHON_TESTS_DIR=Tests/Python Plugins/Tempo/Scripts/TestPythonAPI.sh core

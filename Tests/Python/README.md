@@ -6,7 +6,8 @@ pure in-engine logic; this suite covers the client-facing API contract and behav
 
 ## Groups (pytest markers)
 
-Each marker is also a CI fan-out group — see `.github/workflows/test_packaged.yml`.
+Each marker is also a CI test group — a `test_commands` line in
+`.github/workflows/tempo_build_and_package.yml`.
 
 | Marker | Needs running sim? | Covers |
 |---|---|---|
@@ -19,8 +20,8 @@ Each marker is also a CI fan-out group — see `.github/workflows/test_packaged.
 
 > The `sensors` group renders, so it only runs when explicitly selected (`-m sensors`) with
 > `TEMPO_SIM_RENDER=1` on a GPU-capable machine. In CI that is the native job's `python-sensors`
-> entry in `tempo_build_and_test_native.yml`; the Linux fan-out jobs run on GPU-less runners and would
-> need a GPU `runner` and `render: true` to run it too.
+> entry in `tempo_build_and_test_native.yml`; the Linux test jobs run on GPU-less runners, so running it
+> there too needs a job of its own with a GPU `runner` and `render: true`.
 
 > The `codegen` group tests the working tree, not a shipped client. **Run it through
 > `Scripts/TestPythonAPI.sh codegen`, never `pytest` directly:** the runner reinstalls the in-tree
@@ -63,10 +64,11 @@ as a CI artifact) so startup failures can be diagnosed.
 
 ## In CI
 
-`tempo_build_and_package.yml` builds and packages once (uploading the artifact), then fans out
-to the reusable `test_packaged.yml` — parallel jobs per (Unreal version × group), across both the
-Python and Rust clients (see `Tests/Rust/`). Each job downloads the same artifact, so the
-expensive build runs once while the tests run in parallel.
+`tempo_build_and_package.yml` builds and packages once (uploading the artifact), then calls the
+reusable `test_packaged.yml` once per Unreal version, which runs every group of the Python, Rust
+(see `Tests/Rust/`) and C++ clients in sequence against that artifact. A failing group doesn't stop
+the others, and since the tests are their own job, a flaky one reruns without a rebuild. `codegen`
+runs in a job of its own.
 
 `test_packaged.yml` is language-agnostic and reusable by downstream projects. To test your own
 project's custom API surface, call it with your own `test_command` — e.g. reuse this runner but

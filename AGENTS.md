@@ -458,15 +458,18 @@ sim (not the editor). They cover the client-facing API contract and behavior ove
   project's own client installs too — / `Packaged/API/Rust/tempo-sim`), and run the group. Reports
   → `TEMPO_TEST_REPORT_DIR` (default `Saved/{Python,Rust}TestReport`). **Package first**
   (`Scripts/Package.sh`; Rust needs `TEMPO_GEN_RUST_API=1`).
-- **CI (fan-out):** `tempo_build_and_package.yml` sets `upload_artifact: true` (package built &
-  uploaded once), then `test_packaged_python_api`, `test_packaged_rust_api` and `test_packaged_cpp_api` matrix jobs (Unreal
-  version × group) both call the **generic, reusable** `test_packaged.yml`. Each job downloads the
-  same artifact and runs one group in parallel — build once, test many.
-  `test_packaged_socket_transport` re-runs the Python `core` group with the sim on a Unix domain
-  socket (`server_socket:` → `TEMPO_SERVER_SOCKET`), covering the transport without duplicating
-  behavior tests.
+- **CI:** `tempo_build_and_package.yml` sets `upload_artifact: true` (package built & uploaded
+  once), then a `test_packaged` job per Unreal version runs every Python, Rust and C++ group in
+  sequence against it, through the **generic, reusable** `test_packaged.yml` and its
+  `test_commands` list — the same list format, and the same groups less `sensors`, as the native
+  job's. One job per engine rather than per group: a group takes a minute or two and a job's setup
+  (checkout, 1.3 GB download, toolchains) about as long. Still separate from the build, so a flaky
+  group reruns without a rebuild. The `python-core-socket` line re-runs `core` with the sim on a
+  Unix domain socket (`TEMPO_SERVER_SOCKET=$TEMPO_CI_SOCKET`), covering the transport without
+  duplicating behavior tests. `codegen` is its own `test_codegen` job: it is the slowest group and
+  needs no sim or engine version.
 - **`test_packaged.yml` is language-agnostic and reusable by downstream projects.** It takes a
-  `test_command`, optional `python_version` / `setup_rust` / `render`, `submodules`, and an
+  `test_command` or a `test_commands` list, optional `python_version` / `setup_rust` / `render`, `submodules`, and an
   `environment` gate, and exports a fixed env contract (`TEMPO_PACKAGED_DIR`, `TEMPO_SERVER_PORT`,
   `TEMPO_SERVER_SOCKET`, `TEMPO_SIM_RENDER`, `TEMPO_TEST_REPORT_DIR`, …). The harness and all three
   clients read those endpoint variables, so one of them points a sim and its client at the same
@@ -477,9 +480,9 @@ sim (not the editor). They cover the client-facing API contract and behavior ove
 **Still absent:** functional/agents/ROS tests, and the GPU-gated `sensors` group anywhere but the
 native job (`python-sensors` in its `test_commands`; the machines there have GPUs), so not on Linux
 or Windows. Adding a new behavior test = a new marker (Python) or `tests/*.rs` (Rust); a brand-new
-group also needs a matrix entry in `tempo_build_and_package.yml` (and, for Python, a line in
-`pytest.ini`). Running `sensors` in a fan-out job means a GPU `runner` + `render: true` on that
-matrix entry.
+group also needs a `test_commands` line in `tempo_build_and_package.yml` and
+`tempo_build_and_test_native.yml` (and, for Python, a line in `pytest.ini`). Running `sensors` on
+a hosted runner means a job of its own with a GPU `runner` + `render: true`.
 
 ---
 
