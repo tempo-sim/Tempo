@@ -56,7 +56,7 @@ def _camera_views(sensors, active):
     return per_camera
 
 
-def _world_view(sensors, active, images_in_3d, follow_entity) -> rrb.Spatial3DView:
+def _world_view(sensors, active, images_in_3d, follow_entity, frustums_in_3d=True) -> rrb.Spatial3DView:
     # Following an entity means making it the view's origin: rerun renders a view in its origin's
     # frame, so the camera rides along with it. Contents stay the whole world, named absolutely.
     origin = follow_entity or conv.WORLD
@@ -70,20 +70,48 @@ def _world_view(sensors, active, images_in_3d, follow_entity) -> rrb.Spatial3DVi
             if sensor is not None and sensor.is_camera:
                 entity = sensor.entity_path
                 contents += [f"- /{entity}/{child}" for child in _IMAGE_CHILDREN]
-    return rrb.Spatial3DView(name="World", origin=origin, contents=contents)
+    # A camera's frustum is its Pinhole: on <entity>/pinhole, or on the entity itself when images are
+    # drawn on it (see tempo_rerun.loggers.image). Leaving those entities out hides the frustum.
+    # (Transforms still apply to everything below them: the hierarchy isn't view contents.)
+    if not frustums_in_3d:
+        for key in active:
+            sensor = sensors.get(key)
+            if sensor is not None and sensor.is_camera:
+                contents += [f"- /{sensor.entity_path}", f"- /{sensor.entity_path}/pinhole"]
+    return rrb.Spatial3DView(name="World", origin=origin, contents=contents,
+                             eye_controls=_follow_eye() if follow_entity else None)
+
+
+# Where the eye sits relative to the followed entity's origin, in its frame (x forward, y left, z
+# up, meters): behind and above, looking at the origin.
+FOLLOW_EYE_POSITION = (-18.0, 0.0, 9.0)
+
+
+def _follow_eye():
+    """An eye looking at the followed entity's origin -- for an actor, its pivot, which for a car is
+    at the bottom. Without one, rerun aims the eye at the middle of the view's bounding box, which
+    in a city is far above the street: the lidar reaches tens of meters up building faces and
+    nothing below the road. Setting the look target needs a rerun whose EyeControls3D has it (0.43
+    does; 0.26 doesn't); with an older one the view keeps rerun's own framing."""
+    try:
+        return rrb.archetypes.EyeControls3D(position=FOLLOW_EYE_POSITION, look_target=(0.0, 0.0, 0.0),
+                                            eye_up=(0.0, 0.0, 1.0))
+    except TypeError:
+        return None
 
 
 def build_blueprint(sensors: Iterable, active: dict, *, images_in_3d: bool = False,
                     follow_entity: Optional[str] = None, extra_views=(),
-                    column_per_camera: bool = False) -> rrb.Blueprint:
+                    column_per_camera: bool = False, frustums_in_3d: bool = True) -> rrb.Blueprint:
     """`sensors`: SensorInfo-likes (``.key``, ``.owner``, ``.name``, ``.is_camera``).
     `follow_entity`: an entity (e.g. the ego's ground-truth entity) the 3D view rides along with.
+    `frustums_in_3d`: draw each camera's frustum in the 3D view.
     `extra_views`: more views for the right-hand column (e.g. a time series).
     `column_per_camera`: lay the camera views out one column per camera, its image kinds stacked
     down it (color, label, depth) and so lined up across cameras, instead of packing every view
     into one auto-sized grid."""
     by_key = _by_key(sensors)
-    world_view = _world_view(by_key, active, images_in_3d, follow_entity)
+    world_view = _world_view(by_key, active, images_in_3d, follow_entity, frustums_in_3d)
 
     per_camera = _camera_views(by_key, active)
     if column_per_camera and per_camera:

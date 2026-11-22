@@ -5,8 +5,12 @@
 Every measurement carries ``header.capture_transform`` (the sensor's world pose
 at capture time, in the right-handed proto frame) and ``header.capture_time_s``,
 so each frame is placed in the 3D world and on the sim timeline independently.
-A Pinhole (built from the camera's FOV) is logged once so the image projects
-into the 3D view as a frustum.
+A Pinhole (built from the camera's FOV) is logged once, drawn in the 3D view as the camera's
+frustum. It goes on a child of the camera's entity, ``<entity>/pinhole``, not on the entity itself:
+rerun (0.43) draws a camera's images over its 2D boxes in a 2D view whose origin holds a Pinhole,
+whatever the draw order. With ``pinhole_on_entity`` it goes on the entity instead, which is what
+projects the images onto the frustum in the 3D view (RerunPlayground's --images-in-3d), at the cost
+of the 2D boxes.
 
 Every stream takes the same two optional hooks:
 
@@ -48,11 +52,17 @@ def _with_taps(log, visualize, taps):
     return handle
 
 
+def pinhole_entity(entity: str) -> str:
+    """Where a camera's Pinhole (its frustum) is logged, by default."""
+    return f"{entity}/pinhole"
+
+
 class _CameraFrame:
     """Holds per-camera state (whether the static Pinhole has been logged yet)."""
 
-    def __init__(self, entity, fov_deg):
+    def __init__(self, entity, fov_deg, pinhole_on_entity=False):
         self.entity = entity
+        self.pinhole_entity = entity if pinhole_on_entity else pinhole_entity(entity)
         self.fov_deg = fov_deg
         self._pinhole_logged = False
 
@@ -62,7 +72,7 @@ class _CameraFrame:
         # Horizontal FOV -> focal length in pixels. Square pixels assumed.
         fx = (width * 0.5) / math.tan(math.radians(self.fov_deg) * 0.5)
         rr.log(
-            self.entity,
+            self.pinhole_entity,
             rr.Pinhole(
                 focal_length=[fx, fx],
                 principal_point=[width * 0.5, height * 0.5],
@@ -92,9 +102,10 @@ def label_array(image) -> np.ndarray:
     return np.frombuffer(image.data, dtype=np.uint8).reshape(image.height_px, image.width_px)
 
 
-async def stream_color(sensor, *, visualize=True, taps=()):
+async def stream_color(sensor, *, visualize=True, taps=(), pinhole_on_entity=False):
+    """`pinhole_on_entity`: see the module docstring (images on the 3D frustum, no 2D boxes)."""
     entity = sensor.entity_path
-    cam = _CameraFrame(entity, sensor.fov_deg)
+    cam = _CameraFrame(entity, sensor.fov_deg, pinhole_on_entity)
 
     def log(image):
         _log_pose(entity, image.header)
@@ -171,7 +182,7 @@ async def stream_bbox(sensor, *, classes=None, visualize=True, taps=()):
                _with_taps(log, visualize, taps), label=f"{sensor.key}:bbox")
 
 
-async def stream_video(sensor, *, visualize=True, taps=()):
+async def stream_video(sensor, *, visualize=True, taps=(), pinhole_on_entity=False):
     """Decode the camera's H.264 stream client-side (PyAV) and log RGB frames.
 
     Used instead of `stream_color` when --stream-video is set. Saves server
@@ -182,7 +193,7 @@ async def stream_video(sensor, *, visualize=True, taps=()):
     import av  # pyright: ignore[reportMissingImports]  # optional; only needed for --stream-video
 
     entity = sensor.entity_path
-    cam = _CameraFrame(entity, sensor.fov_deg)
+    cam = _CameraFrame(entity, sensor.fov_deg, pinhole_on_entity)
     codec_ctx = av.codec.CodecContext.create("h264", "r")  # pyright: ignore[reportAttributeAccessIssue]
     state = {"seen_key": False}
 

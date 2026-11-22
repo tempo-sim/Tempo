@@ -167,10 +167,13 @@ class TempoRerunClient:
         name = f"{sensor.key}:{kind}"
         if name in self.tasks:
             return
+        # Images drawn on their 3D frustums need the Pinhole on the camera's entity, which costs
+        # the 2D boxes their visibility (see tempo_rerun.loggers.image).
+        on_entity = bool(self.cfg.images_in_3d)
         if kind == "color":
-            coro = image_logger.stream_color(sensor)
+            coro = image_logger.stream_color(sensor, pinhole_on_entity=on_entity)
         elif kind == "video":
-            coro = image_logger.stream_video(sensor)
+            coro = image_logger.stream_video(sensor, pinhole_on_entity=on_entity)
         elif kind == "depth":
             coro = image_logger.stream_depth(sensor)
         elif kind == "label":

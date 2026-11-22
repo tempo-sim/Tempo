@@ -135,8 +135,10 @@ class Session:
 
     def _blueprint(self, mounted: MountedRig):
         # One column per camera, its color (with 2D boxes), label and depth stacked down it.
+        # No frustums in the 3D view: a rig's cameras sit together on the roof, and their frustums
+        # only clutter the lidar.
         return build_blueprint(mounted.infos, self._active(mounted), follow_entity=EGO_ENTITY,
-                               column_per_camera=True)
+                               column_per_camera=True, frustums_in_3d=False)
 
     def start_viewer(self) -> None:
         _compat.init(self.args.app_id)
