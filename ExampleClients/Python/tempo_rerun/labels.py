@@ -19,7 +19,12 @@ import tempo_sim.tempo_sensors as ts
 
 
 class LabelRemap:
-    def __init__(self):
+    def __init__(self, fixed_ids=()):
+        """`fixed_ids`: ids that always map to themselves, whatever the labeler's map says. The
+        labeler reserves every class's label as an instance id meaning the whole class, but its map
+        lists only ids some labeled object holds. A stuff class with nothing loaded, or one reached
+        only through a per-pixel label override, would otherwise read as unlabeled."""
+        self._fixed = [i for i in fixed_ids if 0 < i < 256]
         # Identity until the first refresh: an unknown instance maps to itself, which in Semantic
         # mode is exactly right.
         self._lut = np.arange(256, dtype=np.uint8)
@@ -35,6 +40,7 @@ class LabelRemap:
     def set_mapping(self, pairs) -> None:
         """Replace the mapping from an iterable of (instance_id, semantic_id)."""
         lut = np.zeros(256, dtype=np.uint8)
+        lut[self._fixed] = self._fixed
         for instance_id, semantic_id in pairs:
             if 0 <= instance_id < 256:
                 lut[instance_id] = semantic_id

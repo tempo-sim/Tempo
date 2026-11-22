@@ -169,8 +169,12 @@ kinds:
 
 - **Sky reads as `unlabeled` (0).** CitySample draws its sky with a sky atmosphere, which is not a
   mesh, so the `sky` rule (`SM_SkySphere`) has nothing to match. Treat 0 as sky/background.
-- **Lane markings read as `road`.** The `SM_DECAL` meshes are decal materials, which don't write
-  custom depth, so the road beneath them shows through.
+- **Road markings need a material edit.** CitySample's street markings (lines, arrows, painted text)
+  are deferred decals on the `SM_DECAL` meshes, which write no custom depth, so they can't be labeled
+  by mesh. The road material (`M_Freeway_Asphalt`) composites them itself, though, and is edited to
+  write Subsurface Color wherever a decal brightens the asphalt; `label_override` in `labels.json`
+  has the client call `SetLabelRowOverrides` so that any `road` pixel carrying one is
+  `road_marking`. Without that edit the call does nothing, and markings read as `road`.
 - **Things can still run out of ids** in a dense scene, more than ~240 vehicles and people labeled
   at once. Ids are then shared, and boxes of two objects with one id merge.
 

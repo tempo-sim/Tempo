@@ -32,7 +32,7 @@ from tempo_rerun.loggers import world as world_logger
 from tempo_rerun.streaming import STATS
 
 from . import ego as ego_mod
-from .config import RigConfig, load_box_classes, load_rig, load_vehicles, load_labels
+from .config import RigConfig, load_box_classes, load_label_override, load_rig, load_vehicles, load_labels
 from .labels import LabelManager
 from .recorder import Recorder
 from .rig import MountedRig, mount_rig
@@ -79,9 +79,11 @@ class Session:
         self.rng = random.Random(args.seed)
         self.catalog = load_vehicles()
         classes = load_labels()
-        self.labels = LabelManager(classes, label_type=args.label_type)
+        self.labels = LabelManager(classes, label_type=args.label_type,
+                                   label_override=load_label_override(classes))
         # Instance mode: the images and lidar carry instance ids, mapped back to classes client-side.
-        self.remap: Optional[LabelRemap] = LabelRemap() if args.label_type == "instance" else None
+        self.remap: Optional[LabelRemap] = (LabelRemap(fixed_ids=self.labels.fixed_ids)
+                                            if args.label_type == "instance" else None)
         # The classes that get boxes, 2D and 3D, and the class of each actor, for the 3D ones.
         self.box_ids = frozenset(c.id for c in load_box_classes(classes))
         self.actor_labels = ActorLabels()

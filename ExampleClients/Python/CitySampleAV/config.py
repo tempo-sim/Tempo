@@ -314,6 +314,39 @@ def load_box_classes(classes: List[LabelClass], path: Path = CONFIG_DIR / "label
     return [by_name[n] for n in names]
 
 
+@dataclass
+class LabelOverride:
+    """labels.json's `label_override`: the class whose pixels a material may relabel through its
+    subsurface color, and the class they become. Both are row names in the label table."""
+    overridable: LabelClass
+    overriding: LabelClass
+
+
+def load_label_override(classes: List[LabelClass],
+                        path: Path = CONFIG_DIR / "labels.json") -> Optional[LabelOverride]:
+    """The `label_override` pair, or None when labels.json has none."""
+    data = _load(path)
+    entry = _get(data, "label_override", path, dict, None)
+    if entry is None:
+        return None
+    by_name = {c.name: c for c in classes}
+    picked = []
+    for key in ("overridable", "overriding"):
+        name = _get(entry, key, path, str, where=".label_override")
+        if name not in by_name:
+            raise ConfigError(f"{path}.label_override: '{key}' names a class that isn't defined: {name!r}")
+        # The sim compares the stencil to the overridable row's label, and writes the overriding row's
+        # label in its place. In Instance mode the stencil holds an instance id, which equals the
+        # label only for a stuff class -- so a thing would never match, or would read as an object.
+        if by_name[name].instanced:
+            raise ConfigError(f"{path}.label_override: '{key}' class {name!r} must be stuff "
+                              f"(\"instanced\": false)")
+        picked.append(by_name[name])
+    if picked[0] is picked[1]:
+        raise ConfigError(f"{path}.label_override: 'overridable' and 'overriding' are the same class")
+    return LabelOverride(overridable=picked[0], overriding=picked[1])
+
+
 def load_labels(path: Path = CONFIG_DIR / "labels.json") -> List[LabelClass]:
     import re
     data = _load(path)

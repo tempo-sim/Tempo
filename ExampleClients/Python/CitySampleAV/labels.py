@@ -26,6 +26,13 @@ them. The "things" (vehicles, pedestrians) get the remaining ids. The semantic i
 from the instance image with the labeler's instance -> semantic map, exactly for stuff, and for a
 thing as soon as the client's copy of the map has caught up with a newly labeled object (it is
 refreshed twice a second). ``--label-type semantic`` streams semantic ids directly, without boxes.
+
+Road markings can't be labeled by mesh: they are deferred decals, which write no stencil. But the
+road material composites them itself, and is edited to write where a decal brightens the asphalt to
+Subsurface Color; ``SetLabelRowOverrides`` (labels.json's ``label_override``) tells the sensors to
+relabel road pixels carrying one as ``road_marking``. No labeled object holds that class, so the
+labeler's instance -> semantic map never lists its id; ``fixed_ids`` is what keeps the client's
+remap from reading those pixels as unlabeled.
 """
 
 import asyncio
@@ -38,7 +45,7 @@ import tempo_sim.tempo_sensors as ts
 import tempo_sim.TempoSensors.Labels_pb2 as Labels
 from tempo_sim.unreal import registered_classes
 
-from .config import LabelClass
+from .config import LabelClass, LabelOverride
 
 EGO_TAG = "TempoEgo"
 
@@ -51,9 +58,11 @@ class _CompiledClass:
 
 
 class LabelManager:
-    def __init__(self, classes: List[LabelClass], label_type: str = "instance"):
+    def __init__(self, classes: List[LabelClass], label_type: str = "instance",
+                 label_override: Optional[LabelOverride] = None):
         self.classes = classes
         self.label_type = label_type
+        self.label_override = label_override
         self._compiled = [_CompiledClass(c, [re.compile(p) for p in c.static_mesh_patterns],
                                          [re.compile(p) for p in c.skeletal_mesh_patterns])
                           for c in classes]
@@ -77,6 +86,14 @@ class LabelManager:
             if EGO_TAG in c.actor_tags:
                 return c.id
         return None
+
+    @property
+    def fixed_ids(self) -> List[int]:
+        """The ids that mean their class in Instance mode whatever the instance map says: every stuff
+        class's. The labeler reserves each class's label as an instance id, but its map lists only
+        ids some labeled object holds -- not a class reached only through the label override, nor a
+        stuff class with nothing loaded yet."""
+        return [c.id for c in self.classes if not c.instanced]
 
     def annotation_infos(self) -> List[Tuple[int, str, Tuple[int, int, int]]]:
         """(id, name, color) per class, for rerun's AnnotationContext."""
@@ -150,10 +167,22 @@ class LabelManager:
             for row in rows:
                 row.pop("bInstanced", None)
             await ts.load_label_table(json=json.dumps(rows))
+        await self._set_label_override()
         await ts.set_label_type(label_type=Labels.LT_INSTANCE if self.label_type == "instance"
                                 else Labels.LT_SEMANTIC)
         print(f"  Label table: {len(self.classes)} classes, {len(self._assigned)} of "
               f"{len(meshes)} loaded meshes matched ({self.label_type} labels).")
+
+    async def _set_label_override(self) -> None:
+        """Name the override pair, or clear it. The sim holds the row names apart from the table and
+        keeps them across loads, so this follows every load -- and clears whatever an earlier run
+        set when labels.json has no pair. Rows are the classes' names (see install)."""
+        o = self.label_override
+        await ts.set_label_row_overrides(overridable_row_name=o.overridable.name if o else "",
+                                         overriding_row_name=o.overriding.name if o else "")
+        if o:
+            print(f"  Label override: '{o.overridable.name}' pixels with a subsurface color are "
+                  f"'{o.overriding.name}'.")
 
     async def sync_meshes(self) -> int:
         """Assign classes to meshes streamed in since the last call. Returns how many."""

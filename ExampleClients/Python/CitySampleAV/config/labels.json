@@ -26,9 +26,17 @@
     "box_classes: the classes drawn and recorded with boxes. 2D boxes are Tempo's: per instance id, the",
     "extent of its visible pixels. 3D boxes come from actors (pose and bounds), so only classes whose",
     "objects are actors have them. One component is one instance, so cars or people drawn by one",
-    "instanced-mesh component (Mass's distant traffic and crowds) share a single id and a single box."
+    "instanced-mesh component (Mass's distant traffic and crowds) share a single id and a single box.",
+    "",
+    "label_override: per-pixel relabeling by material. Wherever an object of the 'overridable' class has",
+    "a non-zero subsurface color, its pixels get the 'overriding' class instead. CitySample's street markings",
+    "are deferred decals, which the road material (M_Freeway_Asphalt) composites itself; edited to write",
+    "where a decal brightens the asphalt to Subsurface Color, it is what makes painted lines, arrows and text",
+    "'road_marking' rather than 'road'. Both must be stuff classes: in Instance mode the stencil holds an",
+    "instance id, and only a stuff class's id is the same as its label. Remove the key to turn it off."
   ],
-  "box_classes": ["car", "van", "truck", "bus", "vehicle_other", "pedestrian"],
+  "label_override": { "overridable": "road", "overriding": "road_marking" },
+  "box_classes":["car", "van", "truck", "bus", "vehicle_other", "pedestrian"],
   "classes": [
     { "id": 1,  "name": "road", "instanced": false, "color": [128, 64, 128],
       "static_mesh_patterns": ["^/Game/Road/Kit_City_Road/", "^/Game/Road/Kit_Freeway", "/SM_INTER_",
