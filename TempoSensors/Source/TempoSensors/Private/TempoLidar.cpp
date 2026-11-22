@@ -700,6 +700,62 @@ void SelectLidarReturns(ETempoLidarReturnMode Mode, const FTempoLidarEcho& Surfa
 	}
 }
 
+namespace
+{
+	// pcg3d, from Jarzynski and Olano, "Hash Functions for GPU Rendering" (JCGT 2020): a hash of
+	// three words into three, good enough that adjacent inputs (neighboring beams) give
+	// uncorrelated outputs.
+	void Pcg3d(uint32& X, uint32& Y, uint32& Z)
+	{
+		X = X * 1664525u + 1013904223u;
+		Y = Y * 1664525u + 1013904223u;
+		Z = Z * 1664525u + 1013904223u;
+		X += Y * Z;
+		Y += Z * X;
+		Z += X * Y;
+		X ^= X >> 16u;
+		Y ^= Y >> 16u;
+		Z ^= Z >> 16u;
+		X += Y * Z;
+		Y += Z * X;
+		Z += X * Y;
+	}
+}
+
+uint32 LidarRangeNoiseStream(int32 Seed, int32 SequenceId, int32 TileIndex)
+{
+	uint32 X = static_cast<uint32>(Seed);
+	uint32 Y = static_cast<uint32>(SequenceId);
+	uint32 Z = static_cast<uint32>(TileIndex);
+	Pcg3d(X, Y, Z);
+	return X;
+}
+
+float LidarRangeNoiseSample(uint32 Stream, uint32 BeamIndex, uint32 EchoIndex)
+{
+	uint32 X = Stream;
+	uint32 Y = BeamIndex;
+	uint32 Z = EchoIndex;
+	Pcg3d(X, Y, Z);
+	// Two uniforms from the top 24 bits of each word, which a float holds exactly. U1 is in (0, 1]
+	// so its log is finite, which bounds a sample at sqrt(2 ln 2^24), about 5.8 standard deviations.
+	constexpr float InvTwoPow24 = 1.0f / 16777216.0f;
+	const float U1 = static_cast<float>((X >> 8u) + 1u) * InvTwoPow24;
+	const float U2 = static_cast<float>(Y >> 8u) * InvTwoPow24;
+	return FMath::Sqrt(-2.0f * FMath::Loge(U1)) * FMath::Cos(UE_TWO_PI * U2);
+}
+
+float ApplyLidarRangeNoise(float Distance, float StdNormalSample, float StdDev, float StdDevFraction,
+	float MinDistance, float MaxDistance)
+{
+	const float Sigma = StdDev + StdDevFraction * Distance;
+	if (Sigma <= 0.0f)
+	{
+		return Distance;
+	}
+	return FMath::Clamp(Distance + Sigma * StdNormalSample, MinDistance, MaxDistance);
+}
+
 ETempoLidarSurfaceFit EstimateLidarSurfaceNormal(const FVector& Center, const FVector* const Neighbors[4],
 	const FVector& ShadingNormal, double SinMaxAngleOfIncidence, FVector& OutNormal)
 {
@@ -842,6 +898,7 @@ namespace
 		const ETempoLidarReturnMode ReturnMode = Read.ReturnMode;
 		const bool bDual = ReturnMode == ETempoLidarReturnMode::Dual;
 		const float MinDetectableIntensity = bMedia ? Read.MinDetectableIntensity : 0.0f;
+		const bool bRangeNoise = Read.RangeNoiseStdDev > 0.0f || Read.RangeNoiseStdDevFraction > 0.0f;
 
 		// The second return's arrays exist only in dual mode; same layouts as the first's. It carries
 		// no colors: both echoes of a beam come from the same pixel, so they would repeat the first's.
@@ -887,7 +944,7 @@ namespace
 		ParallelFor(Read.HorizontalBeams, [&Read, BeamSamples, CosMaxAngleOfIncidence, SinMaxAngleOfIncidence, MaxDistanceWithMargin,
 			ColumnRayStep, RowRayStep, ImageWidth, ImageHeight, InverseCaptureRotation, InverseCaptureScale,
 			DistancesData, IntensitiesData, LabelsData, AzimuthsData, ElevationsData, ReflectivitiesData, ColorsData, ColorEncoding,
-			MediaPixels, ReturnMode, bDual, MinDetectableIntensity,
+			MediaPixels, ReturnMode, bDual, MinDetectableIntensity, bRangeNoise,
 			SecondDistancesData, SecondIntensitiesData, SecondLabelsData, SecondReflectivitiesData](int32 HorizontalBeam)
 		{
 			for (int32 VerticalBeam = 0; VerticalBeam < Read.VerticalBeams; ++VerticalBeam)
@@ -989,11 +1046,32 @@ namespace
 					}
 				}
 
+				const int32 Idx = HorizontalBeam * Read.VerticalBeams + VerticalBeam;
+
+				// Range noise is the sensor's timing error, so it applies to each echo it times,
+				// before it chooses between them: First and Last compare the ranges it measured.
+				// Each echo draws by its kind, not by the slot it is reported in, so which return
+				// mode is set does not change a given echo's noise.
+				if (bRangeNoise)
+				{
+					auto AddRangeNoise = [&Read, Idx](FTempoLidarEcho& Echo, uint32 EchoIndex)
+					{
+						if (Echo.bValid)
+						{
+							Echo.Distance = ApplyLidarRangeNoise(Echo.Distance,
+								LidarRangeNoiseSample(Read.RangeNoiseStream, static_cast<uint32>(Idx), EchoIndex),
+								Read.RangeNoiseStdDev, Read.RangeNoiseStdDevFraction,
+								static_cast<float>(Read.MinDistance), static_cast<float>(Read.MaxDistance));
+						}
+					};
+					AddRangeNoise(Surface, 0u);
+					AddRangeNoise(Medium, 1u);
+				}
+
 				FTempoLidarEcho Primary;
 				FTempoLidarEcho Secondary;
 				SelectLidarReturns(ReturnMode, Surface, Medium, Primary, Secondary);
 
-				const int32 Idx = HorizontalBeam * Read.VerticalBeams + VerticalBeam;
 				// Already negated into the client's right-handed frame, and offset by the tile yaw.
 				AzimuthsData[Idx] = Sample.AzimuthRad;
 				ElevationsData[Idx] = Sample.ElevationRad;
@@ -1439,6 +1517,9 @@ void UTempoLidar::RenderCapture()
 				MinDistance, MaxDistance, Tile.BeamSamples, Tile.ImagePlanePixelStep);
 			Slice->ReturnMode = ReturnMode;
 			Slice->MinDetectableIntensity = MinDetectableIntensity;
+			Slice->RangeNoiseStdDev = RangeNoiseStdDev;
+			Slice->RangeNoiseStdDevFraction = RangeNoiseStdDevFraction;
+			Slice->RangeNoiseStream = LidarRangeNoiseStream(RangeNoiseSeed, SequenceId, static_cast<int32>(&Tile - Tiles));
 			if (bMedia)
 			{
 				Slice->MediaImage.SetNumUninitialized(Tile.SizeXY.X * Tile.SizeXY.Y);

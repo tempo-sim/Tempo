@@ -183,6 +183,22 @@ struct FTempoLidarEcho
 TEMPOSENSORS_API void SelectLidarReturns(ETempoLidarReturnMode Mode, const FTempoLidarEcho& Surface, const FTempoLidarEcho& Medium,
 	FTempoLidarEcho& OutPrimary, FTempoLidarEcho& OutSecondary);
 
+// Range noise is a pure function of where it is drawn, not a stateful generator, so a scan's noise
+// is the same however the decode's ParallelFor schedules its beams, and the same on every run.
+// The stream identifies one tile of one scan of one sensor configuration; within it, each beam's
+// echoes draw independently.
+TEMPOSENSORS_API uint32 LidarRangeNoiseStream(int32 Seed, int32 SequenceId, int32 TileIndex);
+
+// A standard normal sample (mean 0, standard deviation 1) for one echo of one beam, from a PCG hash
+// of its stream, beam and echo index through Box-Muller. Pure, so it can be tested without a lidar.
+TEMPOSENSORS_API float LidarRangeNoiseSample(uint32 Stream, uint32 BeamIndex, uint32 EchoIndex);
+
+// The range an echo at Distance (cm) reports with range noise: Distance plus a normal error whose
+// standard deviation is StdDev (cm) + StdDevFraction * Distance, kept within [MinDistance,
+// MaxDistance] so it never leaves the range the segment reports.
+TEMPOSENSORS_API float ApplyLidarRangeNoise(float Distance, float StdNormalSample, float StdDev, float StdDevFraction,
+	float MinDistance, float MaxDistance);
+
 // How much of a pixel's surface normal EstimateLidarSurfaceNormal could take from the geometry.
 enum class ETempoLidarSurfaceFit : uint8
 {
@@ -481,6 +497,23 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(UIMin=0.0, UIMax=90.0, ClampMin=0.0, ClampMax=90.0))
 	float MaxAngleOfIncidence = 87.5;
 
+	// Standard deviation, in cm, of the Gaussian error added to every reported range (surface and
+	// participating-media echoes alike), modeling the sensor's timing jitter. The error is along the
+	// beam: azimuth and elevation are unchanged. 0 disables range noise. A sensor's datasheet range
+	// accuracy is often quoted as +/- one standard deviation.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="TempoLidar", meta=(UIMin=0.0, UIMax=20.0, ClampMin=0.0))
+	float RangeNoiseStdDev = 0.0f;
+
+	// Range noise that grows with distance: this fraction of the range is added to RangeNoiseStdDev
+	// for each echo's standard deviation. 0.001 adds 1 cm at 10 m.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, AdvancedDisplay, Category="TempoLidar", meta=(UIMin=0.0, UIMax=0.01, ClampMin=0.0))
+	float RangeNoiseStdDevFraction = 0.0f;
+
+	// Seeds the range noise. The noise is reproducible for a given seed and sequence_id; two lidars
+	// with the same configuration need different seeds to draw different noise.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, AdvancedDisplay, Category="TempoLidar")
+	int32 RangeNoiseSeed = 0;
+
 	// Per-beam intrinsic calibration. When non-empty, replaces the uniform VerticalBeams /
 	// VerticalFOV grid. Array length determines the beam count; VerticalFOV is derived
 	// automatically as a symmetric FOV that encloses all configured elevation angles.
@@ -641,6 +674,12 @@ struct TLidarTextureReadBase : TTextureReadBase<PixelType>
 	// The sensor model the decode applies to the media results and the mode it reports in.
 	ETempoLidarReturnMode ReturnMode = ETempoLidarReturnMode::Strongest;
 	float MinDetectableIntensity = 0.0f;
+
+	// Range noise; see UTempoLidar::RangeNoiseStdDev. RangeNoiseStream is LidarRangeNoiseStream for
+	// this read's scan and tile.
+	float RangeNoiseStdDev = 0.0f;
+	float RangeNoiseStdDevFraction = 0.0f;
+	uint32 RangeNoiseStream = 0;
 };
 
 template <>
