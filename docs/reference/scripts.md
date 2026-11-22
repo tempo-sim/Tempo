@@ -122,11 +122,12 @@ your project root works.
 
 `PatchCitySample.sh`
 
-:   In a CitySample project, rewrites the one line of CitySample's source that fails to compile on
-    Clang at `BuildSettingsVersion.V7`. Any other project has none of that source, and it does
-    nothing there. Called by `Setup.sh`; pass `-restore` to undo it.
+:   In a CitySample project, fixes two bugs in CitySample's source on UE 5.8: the line that fails
+    to compile on Clang at `BuildSettingsVersion.V7`, and the Mass calls that crash a packaged game
+    when the player gets into a car. Any other project has none of that source, and it does nothing
+    there. Called by `Setup.sh`; pass `-restore` to undo it.
 
-    [:octicons-arrow-right-24: The CitySample source fix](../guides/citysample.md#patch-citysample)
+    [:octicons-arrow-right-24: The CitySample source fixes](../guides/citysample.md#patch-citysample)
 
 ## Discovery helpers
 

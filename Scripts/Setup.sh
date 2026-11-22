@@ -127,7 +127,7 @@ if [ "$KEEP_FASTGEO" -eq 1 ]; then
 else
   bash "$SCRIPT_DIR/ConfigureProject.sh"
 fi
-# CitySample only: source fixes it needs to compile; see PatchCitySample.sh.
+# CitySample only: source fixes it needs to compile and run; see PatchCitySample.sh.
 bash "$SCRIPT_DIR/PatchCitySample.sh"
 for TARGET_FILE in "$PROJECT_ROOT/Source/"*.Target.cs; do
   [ -f "$TARGET_FILE" ] || continue

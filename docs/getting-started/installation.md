@@ -36,7 +36,7 @@
 
     !!! tip "Adding Tempo to CitySample?"
 
-        CitySample needs two extra things, a one-line source patch and the plugin-name
+        CitySample needs two extra things, two fixes to its source and the plugin-name
         collision, and `Setup.sh` takes care of both. See
         [Tempo + CitySample](../guides/citysample.md).
 

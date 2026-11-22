@@ -520,12 +520,15 @@ matrix entry.
   don't write custom depth, labels behind them show through. `Setup.sh` runs
   `Scripts/ConfigureProject.sh`, which turns FastGeo off in the project's cook (`-keep-fastgeo` skips
   it). `FASTGEO_LABELING_NOTES.md` covers what supporting it would take.
-- **Stock CitySample doesn't compile on Clang.** Its targets build at `BuildSettingsVersion.V7`
-  (UE 5.8), which makes unreachable code an error on Clang, and `GetWorldInfo` in
-  `CitySampleBlueprintLibrary.cpp` has a loop that always returns. `Setup.sh` runs
-  `Scripts/PatchCitySample.sh`, which rewrites that one line (exact match, idempotent, `-restore`);
-  it does nothing in a project without CitySample's source. A further CitySample source fix
-  belongs there, as one more entry.
+- **Stock CitySample doesn't compile on Clang, and its packaged game crashes entering a car.** Its
+  targets build at `BuildSettingsVersion.V7` (UE 5.8), which makes unreachable code an error on
+  Clang, and `GetWorldInfo` in `CitySampleBlueprintLibrary.cpp` has a loop that always returns.
+  And `ACitySampleVehicleBase::PossessedBy` changes Mass tags with the synchronous API, which
+  asserts in a UE 5.8 game build, where a Mass phase can still be in flight (never in the editor,
+  which waits for it). `Setup.sh` runs `Scripts/PatchCitySample.sh`, which fixes both by exact
+  replacement of whole lines (idempotent, `-restore`; a fix whose lines Epic changed is skipped
+  whole). It does nothing in a project without CitySample's source. A further CitySample source
+  fix belongs there, as more entries.
 - **Time control needs `ATempoWorldSettings` in the level.** Every time RPC fails without it. A host
   project's maps keep the engine's `AWorldSettings` unless `WorldSettingsClassName` names Tempo's.
   `ConfigureProject.sh` sets it when the project uses the default, and the editor or cook swaps the

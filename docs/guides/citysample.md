@@ -26,11 +26,21 @@ stock CitySample checkout to a Tempo gRPC server you can drive from Python.
 - A CitySample checkout on **UE 5.7 or 5.8**. Epic distributes CitySample through the Epic Games
   Launcher and Fab. Tempo does not support 5.6 or earlier.
 
-## 1. The CitySample source fix { #patch-citysample }
+## 1. The CitySample source fixes { #patch-citysample }
 
-You don't need to do anything for this step: `Setup.sh` (step 3) makes the fix. It's described here
-because it edits CitySample's own source. The bug is in CitySample itself, and it fails a stock build
-on macOS or Linux with no plugin involved:
+You don't need to do anything for this step: `Setup.sh` (step 3) runs `Scripts/PatchCitySample.sh`,
+which makes both fixes. They're described here because they edit CitySample's own source. Both bugs
+are in CitySample itself, on UE 5.8, with no plugin involved: one stops the build on macOS and
+Linux, and the other crashes a packaged game when the player gets into a car.
+
+The script changes only the exact lines it expects, so running it again does nothing. If Epic
+changes the code a fix touches, it leaves that file alone and says so.
+`Scripts/PatchCitySample.sh -restore` puts Epic's lines back. In any other project it finds no
+CitySample source and does nothing.
+
+### The compile error on macOS and Linux { #patch-citysample-compile }
+
+A stock build fails with:
 
 ```text
 CitySample/Source/CitySample/Util/CitySampleBlueprintLibrary.cpp:203:97: error: loop will run
@@ -40,8 +50,7 @@ CitySample/Source/CitySample/Util/CitySampleBlueprintLibrary.cpp:203:97: error: 
 ```
 
 The loop body returns unconditionally, so `++It` can never run. The function means "return the
-first `ACitySampleWorldInfo`, or `nullptr`", and `Scripts/PatchCitySample.sh`, which `Setup.sh`
-runs, rewrites that one line to say so:
+first `ACitySampleWorldInfo`, or `nullptr`", and the script rewrites that one line to say so:
 
 ```cpp title="Source/CitySample/Util/CitySampleBlueprintLibrary.cpp"
 ACitySampleWorldInfo* UCitySampleBlueprintLibrary::GetWorldInfo(const UObject* const WorldContextObject)
@@ -62,10 +71,6 @@ This is exactly equivalent. `TActorIteratorBase` has an `explicit operator bool(
 performs the same validity check the `for` condition did, and constructing the iterator already
 advances it to the first match. CitySample is built as C++20 — `BuildSettingsVersion.V4` and later
 set `CppStandardVersion.Cpp20` — so the if-with-initializer form is available.
-
-The script changes only that exact line, so running it again does nothing. If Epic changes the
-code, it leaves the file alone and says so. `Scripts/PatchCitySample.sh -restore` puts Epic's line
-back. In any other project it finds no CitySample source and does nothing.
 
 ??? question "Why doesn't this happen in other projects?"
 
@@ -95,7 +100,7 @@ back. In any other project it finds no CitySample source and does nothing.
 
 !!! tip "Relaxing the warning instead"
 
-    If you would rather not patch CitySample (run `PatchCitySample.sh -restore` after `Setup.sh`), a module can opt out in its `*.Build.cs`:
+    If you would rather not patch this line, a module can opt out in its `*.Build.cs`:
 
     ```csharp
     CppCompileWarningSettings.UnreachableCodeWarningLevel = WarningLevel.Warning;
@@ -103,6 +108,120 @@ back. In any other project it finds no CitySample source and does nothing.
 
     Dropping the whole project to `BuildSettingsVersion.V6` also works, but it switches the
     warning off for every plugin in the project — including yours.
+
+### The crash when entering a vehicle { #patch-citysample-vehicle-entry }
+
+A packaged game crashes the moment the player character gets into a car. It happens on every
+platform, and **never in the editor**, so you won't see it until you package:
+
+```text
+Script Stack (3 frames) :
+/Game/Gameplay/Driving/BP_CarEntryInteraction.BP_CarEntryInteraction_C.ExecuteUbergraph_BP_CarEntryInteraction
+/Game/Gameplay/Driving/BP_CarEntryInteraction.BP_CarEntryInteraction_C.OnNotifyBegin_F4B523ED48E3799F950FDEA6575EEDC5
+/Script/AnimGraphRuntime.PlayMontageCallbackProxy.OnNotifyBeginReceived
+
+LogWindows: Error: appError called: Assertion failed: IsProcessing() == false
+    [File:...\Engine\Source\Runtime\MassEntity\Private\MassEntityManager.cpp] [Line: 1406]
+Synchronous API function FMassEntityManager::AddTagToEntity called during mass processing.
+Use asynchronous API instead.
+```
+
+When the car-entry montage reaches its notify, CitySample possesses the vehicle.
+`ACitySampleVehicleBase::PossessedBy` then moves `FMassTrafficPlayerVehicleTag` from the previous
+player vehicle's Mass entity to this one. It does that with Mass's synchronous API
+(`RemoveTagFromEntity`, and `UE::MassActor::AddEntityTagToActor`, which calls `AddTagToEntity`).
+UE 5.8 asserts on those calls whenever Mass is processing.
+
+The script changes both calls to queue the change while Mass is processing, and to make it at once
+otherwise, as before. In `PossessedBy`, the block from `const UWorld* World = GetWorld();` up to
+`CitySamplePlayerController->SetCurrentPlayerVehicle(this);` becomes:
+
+```cpp title="Source/CitySample/Vehicles/CitySampleVehicleBase.cpp"
+		const UWorld* World = GetWorld();
+		{
+			// When removing this player vehicle tag whe have to do it this slightly more complex way
+			// instead of UE::MassActor::RemoveEntityTagFromActor<FTagFragment_MassTrafficPlayerVehicle>(*PreviousPlayerVehicle);
+			// because the actor might not actually exist any more. This entity might be represented by an ISMC or something
+			// else. By using the handle we know we're changing the Mass entity no matter what it is now.
+			const FMassEntityHandle & MassAgentHandle = CitySamplePlayerController->GetCurrentPlayerVehicleMassHandle();
+			if (MassAgentHandle.IsValid())
+			{
+				// An entity might be removed from Mass (because the vehicle was damaged and LODs out), hence
+				// the thorough IsEntityValid() check.
+				UMassEntitySubsystem* EntitySubsystem = UWorld::GetSubsystem<UMassEntitySubsystem>(World);
+				if (EntitySubsystem && EntitySubsystem->GetMutableEntityManager().IsEntityValid(MassAgentHandle))
+				{
+					FMassEntityManager& EntityManager = EntitySubsystem->GetMutableEntityManager();
+					// PossessedBy can run while a Mass phase is still in flight (in UE 5.8 game builds, phases
+					// don't block the game thread), where synchronous composition changes assert. Defer in that case.
+					if (EntityManager.IsProcessing())
+					{
+						EntityManager.Defer().RemoveTag<FMassTrafficPlayerVehicleTag>(MassAgentHandle);
+					}
+					else
+					{
+						EntityManager.RemoveTagFromEntity(MassAgentHandle, FMassTrafficPlayerVehicleTag::StaticStruct());
+					}
+				}
+			}
+		}
+
+		UMassEntitySubsystem* EntitySubsystem = UWorld::GetSubsystem<UMassEntitySubsystem>(World);
+		UMassActorSubsystem* MassActorSubsystem = UWorld::GetSubsystem<UMassActorSubsystem>(World);
+		if (EntitySubsystem && MassActorSubsystem)
+		{
+			const FMassEntityHandle MassAgentHandle = MassActorSubsystem->GetEntityHandleFromActor(this);
+			if (MassAgentHandle.IsValid())
+			{
+				// Not using UE::MassActor::AddEntityTagToActor here: it calls the synchronous
+				// AddTagToEntity, which asserts if this runs during Mass processing.
+				FMassEntityManager& EntityManager = EntitySubsystem->GetMutableEntityManager();
+				if (EntityManager.IsProcessing())
+				{
+					EntityManager.Defer().AddTag<FMassTrafficPlayerVehicleTag>(MassAgentHandle);
+				}
+				else
+				{
+					EntityManager.AddTagToEntity(MassAgentHandle, FMassTrafficPlayerVehicleTag::StaticStruct());
+				}
+			}
+			else
+			{
+				UE_LOG(LogCitySample, Verbose, TEXT("MassAgentHandle not valid for vehicle. Mass AI spawner may not be setup for current level. Vehicle = %s"), *GetName());
+			}
+		}
+```
+
+It also adds `#include "MassCommandBuffer.h"` before the file's `#include "MassEntityManager.h"`.
+
+The only change in behavior is timing. A queued tag lands when the current Mass phase finishes,
+not at once. Mass merges and applies commands queued on the entity manager when a phase cleans up,
+so code that reads `FMassTrafficPlayerVehicleTag` later in the same phase won't see it yet.
+
+??? question "Why does Mass count as processing here?"
+
+    The crash's callstack has no Mass code on it. The notify fires from the player character's
+    ordinary `CharacterMovementComponent` tick, and no other thread is running a Mass processor at
+    that moment. Mass is still *considered* to be processing, though.
+
+    UE 5.8 runs each Mass phase through a new processing queue, which is on by default
+    (`mass.UseProcessingQueue`, `MassProcessingPhaseManager.cpp`). In a game build it runs
+    **without blocking the game thread**. It starts the phase's work and returns, keeping a
+    processing scope open (`FProcessingQueueAsyncCleanup` in `MassProcessingQueue.cpp`) until a
+    cleanup task later runs on the game thread. Until then, every actor tick on the game thread
+    sees `IsProcessing() == true`. Any synchronous Mass call made from gameplay code in that window
+    asserts, and the assert protects against a real data race with workers that may still be
+    running.
+
+    The editor forces the queue to block until processing completes (the `WITH_EDITOR` branch in
+    `FProcessingQueue::Execute_GetEventRef`), and that covers PIE too. That's why only packaged
+    builds crash.
+
+!!! tip "Switching the queue off instead"
+
+    Setting `mass.UseProcessingQueue=0` under `[SystemSettings]` in `Config/DefaultEngine.ini` goes
+    back to Mass's previous scheduling, and the crash goes away without a source change. It changes
+    how every Mass phase in the project runs, though, just to work around one call site.
 
 ## 2. Add Tempo
 
@@ -174,7 +293,7 @@ FastGeo.Enable=False
 
 All three take effect at the next package. `Scripts/ConfigureProject.sh -restore` removes the block.
 
-It also makes the [source fix](#patch-citysample) from step 1, and downloads third-party
+It also makes the [source fixes](#patch-citysample) from step 1, and downloads third-party
 dependencies.
 
 ## 4. Build and run
@@ -229,6 +348,7 @@ covers choosing vehicles, the rig and label JSON, and the recording format.
 | | |
 |---|---|
 | `Source/CitySample/Util/CitySampleBlueprintLibrary.cpp` | One line patched by `Setup.sh` (step 1) |
+| `Source/CitySample/Vehicles/CitySampleVehicleBase.cpp` | `PossessedBy` and one `#include` patched by `Setup.sh` (step 1) |
 | `Plugins/Traffic/`, `Plugins/RuleProcessor/` | Descriptors renamed `*.disabled-by-tempo` |
 | `Config/DefaultEngine.ini` | Tempo's world settings, physics substepping, FastGeo off (a `TEMPO_PROJECT_CONFIG` block at the end) |
 | `TempoEnv/` | Generated Python virtual environment with the client packages |
