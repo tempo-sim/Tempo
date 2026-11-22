@@ -19,7 +19,7 @@ Each marker is also a CI fan-out group — see `.github/workflows/test_packaged.
 
 > The `sensors` group renders, so it only runs when explicitly selected (`-m sensors`) with
 > `TEMPO_SIM_RENDER=1` on a GPU-capable machine. In CI that is the native job's `python-sensors`
-> entry in `tempo_build_and_package.yml`; the Linux fan-out jobs run on GPU-less runners and would
+> entry in `tempo_build_and_test_native.yml`; the Linux fan-out jobs run on GPU-less runners and would
 > need a GPU `runner` and `render: true` to run it too.
 
 > The `codegen` group tests the working tree, not a shipped client. **Run it through
