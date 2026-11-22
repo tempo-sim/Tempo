@@ -67,10 +67,35 @@ if [ "$GROUP" = "typed" ]; then
   CRATE_DIR="$TESTS_DIR/typed"
 fi
 
+# Vendored crates are copied into a scratch directory and synced from there into vendor/, which
+# rewrites only the files that changed. cargo decides what to rebuild by modification time, and a
+# fresh copy of the project's crate -- thousands of generated classes -- costs minutes to compile
+# again even when not a byte of it changed. Without a Python to sync with, a plain copy.
+SYNC_PYTHON=""
+for candidate in python3 python; do
+  if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c "" >/dev/null 2>&1; then
+    SYNC_PYTHON="$candidate"
+    break
+  fi
+done
+VENDOR_STAGING="$CRATE_DIR/vendor/.staging"
+# vendor_from_staging <name>: moves $VENDOR_STAGING into vendor/<name>.
+vendor_from_staging() {
+  local dest="$CRATE_DIR/vendor/$1"
+  if [ -n "$SYNC_PYTHON" ]; then
+    "$SYNC_PYTHON" "$TEMPO_ROOT/TempoCore/Content/Python/sync_tree.py" "$VENDOR_STAGING" "$dest"
+    rm -rf "$VENDOR_STAGING"
+  else
+    rm -rf "$dest"
+    mv "$VENDOR_STAGING" "$dest"
+  fi
+}
+
 # Vendor the packaged crate so the test crate's `path` dependency resolves.
-rm -rf "$CRATE_DIR/vendor/tempo-sim"
 mkdir -p "$CRATE_DIR/vendor"
-cp -r "$CRATE_SRC" "$CRATE_DIR/vendor/tempo-sim"
+rm -rf "$VENDOR_STAGING"
+cp -r "$CRATE_SRC" "$VENDOR_STAGING"
+vendor_from_staging tempo-sim
 
 if [ "$GROUP" = "typed" ]; then
   # The project's own crate, which carries this build's generated classes as its `reflected` module,
@@ -90,14 +115,16 @@ if [ "$GROUP" = "typed" ]; then
     exit 1
   fi
   echo "Vendoring $(basename "$CLASSES_SRC") as project"
-  rm -rf "$CRATE_DIR/vendor/project"
-  cp -r "$CLASSES_SRC" "$CRATE_DIR/vendor/project"
+  rm -rf "$VENDOR_STAGING"
+  cp -r "$CLASSES_SRC" "$VENDOR_STAGING"
   # Not `sed -i`: its suffix argument is required on BSD and rejected on GNU, and this script runs
-  # on both. [[:space:]] rather than \s for the same reason.
-  CLASSES_MANIFEST="$CRATE_DIR/vendor/project/Cargo.toml"
+  # on both. [[:space:]] rather than \s for the same reason. In the scratch copy, so the vendored
+  # manifest only changes when the packaged one does.
+  CLASSES_MANIFEST="$VENDOR_STAGING/Cargo.toml"
   sed -E 's/^name[[:space:]]*=[[:space:]]*"[^"]+"/name = "project"/' \
     "$CLASSES_MANIFEST" > "$CLASSES_MANIFEST.renamed"
   mv "$CLASSES_MANIFEST.renamed" "$CLASSES_MANIFEST"
+  vendor_from_staging project
 fi
 
 # Launch the sim for groups that need it (everything except the compile-only "contract" group).
