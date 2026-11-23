@@ -121,11 +121,11 @@ fi
 # Run the steps once (adding -force if specified)
 echo -e "\nDisabling project plugins that Tempo replaces\n"
 bash "$SCRIPT_DIR/DisableConflictingPlugins.sh"
-# World settings, physics substepping and FastGeo; see ConfigureProject.sh.
+# World settings; see ConfigureProject.sh. Substepping and FastGeo are in TempoCore/Config/Engine.ini.
+bash "$SCRIPT_DIR/ConfigureProject.sh"
 if [ "$KEEP_FASTGEO" -eq 1 ]; then
-  bash "$SCRIPT_DIR/ConfigureProject.sh" -keep-fastgeo
-else
-  bash "$SCRIPT_DIR/ConfigureProject.sh"
+  echo "  ! -keep-fastgeo no longer does anything: TempoCore/Config/Engine.ini turns FastGeo off. To keep it"
+  echo "    on (UE 5.8+), add FastGeo.Enable=True under [ConsoleVariables] in Config/PluginOverrideEngine.ini."
 fi
 # CitySample only: source fixes it needs to compile and run; see PatchCitySample.sh.
 bash "$SCRIPT_DIR/PatchCitySample.sh"

@@ -517,9 +517,11 @@ matrix entry.
   `StructValue.fields` does), or add the exports in TempoThirdParty's `exports.def`.
 - **FastGeo-cooked geometry can't be labeled.** FastGeoStreaming (UE 5.6+, CitySample) turns static
   actors into non-component primitives at cook time. The labeler can't stencil them, and since they
-  don't write custom depth, labels behind them show through. `Setup.sh` runs
-  `Scripts/ConfigureProject.sh`, which turns FastGeo off in the project's cook (`-keep-fastgeo` skips
-  it). `FASTGEO_LABELING_NOTES.md` covers what supporting it would take.
+  don't write custom depth, labels behind them show through. `TempoCore/Config/Engine.ini` sets
+  `FastGeo.Enable=False`, and a plugin's `Engine.ini` is layered over the project's config, so it wins
+  over the project's `DefaultEngine.ini`. On UE 5.8, a project that wants FastGeo back sets it in
+  `Config/PluginOverrideEngine.ini`, which sits above plugin layers. 5.7 has no such layer.
+  `FASTGEO_LABELING_NOTES.md` covers what supporting it would take.
 - **Stock CitySample doesn't compile on Clang, and its packaged game crashes entering a car.** Its
   targets build at `BuildSettingsVersion.V7` (UE 5.8), which makes unreachable code an error on
   Clang, and `GetWorldInfo` in `CitySampleBlueprintLibrary.cpp` has a loop that always returns.
@@ -533,8 +535,11 @@ matrix entry.
   project's maps keep the engine's `AWorldSettings` unless `WorldSettingsClassName` names Tempo's.
   `ConfigureProject.sh` sets it when the project uses the default, and the editor or cook swaps the
   class in (`UWorld::RepairWorldSettings`, editor-only), so a *package* made after that has it. It
-  also turns physics substepping on. Without substepping, a coarse Fixed Step frame is clamped to
-  `MaxPhysicsDeltaTime`.
+  stays a project-side script, not plugin config, because a project with its own world-settings class
+  must keep it. Physics substepping is in `TempoCore/Config/Engine.ini` (same override rules as
+  FastGeo above). Without substepping, a coarse Fixed Step frame is clamped to `MaxPhysicsDeltaTime`.
+  Only settings Tempo can impose unconditionally belong in that file. Anything that depends on the
+  project's own value goes in `ConfigureProject.sh`.
 - **Anything a settings CDO holds at runtime must be rooted.** A cooked build puts native CDOs in
   the GC's disregard set: their references keep nothing alive, and GC verification fatals on one
   that points at an unrooted object. `UTempoSensorsSettings::SetRuntimeSemanticLabelTable` roots

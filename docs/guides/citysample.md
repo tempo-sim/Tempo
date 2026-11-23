@@ -27,17 +27,11 @@ Setup.sh will prompt you to download third party dependencies (our custom build 
 In the CitySample project Setup.sh does a few additional steps (none of which you need to know about, just FYI):
 - Fixes two bugs that will prevent you from building the project from source
 - Disables the project's RuleProcessor and Traffic plugins (which Tempo replaces)
-- Inserts some necessary Tempo settings into your `Config/DefaultEngine.ini`:
+- Points your `Config/DefaultEngine.ini` at Tempo's world settings, which Tempo's time control needs:
 
 ```ini
 [/Script/Engine.Engine]
 WorldSettingsClassName=/Script/TempoCore.TempoWorldSettings
-[/Script/Engine.PhysicsSettings]
-bSubstepping=True
-MaxSubstepDeltaTime=0.016667
-MaxSubsteps=6
-[ConsoleVariables]
-FastGeo.Enable=False
 ```
 
 ## 4. Build and Package
@@ -85,7 +79,7 @@ TempoCamera will replace the Road label with RoadMarking anywhere it picks up th
 | `Source/CitySample/Util/CitySampleBlueprintLibrary.cpp` | One line patched by `Setup.sh` (step 1) |
 | `Source/CitySample/Vehicles/CitySampleVehicleBase.cpp` | `PossessedBy` and one `#include` patched by `Setup.sh` (step 1) |
 | `Plugins/Traffic/`, `Plugins/RuleProcessor/` | Descriptors renamed `*.disabled-by-tempo` |
-| `Config/DefaultEngine.ini` | Tempo's world settings, physics substepping, FastGeo off (a `TEMPO_PROJECT_CONFIG` block at the end) |
+| `Config/DefaultEngine.ini` | Tempo's world settings (a `TEMPO_PROJECT_CONFIG` block at the end) |
 | `TempoEnv/` | Generated Python virtual environment with the client packages |
 
 ## See also

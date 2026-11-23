@@ -331,9 +331,9 @@ CitySample (5.6+) cooks most of its static city through Epic's FastGeoStreaming 
 turns actors into lightweight primitives that are not components. Tempo's labeler sets each
 component's custom-depth stencil, so it cannot label them. Worse, they don't draw into custom depth
 at all, so the label of whatever is behind them shows through: the sky's label where a building
-stands. `Setup.sh` (through `Scripts/ConfigureProject.sh`) therefore adds an override to the
-project's `Config/DefaultEngine.ini` that turns FastGeo off for the cook, which is how CitySample
-shipped before 5.6. It costs some streaming performance. The same block gives the levels Tempo's
-world settings, which Fixed Step needs, and turns on physics substepping, so a 0.1 s step simulates
-0.1 s of physics. `Scripts/ConfigureProject.sh -restore` removes it, and `Setup.sh -keep-fastgeo`
-leaves FastGeo on.
+stands. So `TempoCore/Config/Engine.ini` turns FastGeo off, which applies to the cook and is how
+CitySample shipped before 5.6. It costs some streaming performance. The same file turns on physics
+substepping, so a 0.1 s step simulates 0.1 s of physics. Unreal applies a plugin's `Engine.ini`
+over the project's own. To keep FastGeo on, set `FastGeo.Enable=True` under `[ConsoleVariables]` in
+the project's `Config/PluginOverrideEngine.ini`. Separately, `Setup.sh` (through
+`Scripts/ConfigureProject.sh`) gives the levels Tempo's world settings, which Fixed Step needs.
