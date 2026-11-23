@@ -14,7 +14,7 @@ off Tempo's features.
 
 ```bash
 cd <your_citysample>/Plugins
-git clone --recurse-submodules https://github.com/tempo-sim/Tempo.git
+git clone https://github.com/tempo-sim/Tempo.git
 ```
 
 ## 3. Run Setup.sh
