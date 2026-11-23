@@ -428,6 +428,9 @@ public:
 	bool TryGetCoreVehicleInfos(const FZoneGraphLaneHandle& LaneHandle, TSet<FMassTrafficCoreVehicleInfo>& OutCoreVehicleInfos) const;
 	void ClearCoreVehicleInfos();
 
+	/** Sorts each lane's core vehicle infos in order of increasing distance along the lane. */
+	void SortCoreVehicleInfos();
+
 	const TMap<FZoneGraphLaneHandle, TSet<FMassTrafficCoreVehicleInfo>>& GetCoreVehicleInfoMap() const;
 	TMap<FZoneGraphLaneHandle, TSet<FMassTrafficCoreVehicleInfo>>& GetMutableCoreVehicleInfoMap();
 
@@ -546,6 +549,10 @@ protected:
 	 * This will allow the vehicle merge logic to "see" all the vehicles on the conflict lanes
 	 * when looking for an opportunity to merge. */
 	TMap<FZoneGraphLaneHandle, TSet<FMassTrafficCoreVehicleInfo>> CoreVehicleInfoMap;
+
+	/** Guards CoreVehicleInfoMap, which vehicle and crowd processors read from worker threads while
+	 * UMassTrafficLaneMetadataProcessor rebuilds it. */
+	mutable FRWLock CoreVehicleInfoMapLock;
 
 	/** Map from a lane to the crowd entities at either end of the line of crowd entities on it,
 	 * so vehicles can time their way through a crosswalk around the pedestrians using it.

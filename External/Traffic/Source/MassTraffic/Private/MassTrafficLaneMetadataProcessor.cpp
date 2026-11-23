@@ -102,16 +102,6 @@ void UMassTrafficLaneMetadataProcessor::Execute(FMassEntityManager& EntityManage
 		}
 	});
 
-	TMap<FZoneGraphLaneHandle, TSet<FMassTrafficCoreVehicleInfo>>& CoreVehicleInfoMap = MassTrafficSubsystem.GetMutableCoreVehicleInfoMap();
-
 	// Finally, sort the CoreVehicleInfos for each lane in order of increasing distance along the lane.
-	for (TTuple<FZoneGraphLaneHandle, TSet<FMassTrafficCoreVehicleInfo>>& CoreVehicleInfoPair : CoreVehicleInfoMap)
-	{
-		TSet<FMassTrafficCoreVehicleInfo>& CoreVehicleInfos = CoreVehicleInfoPair.Value;
-
-		CoreVehicleInfos.Sort([](const FMassTrafficCoreVehicleInfo& FirstCoreVehicleInfo, const FMassTrafficCoreVehicleInfo& SecondCoreVehicleInfo)
-		{
-			return FirstCoreVehicleInfo.VehicleDistanceAlongLane < SecondCoreVehicleInfo.VehicleDistanceAlongLane;
-		});
-	}
+	MassTrafficSubsystem.SortCoreVehicleInfos();
 }

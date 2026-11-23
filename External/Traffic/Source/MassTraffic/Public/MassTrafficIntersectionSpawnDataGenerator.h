@@ -66,7 +66,16 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, Category="Pedestrians")
 	float IntersectionSideToCrosswalkSearchDistance = 500.0f;
-	
+
+	/**
+	 * Link each vehicle intersection lane to the crosswalk lanes of its own intersection that it crosses, so vehicles
+	 * yield to pedestrians on them and pedestrians yield to approaching vehicles. Skips intersections whose lanes are
+	 * already linked (Tempo road actors link their own), so this only fills in for content without them, such as
+	 * CitySample's.
+	 */
+	UPROPERTY(EditAnywhere, Category="Pedestrians")
+	bool bLinkIntersectionLanesToCrosswalks = true;
+
 	/** How many seconds vehicles go (how long a green light lasts) - in most cases. */
 	UPROPERTY(EditAnywhere, Category="Durations|Standard")
 	float StandardTrafficGoSeconds = 20.0f;
@@ -118,6 +127,12 @@ protected:
 		const UWorld& World) const;
 
 	void SetupLaneData(
+		UMassTrafficSubsystem& MassTrafficSubsystem,
+		const UMassTrafficSettings& MassTrafficSettings,
+		const UZoneGraphSubsystem& ZoneGraphSubsystem,
+		const FIntersectionDetailsMap& IntersectionDetailsMap) const;
+
+	void LinkIntersectionLanesToCrosswalks(
 		UMassTrafficSubsystem& MassTrafficSubsystem,
 		const UMassTrafficSettings& MassTrafficSettings,
 		const UZoneGraphSubsystem& ZoneGraphSubsystem,

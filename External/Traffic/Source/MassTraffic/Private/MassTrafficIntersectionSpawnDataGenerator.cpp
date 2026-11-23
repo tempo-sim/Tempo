@@ -99,6 +99,11 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner,
 	// Push data from the IntersectionDetails into the lanes.
 	SetupLaneData(*MassTrafficSubsystem, *MassTrafficSettings, *ZoneGraphSubsystem, IntersectionDetailsMap);
 
+	if (bLinkIntersectionLanesToCrosswalks)
+	{
+		LinkIntersectionLanesToCrosswalks(*MassTrafficSubsystem, *MassTrafficSettings, *ZoneGraphSubsystem, IntersectionDetailsMap);
+	}
+
 	// The spawner decides which entity configs exist; we only get to index into them. Epic's
 	// CitySample spawner carries a single intersection config, from before this plugin split
 	// intersections into light- and sign-controlled ones. Without a config for the sign
@@ -664,6 +669,103 @@ void UMassTrafficIntersectionSpawnDataGenerator::SetupLaneData(
 		// edge query; set LogMassTraffic to Verbose to see which lanes are involved.
 		UE_LOG(LogMassTraffic, Error, TEXT("%d of %d conflicting lane pairs could not be given intersection enter/exit distances.  MassTrafficSettings.AcceptableLaneIntersectionDistance: %f."),
 			NumConflictLanePairsWithoutIntersectionInfo, NumConflictLanePairs, MassTrafficSettings.AcceptableLaneIntersectionDistance);
+	}
+}
+
+void UMassTrafficIntersectionSpawnDataGenerator::LinkIntersectionLanesToCrosswalks(
+		UMassTrafficSubsystem& MassTrafficSubsystem,
+		const UMassTrafficSettings& MassTrafficSettings,
+		const UZoneGraphSubsystem& ZoneGraphSubsystem,
+		const FIntersectionDetailsMap& IntersectionDetailsMap) const
+{
+	// Vehicles yield to pedestrians on an intersection lane's DownstreamCrosswalkLanes, and pedestrians yield to
+	// vehicles on a crosswalk's IncomingVehicleLanes. Tempo road actors fill both in (UTempoAgentsWorldSubsystem).
+	// Content without them, such as CitySample's, would otherwise have neither, so vehicles would drive through
+	// pedestrians on open crosswalks. The crosswalks found for each intersection side are the candidates, and a lane
+	// is linked to each one it actually crosses.
+	int32 NumIntersectionsLinked = 0;
+	int32 NumIntersectionsWithoutCrossings = 0;
+	int32 NumLaneCrosswalkLinks = 0;
+
+	for (const TTuple<FZoneGraphDataHandle, FZoneIndexToIntersectionDetailMap>& ZoneIndexToIntersectionDetailMapPair : IntersectionDetailsMap)
+	{
+		const FZoneGraphStorage* ZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(ZoneIndexToIntersectionDetailMapPair.Key);
+
+		if (!ensureMsgf(ZoneGraphStorage != nullptr, TEXT("Must get valid ZoneGraphStorage in UMassTrafficIntersectionSpawnDataGenerator::LinkIntersectionLanesToCrosswalks.")))
+		{
+			continue;
+		}
+
+		for (const TTuple<int32, FMassTrafficIntersectionDetail>& ZoneIndexToIntersectionDetailPair : ZoneIndexToIntersectionDetailMapPair.Value)
+		{
+			const FMassTrafficIntersectionDetail& IntersectionDetail = ZoneIndexToIntersectionDetailPair.Value;
+
+			// Road crosswalks are built from lanes that are already linked.
+			if (IntersectionDetail.bIsRoadCrosswalk)
+			{
+				continue;
+			}
+
+			TSet<int32> CrosswalkLaneIndices(IntersectionDetail.HiddenOutboundSideHints.CrosswalkLanes);
+			TArray<FZoneGraphTrafficLaneData*> VehicleIntersectionLanes;
+			bool bAlreadyLinked = false;
+
+			for (const FMassTrafficIntersectionSide& Side : IntersectionDetail.Sides)
+			{
+				CrosswalkLaneIndices.Append(Side.CrosswalkLanes);
+
+				for (const auto& VehicleIntersectionLaneElem : Side.VehicleIntersectionLanes)
+				{
+					if (FZoneGraphTrafficLaneData* VehicleIntersectionLane = VehicleIntersectionLaneElem.Key)
+					{
+						VehicleIntersectionLanes.AddUnique(VehicleIntersectionLane);
+						bAlreadyLinked |= !VehicleIntersectionLane->DownstreamCrosswalkLanes.IsEmpty();
+					}
+				}
+			}
+
+			// Leave intersections that something else (Tempo road actors, or an earlier spawn) has already linked.
+			if (bAlreadyLinked || CrosswalkLaneIndices.IsEmpty() || VehicleIntersectionLanes.IsEmpty())
+			{
+				continue;
+			}
+
+			int32 NumLinksForIntersection = 0;
+
+			for (FZoneGraphTrafficLaneData* VehicleIntersectionLane : VehicleIntersectionLanes)
+			{
+				for (const int32 CrosswalkLaneIndex : CrosswalkLaneIndices)
+				{
+					const FZoneGraphLaneHandle CrosswalkLaneHandle(CrosswalkLaneIndex, ZoneIndexToIntersectionDetailMapPair.Key);
+
+					// Only link crosswalks the lane actually crosses. Each side's crosswalks are found by distance, so
+					// a lane turning away from a side won't cross that side's crosswalk.
+					if (float EnterDistance, ExitDistance; UE::MassTraffic::TryGetEnterAndExitDistancesAlongQueryLane(MassTrafficSubsystem, MassTrafficSettings, *ZoneGraphStorage, VehicleIntersectionLane->LaneHandle, CrosswalkLaneHandle, EnterDistance, ExitDistance, false))
+					{
+						MassTrafficSubsystem.AddDownstreamCrosswalkLane(VehicleIntersectionLane->LaneHandle, CrosswalkLaneHandle, EnterDistance);
+						++NumLinksForIntersection;
+					}
+				}
+			}
+
+			if (NumLinksForIntersection > 0)
+			{
+				++NumIntersectionsLinked;
+				NumLaneCrosswalkLinks += NumLinksForIntersection;
+			}
+			else
+			{
+				++NumIntersectionsWithoutCrossings;
+			}
+		}
+	}
+
+	if (NumIntersectionsLinked > 0 || NumIntersectionsWithoutCrossings > 0)
+	{
+		// Intersections whose crosswalks no intersection lane crosses (for instance because the crosswalks lie on the
+		// approach roads instead) get no pedestrian yielding from this.
+		UE_LOG(LogMassTraffic, Log, TEXT("%s linked intersection lanes to crosswalks they cross at %d intersections (%d links). %d intersections with crosswalks had no intersection lane crossing them."),
+			*GetName(), NumIntersectionsLinked, NumLaneCrosswalkLinks, NumIntersectionsWithoutCrossings);
 	}
 }
 
