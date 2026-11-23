@@ -20,6 +20,19 @@ set -e
 #   phase can still be in flight when gameplay code runs (the editor waits for it, so PIE never
 #   crashes). The fix defers the tag changes to Mass's command buffer while it is processing, and
 #   makes them at once otherwise, as before.
+#
+# - CitySample.Target.cs: the game target sets ALLOW_LOW_LEVEL_MEM_TRACKER_IN_TEST and
+#   bTrackRHIResourceInfoForTest unconditionally (for an LLM test that only a Test build runs). An
+#   installed engine builds game targets in a shared build environment, where UnrealBuildTool
+#   refuses settings that differ from UnrealGame's ("This is not allowed, as CitySample has build
+#   products in common with UnrealGame"), so the game cannot be packaged in any configuration. The
+#   fix applies them only in a unique build environment, the guard the same constructor already
+#   uses for bUseLoggingInShipping.
+#
+# - MassCrowdAnimationProcessor.h (the CitySampleMassCrowd plugin): its processors hold
+#   FMassEntityQuery members but the header doesn't include MassEntityQuery.h. Editor and Development
+#   builds get it through the shared PCH; a Shipping build doesn't, and fails with "field has
+#   incomplete type 'FMassEntityQuery'". (Tempo's own Traffic fork had the same omission.)
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 PROJECT_ROOT=$("$SCRIPT_DIR"/FindProjectRoot.sh)
@@ -42,6 +55,8 @@ FIX_FILES=(
   "Source/CitySample/Vehicles/CitySampleVehicleBase.cpp"
   "Source/CitySample/Vehicles/CitySampleVehicleBase.cpp"
   "Source/CitySample/Vehicles/CitySampleVehicleBase.cpp"
+  "Source/CitySample.Target.cs"
+  "Plugins/CitySampleMassCrowd/Source/CitySampleMassCrowd/Public/MassCrowdAnimationProcessor.h"
 )
 FIX_ORIGINALS=(
   "for (TActorIterator<ACitySampleWorldInfo> It(World, ACitySampleWorldInfo::StaticClass()); It; ++It)"
@@ -49,6 +64,8 @@ FIX_ORIGINALS=(
   "EntitySubsystem->GetMutableEntityManager().RemoveTagFromEntity(MassAgentHandle, FMassTrafficPlayerVehicleTag::StaticStruct());"
   "if (UMassActorSubsystem* MassActorSubsystem = UWorld::GetSubsystem<UMassActorSubsystem>(World))"
   "UE::MassActor::AddEntityTagToActor<FMassTrafficPlayerVehicleTag>(*this);"
+  $'// For LLM subtest type\nGlobalDefinitions.Add("ALLOW_LOW_LEVEL_MEM_TRACKER_IN_TEST=1");\nbTrackRHIResourceInfoForTest = true;'
+  '#include "MassObserverProcessor.h"'
 )
 FIX_REPLACEMENTS=(
   "if (TActorIterator<ACitySampleWorldInfo> It(World, ACitySampleWorldInfo::StaticClass()); It)"
@@ -78,6 +95,14 @@ else
 {
 \tEntityManager.AddTagToEntity(MassAgentHandle, FMassTrafficPlayerVehicleTag::StaticStruct());
 }'
+  $'// For LLM subtest type. Only in a unique build environment: an installed engine\'s shared one
+// refuses target settings that differ from UnrealGame\'s, and would fail the whole build.
+if (BuildEnvironment == TargetBuildEnvironment.Unique)
+{
+\tGlobalDefinitions.Add("ALLOW_LOW_LEVEL_MEM_TRACKER_IN_TEST=1");
+\tbTrackRHIResourceInfoForTest = true;
+}'
+  $'#include "MassEntityQuery.h"\n#include "MassObserverProcessor.h"'
 )
 FIX_PURPOSES=(
   "so CitySample compiles on Clang"
@@ -85,6 +110,8 @@ FIX_PURPOSES=(
   "so a packaged game doesn't crash when the player gets into a car"
   "so a packaged game doesn't crash when the player gets into a car"
   "so a packaged game doesn't crash when the player gets into a car"
+  "so CitySample can be packaged with an installed engine"
+  "so a Shipping build of CitySample compiles"
 )
 
 # The regex matching the lines in $_[0] (see above), capturing the first line's indentation as `ind`

@@ -25,20 +25,14 @@ Plugins/Tempo/Setup.sh    # Setup.bat on Windows
 Setup.sh will prompt you to download third party dependencies (our custom build of gRPC). Say yes.
 
 In the CitySample project Setup.sh does a few additional steps (none of which you need to know about, just FYI):
-- Fixes two bugs that will prevent you from building the project from source
+- Patches bugs in the project's source that would prevent you from building
 - Disables the project's RuleProcessor and Traffic plugins (which Tempo replaces)
-- Points your `Config/DefaultEngine.ini` at Tempo's world settings, which Tempo's time control needs:
-
-```ini
-[/Script/Engine.Engine]
-WorldSettingsClassName=/Script/TempoCore.TempoWorldSettings
-```
 
 ## 4. Build and Package
 
 ```bash
 Plugins/Tempo/Scripts/Build.sh
-Plugins/Tempo/Scripts/Build.sh # Optional - open the project in Unreal Editor to test
+Plugins/Tempo/Scripts/Run.sh   # Optional - open the project in Unreal Editor to test
 Plugins/Tempo/Scripts/Package.sh --release # --release packages a Shipping build, remove for a Development build
 ```
 
@@ -76,10 +70,12 @@ TempoCamera will replace the Road label with RoadMarking anywhere it picks up th
 
 | | |
 |---|---|
-| `Source/CitySample/Util/CitySampleBlueprintLibrary.cpp` | One line patched by `Setup.sh` (step 1) |
-| `Source/CitySample/Vehicles/CitySampleVehicleBase.cpp` | `PossessedBy` and one `#include` patched by `Setup.sh` (step 1) |
+| `Source/CitySample/Util/CitySampleBlueprintLibrary.cpp` | One line patched by `Setup.sh` (step 3) |
+| `Source/CitySample/Vehicles/CitySampleVehicleBase.cpp` | `PossessedBy` and one `#include` patched by `Setup.sh` (step 3) |
+| `Source/CitySample.Target.cs` | Its two LLM test settings guarded to a unique build environment by `Setup.sh` (step 3) |
+| `Plugins/CitySampleMassCrowd/.../MassCrowdAnimationProcessor.h` | One `#include` added by `Setup.sh` (step 3) |
 | `Plugins/Traffic/`, `Plugins/RuleProcessor/` | Descriptors renamed `*.disabled-by-tempo` |
-| `Config/DefaultEngine.ini` | Tempo's world settings (a `TEMPO_PROJECT_CONFIG` block at the end) |
+| `Config/DefaultEngine.ini` | Tempo's world settings and Mac entitlements (a `TEMPO_PROJECT_CONFIG` block at the end) |
 | `TempoEnv/` | Generated Python virtual environment with the client packages |
 
 ## See also

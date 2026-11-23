@@ -522,12 +522,18 @@ matrix entry.
   over the project's `DefaultEngine.ini`. On UE 5.8, a project that wants FastGeo back sets it in
   `Config/PluginOverrideEngine.ini`, which sits above plugin layers. 5.7 has no such layer.
   `FASTGEO_LABELING_NOTES.md` covers what supporting it would take.
-- **Stock CitySample doesn't compile on Clang, and its packaged game crashes entering a car.** Its
+- **Stock CitySample doesn't compile on Clang, can't be packaged, and its packaged game crashes
+  entering a car.** Its
   targets build at `BuildSettingsVersion.V7` (UE 5.8), which makes unreachable code an error on
   Clang, and `GetWorldInfo` in `CitySampleBlueprintLibrary.cpp` has a loop that always returns.
   And `ACitySampleVehicleBase::PossessedBy` changes Mass tags with the synchronous API, which
   asserts in a UE 5.8 game build, where a Mass phase can still be in flight (never in the editor,
-  which waits for it). `Setup.sh` runs `Scripts/PatchCitySample.sh`, which fixes both by exact
+  which waits for it). And `CitySample.Target.cs` sets two Test-build LLM options
+  unconditionally, which UnrealBuildTool refuses in an installed engine's shared build
+  environment, failing the game target in every configuration before it compiles anything. And
+  CitySampleMassCrowd's `MassCrowdAnimationProcessor.h` holds `FMassEntityQuery` members without
+  including `MassEntityQuery.h`, which only the shared PCH of Editor/Development builds hides.
+  `Setup.sh` runs `Scripts/PatchCitySample.sh`, which fixes all four by exact
   replacement of whole lines (idempotent, `-restore`; a fix whose lines Epic changed is skipped
   whole). It does nothing in a project without CitySample's source. A further CitySample source
   fix belongs there, as more entries.
@@ -536,7 +542,9 @@ matrix entry.
   `ConfigureProject.sh` sets it when the project uses the default, and the editor or cook swaps the
   class in (`UWorld::RepairWorldSettings`, editor-only), so a *package* made after that has it. It
   stays a project-side script, not plugin config, because a project with its own world-settings class
-  must keep it. Physics substepping is in `TempoCore/Config/Engine.ini` (same override rules as
+  must keep it. It also points the Mac entitlements at the engine's `Unrestricted.entitlements` when
+  the project uses the engine's App Sandbox ones (a sandboxed Shipping build has no network, so no
+  gRPC); UnrealBuildTool reads those keys without plugin config, so they can't go in TempoCore's. Physics substepping is in `TempoCore/Config/Engine.ini` (same override rules as
   FastGeo above). Without substepping, a coarse Fixed Step frame is clamped to `MaxPhysicsDeltaTime`.
   Only settings Tempo can impose unconditionally belong in that file. Anything that depends on the
   project's own value goes in `ConfigureProject.sh`.

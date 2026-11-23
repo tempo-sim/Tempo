@@ -122,9 +122,11 @@ your project root works.
 
 `PatchCitySample.sh`
 
-:   In a CitySample project, fixes two bugs in CitySample's source on UE 5.8: the line that fails
-    to compile on Clang at `BuildSettingsVersion.V7`, and the Mass calls that crash a packaged game
-    when the player gets into a car. Any other project has none of that source, and it does nothing
+:   In a CitySample project, fixes four bugs in CitySample's source on UE 5.8: the line that fails
+    to compile on Clang at `BuildSettingsVersion.V7`, the game target's Test-only LLM settings
+    that stop an installed engine from packaging it at all, a missing `#include` that fails a
+    Shipping build, and the Mass calls that crash a
+    packaged game when the player gets into a car. Any other project has none of that source, and it does nothing
     there. Called by `Setup.sh`; pass `-restore` to undo it.
 
     [:octicons-arrow-right-24: The CitySample source fixes](../guides/citysample.md#what-changed-in-your-project)

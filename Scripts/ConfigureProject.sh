@@ -18,6 +18,14 @@ set -e
 #   made after this has Tempo's world settings in every level. A project with a world-settings class
 #   of its own is left alone (with a warning), since forcing ours would replace it in its maps.
 #
+# - Mac entitlements -> the engine's Unrestricted.entitlements, when the project uses the engine's
+#   App Sandbox ones (Sandbox.Server, and Sandbox.NoNet for Shipping, by default). A sandboxed sim
+#   cannot bind a Unix socket outside its container, and a sandboxed Shipping build has no network
+#   at all, so it cannot serve gRPC. UnrealBuildTool reads these keys without any plugin's config,
+#   so they cannot go in TempoCore/Config. A project with entitlements files of its own is left
+#   alone (with a warning). Written on every host, since the config is shared by whoever packages
+#   for Mac. See docs/guides/packaging.md#packaging-for-macos.
+#
 # It is read when the project is packaged: re-package after running this.
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
@@ -74,7 +82,7 @@ if [ "$RESTORE" -eq 1 ]; then
 fi
 
 # The value the project gives a key, if any (last one wins, as in Unreal). Section-blind, which is
-# enough for this key: its name is unique to its section.
+# enough for these keys: their names are unique to their sections.
 PROJECT_VALUE() {
   grep -iE "^[[:space:]]*$1[[:space:]]*=" "$ENGINE_INI" | tail -1 | sed -E 's/^[^=]*=[[:space:]]*//; s/[[:space:]]*\r?$//'
 }
@@ -89,6 +97,26 @@ if [ -z "$WORLD_SETTINGS" ] || [ "$WORLD_SETTINGS" = "/Script/Engine.WorldSettin
 elif [ "$WORLD_SETTINGS" != "/Script/TempoCore.TempoWorldSettings" ]; then
   echo "  ! This project's world settings class is $WORLD_SETTINGS. Tempo's time control needs"
   echo "    ATempoWorldSettings: derive that class from it, or pause, step and Fixed Step won't work."
+fi
+
+# Each entitlements key separately: a project may have replaced one and not the other.
+UNRESTRICTED_ENTITLEMENTS='(FilePath="/Game/Build/Mac/Resources/Unrestricted.entitlements")'
+ENTITLEMENT_LINES=()
+for KEY in PremadeMacEntitlements ShippingSpecificMacEntitlements; do
+  VALUE=$(PROJECT_VALUE "$KEY")
+  case "$VALUE" in
+    "" | *'/Game/Build/Mac/Resources/Sandbox.'*'.entitlements"'*)
+      ENTITLEMENT_LINES+=("$KEY=$UNRESTRICTED_ENTITLEMENTS") ;;
+    "$UNRESTRICTED_ENTITLEMENTS") ;;
+    *)
+      echo "  ! This project sets its own $KEY, $VALUE. If that file enables App Sandbox"
+      echo "    (com.apple.security.app-sandbox), a packaged Mac sim can't serve gRPC; see Tempo's"
+      echo "    docs/guides/packaging.md#packaging-for-macos." ;;
+  esac
+done
+if [ "${#ENTITLEMENT_LINES[@]}" -gt 0 ]; then
+  LINES+=("[/Script/MacTargetPlatform.XcodeProjectSettings]" "${ENTITLEMENT_LINES[@]}")
+  APPLIED+=("Mac entitlements -> Unrestricted (App Sandbox would keep a packaged Mac sim off the network)")
 fi
 
 if [ "${#LINES[@]}" -eq 0 ]; then
