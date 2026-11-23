@@ -1,5 +1,7 @@
 # Tempo
 
+<img width="5116" height="1978" alt="Screenshot 2026-11-23 at 8 43 16 AM" src="https://github.com/user-attachments/assets/66bb2061-aec2-4452-9b78-3e8d9a14f66e" />
+
 Tempo is a collection of simulation-focused plugins for Unreal Engine. Tempo makes the power of Unreal accessible to simulation and robotics developers, including plugins for client APIs, sensor simulation, agent behaviors, and more. Tempo is the foundation on which you can build a simulator for your unique application - a foundation of composable plugins, not a self-contained simulator.
 
 **Full documentation lives at [tempo-sim.readthedocs.io](https://tempo-sim.readthedocs.io/).**
