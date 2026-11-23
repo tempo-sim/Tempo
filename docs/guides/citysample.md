@@ -59,12 +59,17 @@ for a full set of features.
 <img width="2880" height="600" alt="lane_rm_semantic_FisheyeCamera_000042" src="https://github.com/user-attachments/assets/c5f3d5e8-c3b5-4020-bd52-2890e771107d" />
 
 Getting the road markings to show up as a different semantic label than the road requires a couple of small content changes:
-  | Asset | Change | Do this |
-  | --- | --- | --- |
-  | `M_Freeway_Asphalt` | Change the Shading Model to Subsurface (from DefaultLit) | <img width="356" height="176" alt="M_Freeway_Asphalt_subsurface" src="https://github.com/user-attachments/assets/334e1843-4ade-49ca-a35f-d32181fdb415" /> |
-  | `M_Freeway_Asphalt` | Create new named reroute nodes containing the Base Color before and after applying decals | <img width="480" height="333" alt="M_Freeway_Asphalt_after_2" src="https://github.com/user-attachments/assets/86b4827c-e63f-4c25-a134-a05b2865180b" /> |
-  | `M_Freeway_Asphalt` | Use the new reroute nodes to set the subsurface color to 1 where there are road markings | <img width="1288" height="530" alt="M_Freeway_Asphalt_after_1" src="https://github.com/user-attachments/assets/e6826e50-bd43-4bd8-ab60-1724200e86fd" /> |
-  | `MI_FreewayAsphalt_RoadDark` | Stop overriding the Shading Mode | <img width="520" height="248" alt="MI_FreewayAsphalt_RoadDark_after" src="https://github.com/user-attachments/assets/4c7e6531-be79-4b50-919f-2a733ac7528a" /> |
+1. `M_Freeway_Asphalt`: Change the Shading Model to Subsurface (from DefaultLit)
+<img width="356" height="176" alt="M_Freeway_Asphalt_subsurface" src="https://github.com/user-attachments/assets/334e1843-4ade-49ca-a35f-d32181fdb415" />
+
+2. `M_Freeway_Asphalt`: Create new named reroute nodes containing the Base Color before and after applying decals
+<img width="480" height="333" alt="M_Freeway_Asphalt_after_2" src="https://github.com/user-attachments/assets/86b4827c-e63f-4c25-a134-a05b2865180b" />
+
+3. `M_Freeway_Asphalt`: Use the new reroute nodes to set the subsurface color to 1 where there are road markings
+<img width="1288" height="530" alt="M_Freeway_Asphalt_after_1" src="https://github.com/user-attachments/assets/e6826e50-bd43-4bd8-ab60-1724200e86fd" />
+
+4. `MI_FreewayAsphalt_RoadDark`: Stop overriding the Shading Mode
+<img width="520" height="248" alt="MI_FreewayAsphalt_RoadDark_after" src="https://github.com/user-attachments/assets/4c7e6531-be79-4b50-919f-2a733ac7528a" />
 
 TempoCamera will replace the Road label with RoadMarking anywhere it picks up this subtle change in subsurface color (this is already configured in `CitySampleAV.py`)
 
