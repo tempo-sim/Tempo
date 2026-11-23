@@ -127,6 +127,11 @@ def parse_args(argv=None):
                         "the logical CPUs, from 2 to 8.")
     g.add_argument("--lidar-color", choices=LIDAR_SIGNALS, default="reflectivity",
                    help="What colors the lidar points in the viewer (default: reflectivity).")
+    g.add_argument("--no-lidar-sync", action="store_true",
+                   help="Log the lidar cloud, the ego and the actor boxes to the viewer separately, "
+                        "each as it arrives, instead of together as one update per lidar scan. They "
+                        "update sooner, but live the cloud then trails the boxes by a step or two. "
+                        "Recording is unaffected either way.")
     g.add_argument("--ground-truth-radius-m", type=float, default=80.0,
                    help="Show/record actor boxes within this radius of the ego; 0 disables.")
     g.add_argument("--duration-s", type=float, default=0.0,

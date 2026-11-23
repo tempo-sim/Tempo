@@ -11,7 +11,7 @@ Layout: a large 3D world view on the left (ground truth + lidar + camera
 frustums), and a right column with a grid of per-sensor 2D image views.
 """
 
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Sequence
 
 import rerun.blueprint as rrb
 
@@ -27,8 +27,8 @@ def _by_key(sensors):
 
 def _camera_views(sensors, active):
     """Per active camera, its 2D views in the order color, label, depth, instance. bbox overlays
-    onto color. Returns one list per camera."""
-    per_camera = []
+    onto color. Returns a list of views per camera key, in `active`'s order."""
+    per_camera = {}
     for key, kinds in active.items():
         sensor = sensors.get(key)
         if sensor is None or not sensor.is_camera:
@@ -52,7 +52,7 @@ def _camera_views(sensors, active):
             views.append(rrb.Spatial2DView(
                 name=f"{label} instance", origin=origin, contents=["+ $origin", "+ $origin/instance"]))
         if views:
-            per_camera.append(views)
+            per_camera[key] = views
     return per_camera
 
 
@@ -102,25 +102,36 @@ def _follow_eye():
 
 def build_blueprint(sensors: Iterable, active: dict, *, images_in_3d: bool = False,
                     follow_entity: Optional[str] = None, extra_views=(),
-                    column_per_camera: bool = False, frustums_in_3d: bool = True) -> rrb.Blueprint:
+                    column_per_camera: bool = False, frustums_in_3d: bool = True,
+                    camera_columns: Optional[Sequence[Sequence[str]]] = None,
+                    sensor_share: float = 1.0) -> rrb.Blueprint:
     """`sensors`: SensorInfo-likes (``.key``, ``.owner``, ``.name``, ``.is_camera``).
     `follow_entity`: an entity (e.g. the ego's ground-truth entity) the 3D view rides along with.
     `frustums_in_3d`: draw each camera's frustum in the 3D view.
     `extra_views`: more views for the right-hand column (e.g. a time series).
     `column_per_camera`: lay the camera views out one column per camera, its image kinds stacked
     down it (color, label, depth) and so lined up across cameras, instead of packing every view
-    into one auto-sized grid."""
+    into one auto-sized grid.
+    `camera_columns`: with `column_per_camera`, group cameras (by key) into shared columns, left to
+    right, each camera's views stacked down its column in the order given. A camera in no group gets
+    a column of its own, after them.
+    `sensor_share`: with `column_per_camera`, the camera columns' width together, relative to the 3D
+    view's (1.0 splits the window in half)."""
     by_key = _by_key(sensors)
     world_view = _world_view(by_key, active, images_in_3d, follow_entity, frustums_in_3d)
 
     per_camera = _camera_views(by_key, active)
     if column_per_camera and per_camera:
-        side = rrb.Horizontal(*[rrb.Vertical(*views) for views in per_camera], name="Sensors")
+        grouped = [list(group) for group in (camera_columns or ())]
+        placed = {key for group in grouped for key in group}
+        grouped += [[key] for key in per_camera if key not in placed]
+        columns = [[v for key in group for v in per_camera.get(key, ())] for group in grouped]
+        side = rrb.Horizontal(*[rrb.Vertical(*views) for views in columns if views], name="Sensors")
         if extra_views:
             side = rrb.Vertical(side, *extra_views)
-        layout = rrb.Horizontal(world_view, side, column_shares=[1, 1])
+        layout = rrb.Horizontal(world_view, side, column_shares=[1, sensor_share])
     elif per_camera or extra_views:
-        views = [v for camera in per_camera for v in camera] + list(extra_views)
+        views = [v for camera in per_camera.values() for v in camera] + list(extra_views)
         layout = rrb.Horizontal(world_view, rrb.Grid(*views, name="Sensors"), column_shares=[3, 2])
     else:
         layout = world_view

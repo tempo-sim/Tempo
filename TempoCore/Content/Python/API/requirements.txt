@@ -31,8 +31,10 @@ pyvistaqt==0.11.3
 qasync==0.27.1
 PyQt5==5.15.11
 av==17.0.1
-# RerunPlayground example client: rerun viewer/logging + Gradio control panel.
-rerun-sdk==0.26.2
+# RerunPlayground and CitySampleAV example clients: rerun viewer/logging + Gradio control panel.
+# CitySampleAV needs >= 0.43: its 3D view's eye looks at the ego through EyeControls3D's
+# look_target, which older releases lack (they fall back to rerun's own framing).
+rerun-sdk==0.43.2
 gradio==6.26.0
 # Gradio's own web stack. Gradio constrains these loosely (fastapi>=0.115.2,<1.0 and
 # starlette>=1.0.1,<2.0); they are pinned here so the venv resolves reproducibly.

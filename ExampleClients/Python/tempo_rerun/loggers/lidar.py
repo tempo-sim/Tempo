@@ -177,7 +177,9 @@ def colorize(scan: AssembledScan, mode: str, remap=None) -> dict:
     return {"colors": colormap.scalar_to_rgb(scan.intensity, vmin=0.0, vmax=1.0)}
 
 
-async def stream_lidar(sensor, mode="intensity", *, remap=None, visualize=True, taps=()):
+async def stream_lidar(sensor, mode="intensity", *, remap=None, visualize=True, taps=(), sink=None):
+    """`sink`, if given, receives each AssembledScan to show instead of this logging it on the
+    sensor's entity (tempo_rerun.ego_frame logs it together with the actors it scanned)."""
     entity = sensor.entity_path
     points_entity = f"{entity}/points"
     accumulator = ScanAccumulator()
@@ -188,9 +190,12 @@ async def stream_lidar(sensor, mode="intensity", *, remap=None, visualize=True, 
         for segment in segments:
             for scan in accumulator.add(segment):
                 if visualize:
-                    set_sim_time(conv.SIM_TIME, scan.capture_time_s)
-                    rr.log(entity, conv.transform_to_rerun(scan.capture_transform))
-                    rr.log(points_entity, rr.Points3D(scan.xyz, **colorize(scan, mode, remap)))
+                    if sink is not None:
+                        sink(scan)
+                    else:
+                        set_sim_time(conv.SIM_TIME, scan.capture_time_s)
+                        rr.log(entity, conv.transform_to_rerun(scan.capture_transform))
+                        rr.log(points_entity, rr.Points3D(scan.xyz, **colorize(scan, mode, remap)))
                 for tap in taps:
                     tap(scan)
 

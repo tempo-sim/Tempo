@@ -161,7 +161,12 @@ kinds:
   behind a truck gets a box around its visible half. They are drawn over each camera's color image.
 - **3D boxes are the actors' ground truth**: local bounds placed by the actor's pose, for the
   moving actors within `--ground-truth-radius-m` (80 m) of the ego. They are drawn in the 3D view,
-  colored by class.
+  colored by class. In the viewer they, the ego and the lidar cloud are logged together, as one
+  update on the ego's entity per lidar scan (in the ego's frame; the 3D view follows its empty
+  child `world/ego/follow`). Actor states arrive a step or two before the lidar's readback, and a
+  live viewer shows separately logged entities as it ingests them, so logged apart the cloud would
+  trail the boxes around it. `--no-lidar-sync` logs them apart anyway, each as it arrives. The
+  recording is unaffected either way.
 
 **Known gaps**, as a starting point for iterating:
 

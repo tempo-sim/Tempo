@@ -30,6 +30,7 @@ from tempo_rerun.loggers import image as image_logger
 from tempo_rerun.loggers import lidar as lidar_logger
 from tempo_rerun.loggers import world as world_logger
 from tempo_rerun.streaming import STATS
+from tempo_rerun.ego_frame import EgoFrameLogger, follow_entity
 
 from . import ego as ego_mod
 from . import lighting
@@ -40,6 +41,14 @@ from .recorder import Recorder
 from .rig import MountedRig, mount_rig
 
 EGO_ENTITY = f"{conv.WORLD}/ego"
+
+# The cameras the viewer shows in full -- color, label and depth down a column each, in this order.
+# Every other camera shows its color image only, all of them stacked in one column after these.
+DETAIL_CAMERAS = ("FisheyeCamera", "FrontCamera")
+
+# The camera columns' width together, relative to the 3D view's: 1.5 gives them three fifths of the
+# window (a fifth each, with three columns) and the 3D view two fifths.
+SENSOR_SHARE = 1.5
 
 
 def sensor_entity(name: str) -> str:
@@ -101,6 +110,7 @@ class Session:
         self.background: List[asyncio.Task] = []
         self._ego: Optional[ego_mod.Ego] = None
         self._mounted: Optional[MountedRig] = None
+        self.ego_frame: Optional[EgoFrameLogger] = None
         self.stop = asyncio.Event()
 
     @property
@@ -122,11 +132,12 @@ class Session:
                 active[s.key] = {"points"}
             else:
                 kinds = {"color"}
-                if self.args.labels:
+                detail = s.name in DETAIL_CAMERAS
+                if self.args.labels and detail:
                     kinds.add("label")
                     if self.remap is not None and self.args.instance_view:
                         kinds.add("instance")
-                if self.args.depth:
+                if self.args.depth and detail:
                     kinds.add("depth")
                 if self.show_bboxes:
                     kinds.add("bbox")
@@ -134,11 +145,25 @@ class Session:
         return active
 
     def _blueprint(self, mounted: MountedRig):
-        # One column per camera, its color (with 2D boxes), label and depth stacked down it.
+        # A column for each detail camera, its color (with 2D boxes), label and depth stacked down
+        # it, then one column with every other camera's color image.
         # No frustums in the 3D view: a rig's cameras sit together on the roof, and their frustums
         # only clutter the lidar.
-        return build_blueprint(mounted.infos, self._active(mounted), follow_entity=EGO_ENTITY,
-                               column_per_camera=True, frustums_in_3d=False)
+        cameras = [s for s in mounted.infos if s.is_camera]
+        detail = sorted((s for s in cameras if s.name in DETAIL_CAMERAS),
+                        key=lambda s: DETAIL_CAMERAS.index(s.name))
+        others = [s.key for s in cameras if s.name not in DETAIL_CAMERAS]
+        columns = [[s.key] for s in detail] + ([others] if others else [])
+        # Combined, the ego's entity holds the boxes, and rerun drops box centers on a view's origin
+        # entity, so the view follows an empty child of it instead.
+        follow = follow_entity(EGO_ENTITY) if self._combined(mounted) else EGO_ENTITY
+        return build_blueprint(mounted.infos, self._active(mounted), follow_entity=follow,
+                               column_per_camera=True, frustums_in_3d=False, camera_columns=columns,
+                               sensor_share=SENSOR_SHARE)
+
+    def _combined(self, mounted: MountedRig) -> bool:
+        """Whether the lidar, ego and boxes are logged as one update (tempo_rerun.ego_frame)."""
+        return any(s.is_lidar for s in mounted.infos) and not self.args.no_lidar_sync
 
     def start_viewer(self) -> None:
         _compat.init(self.args.app_id)
@@ -146,6 +171,10 @@ class Session:
                              rrd_path=self.args.save_rrd, memory_limit=self.args.viewer_memory_limit)
         rr.log(conv.WORLD, conv.WORLD_VIEW_COORDINATES, static=True)
         rr.log("/", rr.AnnotationContext(self.labels.annotation_infos()), static=True)
+        # The entity the 3D view follows when the lidar is logged in the ego's frame: an empty
+        # child of the ego, given an identity transform so it exists from the start. (The
+        # translation is explicit: rerun drops a Transform3D with no fields set as empty.)
+        rr.log(follow_entity(EGO_ENTITY), rr.Transform3D(translation=[0.0, 0.0, 0.0]), static=True)
 
     @property
     def logging(self) -> bool:
@@ -213,27 +242,39 @@ class Session:
         rec, viz = self.recorder, self.logging
         if self.streaming_since is None:
             self.streaming_since = time.monotonic()
+        # The cloud, the ego and the ground-truth boxes go to the viewer as one update per step, so
+        # a live viewer can't show one before the others (tempo_rerun.ego_frame). One per car: the
+        # last car's unfinished steps die with it.
+        lidars = [s for s in self.mounted.infos if s.is_lidar]
+        frame = None
+        if viz and self._combined(self.mounted):
+            frame = EgoFrameLogger(EGO_ENTITY, [s.key for s in lidars], lidar_mode=self.args.lidar_color,
+                                   remap=self.remap, ground_truth=self.args.ground_truth_radius_m > 0)
+        self.ego_frame = frame
         for s in self.mounted.infos:
             if s.is_lidar:
                 def count(_scan, name=s.name):
                     self.revolutions[name] += 1
                 self._spawn(lidar_logger.stream_lidar(
                     s, self.args.lidar_color, remap=self.remap, visualize=viz,
+                    sink=frame.lidar_sink(s.key) if frame else None,
                     taps=[count] + ([rec.lidar_tap(s.name, self.remap)] if rec else [])),
                     f"{s.name}:points", self.stream_tasks)
                 continue
             self._spawn(image_logger.stream_color(
                 s, visualize=viz, taps=[rec.color_tap(s.name)] if rec else []), f"{s.name}:color",
                 self.stream_tasks)
-            if self.args.labels:
+            # Only the detail cameras show label and depth; the others stream them just to record.
+            detail = s.name in DETAIL_CAMERAS
+            if self.args.labels and (detail or rec):
                 self._spawn(image_logger.stream_label(
-                    s, remap=self.remap, visualize=viz, log_instance=self.args.instance_view,
+                    s, remap=self.remap, visualize=viz and detail, log_instance=self.args.instance_view,
                     taps=[rec.label_tap(s.name, self.remap)] if rec else []),
                     f"{s.name}:label", self.stream_tasks)
             record_depth = rec is not None and not self.args.no_record_depth
-            if self.args.depth or record_depth:
+            if (self.args.depth and detail) or record_depth:
                 self._spawn(image_logger.stream_depth(
-                    s, visualize=viz and self.args.depth, view_max_m=self.args.depth_view_max_m,
+                    s, visualize=viz and self.args.depth and detail, view_max_m=self.args.depth_view_max_m,
                     taps=[rec.depth_tap(s.name)] if rec and record_depth else []),
                     f"{s.name}:depth", self.stream_tasks)
             if self.stream_bboxes:
@@ -244,12 +285,14 @@ class Session:
 
         self._spawn(world_logger.stream_ego(
             self.ego.name, entity=EGO_ENTITY, visualize=viz, show_labels=False,
+            sink=frame.ego_sink if frame else None,
             taps=[rec.ego_tap()] if rec else []),
             "ego", self.stream_tasks)
         if self.args.ground_truth_radius_m > 0:
             self._spawn(world_logger.stream_ground_truth(
                 self.ego.name, search_radius_m=self.args.ground_truth_radius_m, exclude=[self.ego.name],
                 classify=self._box_class, visualize=viz, show_labels=False,
+                sink=frame.actors_sink if frame else None,
                 taps=[rec.actors_tap(self.actor_labels.semantic)] if rec else []),
                 "ground_truth", self.stream_tasks)
 
@@ -263,6 +306,9 @@ class Session:
             task.cancel()
         await asyncio.gather(*self.stream_tasks, return_exceptions=True)
         self.stream_tasks.clear()
+        if self.ego_frame is not None:
+            self.ego_frame.close()
+            self.ego_frame = None
 
     # -- time ------------------------------------------------------------------------------------
 
