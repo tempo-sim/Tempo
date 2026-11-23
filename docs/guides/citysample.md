@@ -1,5 +1,7 @@
 # Tempo + CitySample Quick Start
 
+<img width="5116" height="1978" alt="Screenshot 2026-11-23 at 8 43 16 AM" src="https://github.com/user-attachments/assets/c0f3acfe-4fc6-42f8-b390-6c6a0972d3bc" />
+
 Epic's **CitySample** — the project behind the *Matrix Awakens* city — is a large, fully authored
 urban environment with traffic, crowds and drivable vehicles. It's a great set of content to show
 off Tempo's features.
