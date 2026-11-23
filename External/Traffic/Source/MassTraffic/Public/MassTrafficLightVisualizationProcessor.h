@@ -26,7 +26,10 @@ struct MASSTRAFFIC_API FMassTrafficLightInstanceCustomData
 
 	FMassTrafficLightInstanceCustomData(const bool VehicleGo, const bool VehicleGoProtectedLeft, const bool VehiclePrepareToStop, const bool PedestrianGo_FrontSide, const bool PedestrianGo_LeftSide, const bool PedestrianGo_RightSide);
 	
-	FMassTrafficLightInstanceCustomData(const EMassTrafficLightStateFlags TrafficLightStateFlags); 
+	FMassTrafficLightInstanceCustomData(const EMassTrafficLightStateFlags TrafficLightStateFlags);
+
+	/** Packs TrafficLight's state in the layout its materials decode (see FMassTrafficLight::bUsesEpicLightStateLayout). */
+	explicit FMassTrafficLightInstanceCustomData(const struct FMassTrafficLight& TrafficLight);
 
 	
 	/** Bit packed param with EMassTrafficLightStateFlags packed into the least significant 8 bits */ 

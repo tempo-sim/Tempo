@@ -223,7 +223,11 @@ struct MASSTRAFFIC_API FMassTrafficLight
 	UPROPERTY()
 	FVector MeshScale = FVector::OneVector;
 
-	
+	/** Copied from this light's FMassTrafficLightTypeData. See FMassTrafficLightTypeData::bUsesEpicLightStateLayout. */
+	UPROPERTY()
+	bool bUsesEpicLightStateLayout = false;
+
+
 	FVector GetXDirection() const;
 
 	FColor GetDebugColorForVehicles() const;

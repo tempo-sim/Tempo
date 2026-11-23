@@ -38,9 +38,17 @@ struct MASSTRAFFIC_API FMassTrafficLightTypeData
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	int32 NumLanes = 0;
 
+	/**
+	 * Whether this light's materials decode its state in Epic's original EMassTrafficLightStateFlags layout, which predates
+	 * VehicleGoProtectedLeft. Set on the types registered from a baked UMassTrafficLightTypesDataAsset (CitySample's).
+	 */
+	UPROPERTY(Transient)
+	bool bUsesEpicLightStateLayout = false;
+
 	bool operator==(const FMassTrafficLightTypeData& Other) const
 	{
-		return Name == Other.Name && StaticMeshInstanceDesc == Other.StaticMeshInstanceDesc && NumLanes == Other.NumLanes;
+		return Name == Other.Name && StaticMeshInstanceDesc == Other.StaticMeshInstanceDesc && NumLanes == Other.NumLanes
+			&& bUsesEpicLightStateLayout == Other.bUsesEpicLightStateLayout;
 	}
 };
 

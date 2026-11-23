@@ -923,7 +923,8 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 					// Add traffic light to intersection
 					if (TrafficLightTypeIndex != INDEX_NONE)
 					{
-						const FMassTrafficLight TrafficLight(TrafficLightDetail.Position, TrafficLightDetail.ZRotation, TrafficLightTypeIndex, EMassTrafficLightStateFlags::None, TrafficLightDetail.MeshScale);
+						FMassTrafficLight TrafficLight(TrafficLightDetail.Position, TrafficLightDetail.ZRotation, TrafficLightTypeIndex, EMassTrafficLightStateFlags::None, TrafficLightDetail.MeshScale);
+						TrafficLight.bUsesEpicLightStateLayout = TrafficLightTypes[TrafficLightTypeIndex].bUsesEpicLightStateLayout;
 						const int8 TrafficLightIndex = static_cast<int8>(IntersectionFragment.TrafficLights.Add(TrafficLight));
 							
 						IntersectionSide_To_TrafficLightIndex.Add(TrafficLightIndex);
@@ -1072,8 +1073,23 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 						Period.CrosswalkWaitingLanes.Append(LeftSide.CrosswalkWaitingLanes.Array());
 						Period.CrosswalkWaitingLanes.Append(RightSide.CrosswalkWaitingLanes.Array());
 							
-						Period.AddTrafficLightControl(ThisTrafficLightIndex, EMassTrafficLightStateFlags::VehicleGo | EMassTrafficLightStateFlags::PedestrianGo);
-						Period.AddTrafficLightControl(OppositeTrafficLightIndex, EMassTrafficLightStateFlags::VehicleGo | EMassTrafficLightStateFlags::PedestrianGo);
+						// Lights with Epic's materials (CitySample's) have a pedestrian signal per side of the light. Epic shows
+						// walk for this period on the front of this and the opposite light, and the right of the left and
+						// right lights, which are the signals facing the crosswalks across the left and right sides.
+						const bool bUsesEpicLightStateLayout = IntersectionFragment.TrafficLights.IsValidIndex(ThisTrafficLightIndex)
+							&& IntersectionFragment.TrafficLights[ThisTrafficLightIndex].bUsesEpicLightStateLayout;
+						if (bUsesEpicLightStateLayout)
+						{
+							Period.AddTrafficLightControl(ThisTrafficLightIndex, EMassTrafficLightStateFlags::VehicleGo | EMassTrafficLightStateFlags::PedestrianGo_FrontSide);
+							Period.AddTrafficLightControl(OppositeTrafficLightIndex, EMassTrafficLightStateFlags::VehicleGo | EMassTrafficLightStateFlags::PedestrianGo_FrontSide);
+							Period.AddTrafficLightControl(LeftTrafficLightIndex, EMassTrafficLightStateFlags::PedestrianGo_RightSide);
+							Period.AddTrafficLightControl(RightTrafficLightIndex, EMassTrafficLightStateFlags::PedestrianGo_RightSide);
+						}
+						else
+						{
+							Period.AddTrafficLightControl(ThisTrafficLightIndex, EMassTrafficLightStateFlags::VehicleGo | EMassTrafficLightStateFlags::PedestrianGo);
+							Period.AddTrafficLightControl(OppositeTrafficLightIndex, EMassTrafficLightStateFlags::VehicleGo | EMassTrafficLightStateFlags::PedestrianGo);
+						}
 
 						// Remember which traffic light controls which lane, for Period::Finalize()
 						LaneToTrafficLightMap.SetTrafficLightForLanes(VehicleTrafficLanes_This_To_OppositeAndRight, ThisTrafficLightIndex);

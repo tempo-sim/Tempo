@@ -66,7 +66,7 @@ EMassActorSpawnRequestAction  UMassTrafficLightRepresentationActorManagement::On
 		}
 
 		// Set light mesh primitive data
-		const FMassTrafficLightInstanceCustomData PackedCustomData(TrafficLight.TrafficLightStateFlags);
+		const FMassTrafficLightInstanceCustomData PackedCustomData(TrafficLight);
 		TrafficLightMeshComponent->SetCustomPrimitiveDataFloat(/*DataIndex*/1, PackedCustomData.PackedParam1);
 		
 		TrafficLightMeshComponent->RegisterComponent();

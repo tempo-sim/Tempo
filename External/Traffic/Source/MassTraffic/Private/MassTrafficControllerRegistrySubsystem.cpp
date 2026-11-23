@@ -41,8 +41,10 @@ void UMassTrafficControllerRegistrySubsystem::RegisterTrafficLightsFromDataAsset
 	if (TypesDataAsset != nullptr)
 	{
 		RegistryTypeIndices.Reserve(TypesDataAsset->TrafficLightTypes.Num());
-		for (const FMassTrafficLightTypeData& TrafficLightType : TypesDataAsset->TrafficLightTypes)
+		for (FMassTrafficLightTypeData TrafficLightType : TypesDataAsset->TrafficLightTypes)
 		{
+			// Baked light types come with Epic's materials, which decode the light state in Epic's bit layout.
+			TrafficLightType.bUsesEpicLightStateLayout = true;
 			RegistryTypeIndices.Add(static_cast<int16>(RegisterTrafficLightType(TrafficLightType)));
 		}
 	}
