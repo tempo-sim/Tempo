@@ -56,8 +56,9 @@ examples = [
     "PyQt5>=5.15",
     "av>=17.0",
     "pynput>=1.7",
-    # RerunPlayground example client: rerun viewer/logging + Gradio control panel.
-    "rerun-sdk>=0.23",
+    # RerunPlayground and CitySampleAV example clients: rerun viewer/logging + Gradio control
+    # panel. CitySampleAV's 3D view needs EyeControls3D's look_target, new in 0.43.
+    "rerun-sdk>=0.43",
     "gradio>=6.15.1",
     # gradio already constrains fastapi/starlette (fastapi>=0.115.2,<1.0 and
     # starlette>=1.0.1,<2.0), so only the starlette security floor is restated here:

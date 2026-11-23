@@ -99,6 +99,11 @@ void UMassTrafficIntersectionSpawnDataGenerator::Generate(UObject& QueryOwner,
 	// Push data from the IntersectionDetails into the lanes.
 	SetupLaneData(*MassTrafficSubsystem, *MassTrafficSettings, *ZoneGraphSubsystem, IntersectionDetailsMap);
 
+	if (bLinkIntersectionLanesToCrosswalks)
+	{
+		LinkIntersectionLanesToCrosswalks(*MassTrafficSubsystem, *MassTrafficSettings, *ZoneGraphSubsystem, IntersectionDetailsMap);
+	}
+
 	// The spawner decides which entity configs exist; we only get to index into them. Epic's
 	// CitySample spawner carries a single intersection config, from before this plugin split
 	// intersections into light- and sign-controlled ones. Without a config for the sign
@@ -667,6 +672,103 @@ void UMassTrafficIntersectionSpawnDataGenerator::SetupLaneData(
 	}
 }
 
+void UMassTrafficIntersectionSpawnDataGenerator::LinkIntersectionLanesToCrosswalks(
+		UMassTrafficSubsystem& MassTrafficSubsystem,
+		const UMassTrafficSettings& MassTrafficSettings,
+		const UZoneGraphSubsystem& ZoneGraphSubsystem,
+		const FIntersectionDetailsMap& IntersectionDetailsMap) const
+{
+	// Vehicles yield to pedestrians on an intersection lane's DownstreamCrosswalkLanes, and pedestrians yield to
+	// vehicles on a crosswalk's IncomingVehicleLanes. Tempo road actors fill both in (UTempoAgentsWorldSubsystem).
+	// Content without them, such as CitySample's, would otherwise have neither, so vehicles would drive through
+	// pedestrians on open crosswalks. The crosswalks found for each intersection side are the candidates, and a lane
+	// is linked to each one it actually crosses.
+	int32 NumIntersectionsLinked = 0;
+	int32 NumIntersectionsWithoutCrossings = 0;
+	int32 NumLaneCrosswalkLinks = 0;
+
+	for (const TTuple<FZoneGraphDataHandle, FZoneIndexToIntersectionDetailMap>& ZoneIndexToIntersectionDetailMapPair : IntersectionDetailsMap)
+	{
+		const FZoneGraphStorage* ZoneGraphStorage = ZoneGraphSubsystem.GetZoneGraphStorage(ZoneIndexToIntersectionDetailMapPair.Key);
+
+		if (!ensureMsgf(ZoneGraphStorage != nullptr, TEXT("Must get valid ZoneGraphStorage in UMassTrafficIntersectionSpawnDataGenerator::LinkIntersectionLanesToCrosswalks.")))
+		{
+			continue;
+		}
+
+		for (const TTuple<int32, FMassTrafficIntersectionDetail>& ZoneIndexToIntersectionDetailPair : ZoneIndexToIntersectionDetailMapPair.Value)
+		{
+			const FMassTrafficIntersectionDetail& IntersectionDetail = ZoneIndexToIntersectionDetailPair.Value;
+
+			// Road crosswalks are built from lanes that are already linked.
+			if (IntersectionDetail.bIsRoadCrosswalk)
+			{
+				continue;
+			}
+
+			TSet<int32> CrosswalkLaneIndices(IntersectionDetail.HiddenOutboundSideHints.CrosswalkLanes);
+			TArray<FZoneGraphTrafficLaneData*> VehicleIntersectionLanes;
+			bool bAlreadyLinked = false;
+
+			for (const FMassTrafficIntersectionSide& Side : IntersectionDetail.Sides)
+			{
+				CrosswalkLaneIndices.Append(Side.CrosswalkLanes);
+
+				for (const auto& VehicleIntersectionLaneElem : Side.VehicleIntersectionLanes)
+				{
+					if (FZoneGraphTrafficLaneData* VehicleIntersectionLane = VehicleIntersectionLaneElem.Key)
+					{
+						VehicleIntersectionLanes.AddUnique(VehicleIntersectionLane);
+						bAlreadyLinked |= !VehicleIntersectionLane->DownstreamCrosswalkLanes.IsEmpty();
+					}
+				}
+			}
+
+			// Leave intersections that something else (Tempo road actors, or an earlier spawn) has already linked.
+			if (bAlreadyLinked || CrosswalkLaneIndices.IsEmpty() || VehicleIntersectionLanes.IsEmpty())
+			{
+				continue;
+			}
+
+			int32 NumLinksForIntersection = 0;
+
+			for (FZoneGraphTrafficLaneData* VehicleIntersectionLane : VehicleIntersectionLanes)
+			{
+				for (const int32 CrosswalkLaneIndex : CrosswalkLaneIndices)
+				{
+					const FZoneGraphLaneHandle CrosswalkLaneHandle(CrosswalkLaneIndex, ZoneIndexToIntersectionDetailMapPair.Key);
+
+					// Only link crosswalks the lane actually crosses. Each side's crosswalks are found by distance, so
+					// a lane turning away from a side won't cross that side's crosswalk.
+					if (float EnterDistance, ExitDistance; UE::MassTraffic::TryGetEnterAndExitDistancesAlongQueryLane(MassTrafficSubsystem, MassTrafficSettings, *ZoneGraphStorage, VehicleIntersectionLane->LaneHandle, CrosswalkLaneHandle, EnterDistance, ExitDistance, false))
+					{
+						MassTrafficSubsystem.AddDownstreamCrosswalkLane(VehicleIntersectionLane->LaneHandle, CrosswalkLaneHandle, EnterDistance);
+						++NumLinksForIntersection;
+					}
+				}
+			}
+
+			if (NumLinksForIntersection > 0)
+			{
+				++NumIntersectionsLinked;
+				NumLaneCrosswalkLinks += NumLinksForIntersection;
+			}
+			else
+			{
+				++NumIntersectionsWithoutCrossings;
+			}
+		}
+	}
+
+	if (NumIntersectionsLinked > 0 || NumIntersectionsWithoutCrossings > 0)
+	{
+		// Intersections whose crosswalks no intersection lane crosses (for instance because the crosswalks lie on the
+		// approach roads instead) get no pedestrian yielding from this.
+		UE_LOG(LogMassTraffic, Log, TEXT("%s linked intersection lanes to crosswalks they cross at %d intersections (%d links). %d intersections with crosswalks had no intersection lane crossing them."),
+			*GetName(), NumIntersectionsLinked, NumLaneCrosswalkLinks, NumIntersectionsWithoutCrossings);
+	}
+}
+
 void UMassTrafficIntersectionSpawnDataGenerator::BuildIntersectionFragments(
 	const FIntersectionDetailsMap& IntersectionDetailsMap,
 	const bool bCanSpawnTrafficSignIntersections,
@@ -821,7 +923,8 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 					// Add traffic light to intersection
 					if (TrafficLightTypeIndex != INDEX_NONE)
 					{
-						const FMassTrafficLight TrafficLight(TrafficLightDetail.Position, TrafficLightDetail.ZRotation, TrafficLightTypeIndex, EMassTrafficLightStateFlags::None, TrafficLightDetail.MeshScale);
+						FMassTrafficLight TrafficLight(TrafficLightDetail.Position, TrafficLightDetail.ZRotation, TrafficLightTypeIndex, EMassTrafficLightStateFlags::None, TrafficLightDetail.MeshScale);
+						TrafficLight.bUsesEpicLightStateLayout = TrafficLightTypes[TrafficLightTypeIndex].bUsesEpicLightStateLayout;
 						const int8 TrafficLightIndex = static_cast<int8>(IntersectionFragment.TrafficLights.Add(TrafficLight));
 							
 						IntersectionSide_To_TrafficLightIndex.Add(TrafficLightIndex);
@@ -970,8 +1073,23 @@ void UMassTrafficIntersectionSpawnDataGenerator::GenerateTrafficLightIntersectio
 						Period.CrosswalkWaitingLanes.Append(LeftSide.CrosswalkWaitingLanes.Array());
 						Period.CrosswalkWaitingLanes.Append(RightSide.CrosswalkWaitingLanes.Array());
 							
-						Period.AddTrafficLightControl(ThisTrafficLightIndex, EMassTrafficLightStateFlags::VehicleGo | EMassTrafficLightStateFlags::PedestrianGo);
-						Period.AddTrafficLightControl(OppositeTrafficLightIndex, EMassTrafficLightStateFlags::VehicleGo | EMassTrafficLightStateFlags::PedestrianGo);
+						// Lights with Epic's materials (CitySample's) have a pedestrian signal per side of the light. Epic shows
+						// walk for this period on the front of this and the opposite light, and the right of the left and
+						// right lights, which are the signals facing the crosswalks across the left and right sides.
+						const bool bUsesEpicLightStateLayout = IntersectionFragment.TrafficLights.IsValidIndex(ThisTrafficLightIndex)
+							&& IntersectionFragment.TrafficLights[ThisTrafficLightIndex].bUsesEpicLightStateLayout;
+						if (bUsesEpicLightStateLayout)
+						{
+							Period.AddTrafficLightControl(ThisTrafficLightIndex, EMassTrafficLightStateFlags::VehicleGo | EMassTrafficLightStateFlags::PedestrianGo_FrontSide);
+							Period.AddTrafficLightControl(OppositeTrafficLightIndex, EMassTrafficLightStateFlags::VehicleGo | EMassTrafficLightStateFlags::PedestrianGo_FrontSide);
+							Period.AddTrafficLightControl(LeftTrafficLightIndex, EMassTrafficLightStateFlags::PedestrianGo_RightSide);
+							Period.AddTrafficLightControl(RightTrafficLightIndex, EMassTrafficLightStateFlags::PedestrianGo_RightSide);
+						}
+						else
+						{
+							Period.AddTrafficLightControl(ThisTrafficLightIndex, EMassTrafficLightStateFlags::VehicleGo | EMassTrafficLightStateFlags::PedestrianGo);
+							Period.AddTrafficLightControl(OppositeTrafficLightIndex, EMassTrafficLightStateFlags::VehicleGo | EMassTrafficLightStateFlags::PedestrianGo);
+						}
 
 						// Remember which traffic light controls which lane, for Period::Finalize()
 						LaneToTrafficLightMap.SetTrafficLightForLanes(VehicleTrafficLanes_This_To_OppositeAndRight, ThisTrafficLightIndex);

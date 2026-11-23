@@ -35,6 +35,11 @@ UMassTrafficCrowdYieldProcessor::UMassTrafficCrowdYieldProcessor()
 	// UMassTrafficCrowdYieldProcessor runs "just before" UMassSteerToMoveTargetProcessor.
 	ExecutionOrder.ExecuteAfter.Add(UE::Mass::ProcessorGroupNames::Tasks);
 	ExecutionOrder.ExecuteBefore.Add(UE::Mass::ProcessorGroupNames::Avoidance);
+
+	// We read the core vehicle infos UMassTrafficLaneMetadataProcessor builds each frame. Declared here rather than
+	// left to the project's DefaultMass.ini, so a project that doesn't configure it (CitySample) doesn't read them
+	// while they're being rebuilt.
+	ExecutionOrder.ExecuteAfter.Add(UE::MassTraffic::ProcessorGroupNames::VehicleLaneMetadata);
 }
 
 void UMassTrafficCrowdYieldProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
@@ -177,7 +182,9 @@ void UMassTrafficCrowdYieldProcessor::Execute(FMassEntityManager& EntityManager,
 					if (CurrentTrafficLaneData.LaneHandle != CrossingTrafficLaneData.LaneHandle)
 					{
 						// Only consider the vehicle if it is heading into the crossing lane.
-						if (CoreVehicleInfo.VehicleNextLane == nullptr || CoreVehicleInfo.VehicleNextLane->LaneHandle != CrossingTrafficLaneData.LaneHandle)
+						// Compare addresses rather than dereferencing VehicleNextLane. Both point into the same
+						// traffic lane data array, so this is equivalent, and doesn't read through the pointer.
+						if (CoreVehicleInfo.VehicleNextLane != &CrossingTrafficLaneData)
 						{
 							continue;
 						}

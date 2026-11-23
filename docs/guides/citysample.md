@@ -1,177 +1,83 @@
 # Tempo + CitySample Quick Start
 
-!!! warning "Work in progress"
-
-    This page is a work in progress. The steps below get a stock CitySample project building and
-    running with Tempo, but the integration is still settling and the details here may change.
+<img width="5116" height="1978" alt="Screenshot 2026-11-23 at 8 43 16 AM" src="https://github.com/user-attachments/assets/c0f3acfe-4fc6-42f8-b390-6c6a0972d3bc" />
 
 Epic's **CitySample** — the project behind the *Matrix Awakens* city — is a large, fully authored
-urban environment with traffic, crowds and drivable vehicles already in it. It is a natural host
-for Tempo: Tempo's [Traffic](../plugins/traffic.md) plugin is a fork of CitySample's own, so the
-simulation you get is the one the content was built for.
+urban environment with traffic, crowds and drivable vehicles. It's a great set of content to show
+off Tempo's features.
 
-That shared ancestry is also the thing you have to handle. This page is the short path from a
-stock CitySample checkout to a Tempo gRPC server you can drive from Python.
-
-!!! info "Read [Installation](../getting-started/installation.md) too"
-
-    This page covers only what is *different* about CitySample. The general install flow, and what
-    `Setup.sh` and `Build.sh` do, are on the [Installation](../getting-started/installation.md)
-    page.
-
-## Before you start
+## 1. Prerequisites
 
 - The [prerequisites](../getting-started/prerequisites.md) for your platform — `jq`, and
   `UNREAL_ENGINE_PATH` on Linux.
-- A CitySample checkout on **UE 5.7 or 5.8**. Epic distributes CitySample through the Epic Games
-  Launcher and Fab. Tempo does not support 5.6 or earlier.
-
-## 1. Patch CitySample so it compiles { #patch-citysample }
-
-Do this first, before adding Tempo — it is a problem in CitySample's own code, and it will fail a
-stock build on macOS or Linux with no plugin involved:
-
-```text
-CitySample/Source/CitySample/Util/CitySampleBlueprintLibrary.cpp:203:97: error: loop will run
-    at most once (loop increment never executed) [-Werror,-Wunreachable-code-loop-increment]
-  203 |  for (TActorIterator<ACitySampleWorldInfo> It(World, ACitySampleWorldInfo::StaticClass()); It; ++It)
-      |                                                                                               ^~~~
-```
-
-The loop body returns unconditionally, so `++It` can never run. The function means "return the
-first `ACitySampleWorldInfo`, or `nullptr`" — write that directly:
-
-```cpp title="Source/CitySample/Util/CitySampleBlueprintLibrary.cpp"
-ACitySampleWorldInfo* UCitySampleBlueprintLibrary::GetWorldInfo(const UObject* const WorldContextObject)
-{
-    if (UWorld* const World = WorldContextObject->GetWorld())
-    {
-        if (TActorIterator<ACitySampleWorldInfo> It(World, ACitySampleWorldInfo::StaticClass()); It)
-        {
-            return *It;
-        }
-    }
-
-    return nullptr;
-}
-```
-
-This is exactly equivalent. `TActorIteratorBase` has an `explicit operator bool()`, so `if (It)`
-performs the same validity check the `for` condition did, and constructing the iterator already
-advances it to the first match. CitySample is built as C++20 — `BuildSettingsVersion.V4` and later
-set `CppStandardVersion.Cpp20` — so the if-with-initializer form is available.
-
-??? question "Why doesn't this happen in other projects?"
-
-    All three CitySample targets set `DefaultBuildSettings = BuildSettingsVersion.V7`. `V7` is new
-    in UE 5.8, and one of the three defaults it changes is:
-
-    > `ModuleRules.CppCompileWarningSettings.UnreachableCodeWarningLevel = WarningLevel.Error` —
-    > Enables compile-time validation of unreachable code. (Previously: Error for MSVC, Off for
-    > Clang.)
-
-    On Clang this warning was previously off entirely. At `V7`, UnrealBuildTool passes
-    `-Wunreachable-code-aggressive`, which is a group covering four diagnostics:
-
-    | Diagnostic | Fires on |
-    |---|---|
-    | `-Wunreachable-code` | Any statement that control flow cannot reach |
-    | `-Wunreachable-code-break` | A `break` after a `return`, `continue` or `throw` |
-    | `-Wunreachable-code-loop-increment` | A loop whose body always exits — the case above |
-    | `-Wunreachable-code-return` | A `return` that cannot be reached |
-
-    A project pinned to `V6` or lower, or one whose targets never set `DefaultBuildSettings` at
-    all, does not get any of them on Clang. That is the whole difference.
-
-    This propagates into plugins, too: `ModuleRules.DefaultBuildSettings` falls back to the
-    target's, so **every plugin in a CitySample project is compiled at V7** unless it overrides
-    the setting itself. Tempo's modules are clean at V7, but your own may not be.
-
-!!! tip "Relaxing the warning instead"
-
-    If you would rather not patch CitySample, a module can opt out in its `*.Build.cs`:
-
-    ```csharp
-    CppCompileWarningSettings.UnreachableCodeWarningLevel = WarningLevel.Warning;
-    ```
-
-    Dropping the whole project to `BuildSettingsVersion.V6` also works, but it switches the
-    warning off for every plugin in the project — including yours.
+- The [CitySample](https://www.fab.com/listings/4898e707-7855-404b-af0e-a505ee690e68) project on **UE 5.8**
 
 ## 2. Add Tempo
 
 ```bash
 cd <your_citysample>/Plugins
-git clone --recurse-submodules https://github.com/tempo-sim/Tempo.git
+git clone https://github.com/tempo-sim/Tempo.git
 ```
-
-This works whether or not your CitySample project is itself a git repository — a plain download
-from the Epic Games Launcher is not one. Don't drop `--recurse-submodules`: Tempo nests
-`TempoROS`, which otherwise clones as an empty directory.
 
 ## 3. Run Setup.sh
 
 ```bash
 Plugins/Tempo/Setup.sh    # Setup.bat on Windows
 ```
+Setup.sh will prompt you to download third party dependencies (our custom build of gRPC). Say yes.
 
-On a CitySample project the step that matters most is the first one: CitySample ships its own
-`Traffic` and `RuleProcessor` plugins, and Tempo ships forks with the same names. Unreal cannot
-see both. `Setup.sh` renames the host's descriptors:
+In the CitySample project Setup.sh does a few additional steps (none of which you need to know about, just FYI):
+- Patches bugs in the project's source that would prevent you from building
+- Disables the project's RuleProcessor and Traffic plugins (which Tempo replaces)
 
-```text
-Plugins/Traffic/Traffic.uplugin              → Traffic.uplugin.disabled-by-tempo
-Plugins/RuleProcessor/RuleProcessor.uplugin  → RuleProcessor.uplugin.disabled-by-tempo
-```
-
-Nothing else on disk is touched, and `Scripts/DisableConflictingPlugins.sh -restore` puts them
-back. If you skip this step the build fails in C# before it compiles any C++, with
-[`CS0101: already contains a definition for 'MassTraffic'`](troubleshooting.md#cs0101-already-contains-a-definition-for-masstraffic).
-
-!!! note "Your `.uproject` does not need editing"
-
-    CitySample's `Plugins` list already enables `Traffic` **by name**, and after this step that
-    name resolves to Tempo's fork — its content still mounts at `/Traffic/`, and `CoreRedirects`
-    keep CitySample's assets loading. Tempo's own plugins do not appear in `CitySample.uproject`
-    at all and do not need to: a project plugin with no `EnabledByDefault` field is enabled by
-    default.
-
-    For the full mechanism, see
-    [Traffic as a drop-in replacement](../plugins/traffic.md#drop-in-replacement-for-citysamples-traffic).
-
-`Setup.sh` also downloads third-party dependencies.
-
-## 4. Build and run
+## 4. Build and Package
 
 ```bash
-Plugins/Tempo/Scripts/Build.sh    # Build.bat on Windows
-Plugins/Tempo/Scripts/Run.sh      # opens CitySample in Unreal Editor
+Plugins/Tempo/Scripts/Build.sh
+Plugins/Tempo/Scripts/Run.sh   # Optional - open the project in Unreal Editor to test
+Plugins/Tempo/Scripts/Package.sh --release # --release packages a Shipping build, remove for a Development build
 ```
 
-## 5. Verify
+Packaging will take a few hours. Be patient, good things come to those who wait.
 
-Press Play. The Editor log should contain:
-
-```text
-LogTempoCore: Display: Tempo gRPC server listening on 0.0.0.0:10001
-```
-
-From another terminal:
+## 5. Profit
 
 ```bash
-source ./TempoEnv/bin/activate            # TempoEnv/Scripts/activate on Windows
-python -c "import tempo_sim.tempo_core as tc; print(tc.get_current_level_name())"
+source ./TempoEnv/bin/activate # TempoEnv/Scripts/activate on Windows
+python Plugins/Tempo/ExampleClients/Python/CitySampleAV.py --launch # remove --launch if running it yourself
 ```
 
-If that prints the level name, you are ready for
-[Hello World](../getting-started/hello-world.md).
+## 6. Explore
+Check out the [README](https://github.com/tempo-sim/Tempo/tree/main/ExampleClients/Python/CitySampleAV) or
+```
+python Plugins/Tempo/ExampleClients/Python/CitySampleAV.py --help
+```
+for a full set of features.
+
+## 7. Bonus: Labeled Road Markings
+
+<img width="2880" height="600" alt="lane_rm_semantic_FisheyeCamera_000042" src="https://github.com/user-attachments/assets/c5f3d5e8-c3b5-4020-bd52-2890e771107d" />
+
+Getting the road markings to show up as a different semantic label than the road requires a couple of small content changes:
+  | Asset | Change | Do this |
+  | --- | --- | --- |
+  | `M_Freeway_Asphalt` | Change the Shading Model to Subsurface (from DefaultLit) | <img width="356" height="176" alt="M_Freeway_Asphalt_subsurface" src="https://github.com/user-attachments/assets/334e1843-4ade-49ca-a35f-d32181fdb415" /> |
+  | `M_Freeway_Asphalt` | Create new named reroute nodes containing the Base Color before and after applying decals | <img width="480" height="333" alt="M_Freeway_Asphalt_after_2" src="https://github.com/user-attachments/assets/86b4827c-e63f-4c25-a134-a05b2865180b" /> |
+  | `M_Freeway_Asphalt` | Use the new reroute nodes to set the subsurface color to 1 where there are road markings | <img width="1288" height="530" alt="M_Freeway_Asphalt_after_1" src="https://github.com/user-attachments/assets/e6826e50-bd43-4bd8-ab60-1724200e86fd" /> |
+  | `MI_FreewayAsphalt_RoadDark` | Stop overriding the Shading Mode | <img width="520" height="248" alt="MI_FreewayAsphalt_RoadDark_after" src="https://github.com/user-attachments/assets/4c7e6531-be79-4b50-919f-2a733ac7528a" /> |
+
+TempoCamera will replace the Road label with RoadMarking anywhere it picks up this subtle change in subsurface color (this is already configured in `CitySampleAV.py`)
 
 ## What changed in your project
 
 | | |
 |---|---|
-| `Source/CitySample/Util/CitySampleBlueprintLibrary.cpp` | Patched by you, in step 1 |
+| `Source/CitySample/Util/CitySampleBlueprintLibrary.cpp` | One line patched by `Setup.sh` (step 3) |
+| `Source/CitySample/Vehicles/CitySampleVehicleBase.cpp` | `PossessedBy` and one `#include` patched by `Setup.sh` (step 3) |
+| `Source/CitySample.Target.cs` | Its two LLM test settings guarded to a unique build environment by `Setup.sh` (step 3) |
+| `Plugins/CitySampleMassCrowd/.../MassCrowdAnimationProcessor.h` | One `#include` added by `Setup.sh` (step 3) |
 | `Plugins/Traffic/`, `Plugins/RuleProcessor/` | Descriptors renamed `*.disabled-by-tempo` |
+| `Config/DefaultEngine.ini` | Tempo's world settings and Mac entitlements (a `TEMPO_PROJECT_CONFIG` block at the end) |
 | `TempoEnv/` | Generated Python virtual environment with the client packages |
 
 ## See also

@@ -1,0 +1,260 @@
+# Copyright Tempo Simulation, LLC. All Rights Reserved
+
+"""Semantic labels for CitySample, from config/labels.json.
+
+Tempo labels the world from a table of rows, each matching actors by class or tag and components by
+mesh asset. No binary asset is involved: the table is JSON, sent with ``LoadLabelTable``. But a
+table can't simply list every mesh in CitySample: validation loads each mesh it names, and the city
+has thousands of them. So the work is split by when it can be known:
+
+- **Classes and tags** go into the table up front. A handful of rows.
+- **Meshes** are matched by the regexes in labels.json against what is *loaded*, as World Partition
+  streams it in. The meshes loaded at startup go into the table too (loading them again is free);
+  each later poll assigns newly streamed meshes with ``SetStaticMeshTypeSemanticId``, which the
+  labeler applies to every component using that mesh, now and later.
+
+The ego vehicle is told apart from other cars by a tag, ``TempoEgo``, which the client adds when it
+adopts the car: to the actor, and to each of its components. The component tags are what count --
+the labeler resolves a component before its actor, so the van body's mesh would otherwise label it a
+van whatever the actor's tag said.
+
+Label type: Panoptic by default (``--label-type instance``, Tempo's LT_PANOPTIC), which is what 2D
+bounding boxes need: instance ids for things, class ids for stuff. Its ids are 8-bit, 1..251 for
+everything in view, and a city has thousands of separately labeled road and building meshes. So the
+classes marked ``"instanced": false`` in labels.json (road, building, sky, ...) are "stuff": the
+labeler gives every one of their objects the class's own id, reserved for it, and the 2D boxes skip
+them. The "things" (vehicles, pedestrians) get the remaining ids. The semantic image is recovered
+from the instance image with the labeler's instance -> semantic map, exactly for stuff, and for a
+thing as soon as the client's copy of the map has caught up with a newly labeled object (it is
+refreshed twice a second). ``--label-type semantic`` streams semantic ids directly, without boxes.
+
+Road markings can't be labeled by mesh: they are deferred decals, which write no stencil. But the
+road material composites them itself, and is edited to write where a decal brightens the asphalt to
+Subsurface Color; ``SetLabelRowOverrides`` (labels.json's ``label_override``) tells the sensors to
+relabel road pixels carrying one as ``road_marking``. No labeled object holds that class, so the
+labeler's instance -> semantic map never lists its id; ``fixed_ids`` is what keeps the client's
+remap from reading those pixels as unlabeled.
+"""
+
+import asyncio
+import json
+import re
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
+
+import tempo_sim.tempo_sensors as ts
+import tempo_sim.TempoSensors.Labels_pb2 as Labels
+from tempo_sim.unreal import registered_classes
+
+from .config import LabelClass, LabelOverride
+
+EGO_TAG = "TempoEgo"
+UNLABELED_COLOR = (115, 170, 225)   # the sky class's color in labels.json
+
+# The label-table column marking a class "stuff", newest name first: Tempo main calls it
+# bPanopticInstanced (Panoptic mode); the pre-merge panoptic branch called it bInstanced.
+_STUFF_COLUMNS = ("bPanopticInstanced", "bInstanced")
+
+
+@dataclass
+class _CompiledClass:
+    entry: LabelClass
+    static: List[re.Pattern]
+    skeletal: List[re.Pattern]
+
+
+class LabelManager:
+    def __init__(self, classes: List[LabelClass], label_type: str = "instance",
+                 label_override: Optional[LabelOverride] = None):
+        self.classes = classes
+        self.label_type = label_type
+        self.label_override = label_override
+        self._compiled = [_CompiledClass(c, [re.compile(p) for p in c.static_mesh_patterns],
+                                         [re.compile(p) for p in c.skeletal_mesh_patterns])
+                          for c in classes]
+        self._assigned: Dict[str, int] = {}      # mesh path -> semantic id the client set
+        self._seen: set = set()                  # every mesh path looked at, matched or not
+        self.unmatched: Dict[str, int] = {}      # mesh path -> instance count, for coverage reports
+
+    # -- classification -------------------------------------------------------------------------
+
+    def classify(self, mesh_path: str, skeletal: bool) -> Optional[int]:
+        """The semantic id the rules give a mesh, or None. First class in file order wins."""
+        for c in self._compiled:
+            for pattern in (c.skeletal if skeletal else c.static):
+                if pattern.search(mesh_path):
+                    return c.entry.id
+        return None
+
+    @property
+    def ego_id(self) -> Optional[int]:
+        for c in self.classes:
+            if EGO_TAG in c.actor_tags:
+                return c.id
+        return None
+
+    @property
+    def fixed_ids(self) -> List[int]:
+        """The ids that mean their class in Instance mode whatever the instance map says: every stuff
+        class's. The labeler reserves each class's label as an instance id, but its map lists only
+        ids some labeled object holds -- not a class reached only through the label override, nor a
+        stuff class with nothing loaded yet."""
+        return [c.id for c in self.classes if not c.instanced]
+
+    def annotation_infos(self) -> List[Tuple[int, str, Tuple[int, int, int]]]:
+        """(id, name, color) per class, for rerun's AnnotationContext."""
+        # Unlabeled is drawn sky blue: in CitySample nearly all of it is the sky, which is not a mesh.
+        return [(0, "unlabeled", UNLABELED_COLOR)] + [(c.id, c.name, c.color) for c in self.classes]
+
+    # -- installing -----------------------------------------------------------------------------
+
+    async def _loaded_meshes(self):
+        static = (await ts.get_all_static_mesh_types()).mesh_types
+        skeletal = (await ts.get_all_skeletal_mesh_types()).mesh_types
+        return [(m.mesh_path, m.instance_count, False) for m in static] + \
+               [(m.mesh_path, m.instance_count, True) for m in skeletal]
+
+    def _actor_classes(self, entry: LabelClass) -> List[str]:
+        """The class paths of a row that this build has. The table import rejects the *whole*
+        table over one unresolvable path, so a class the packaged build lacks (a different
+        CitySample version, say) is dropped here with a warning instead."""
+        registry = registered_classes()
+        kept = []
+        for path in entry.actor_classes:
+            try:
+                known = registry.python_class(path) is not None
+            except Exception:
+                known = True   # no generated package to ask; let the server decide
+            if known:
+                kept.append(path)
+            else:
+                print(f"  [labels] '{entry.name}': this build has no class {path}; skipping it")
+        return kept
+
+    async def install(self) -> None:
+        """Load the table (classes, tags, and the meshes loaded right now) and set the label type."""
+        meshes = await self._loaded_meshes()
+        static_rows: Dict[int, List[str]] = {}
+        skeletal_rows: Dict[int, List[str]] = {}
+        for path, count, skeletal in meshes:
+            self._seen.add(path)
+            sid = self.classify(path, skeletal)
+            if sid is None:
+                self.unmatched[path] = count
+                continue
+            (skeletal_rows if skeletal else static_rows).setdefault(sid, []).append(path)
+            self._assigned[path] = sid
+
+        rows = [{"Name": "NoLabel", "Label": 0}]
+        for c in self.classes:
+            row = {"Name": c.name, "Label": c.id}
+            if not c.instanced:
+                row[_STUFF_COLUMNS[0]] = False
+            actor_classes = self._actor_classes(c)
+            if actor_classes:
+                row["ActorTypes"] = actor_classes
+            if c.actor_tags:
+                row["ActorTags"] = c.actor_tags
+            if c.component_tags:
+                row["ComponentTags"] = c.component_tags
+            if c.id in static_rows:
+                row["StaticMeshTypes"] = sorted(static_rows[c.id])
+            if c.id in skeletal_rows:
+                row["SkeletalMeshTypes"] = sorted(skeletal_rows[c.id])
+            rows.append(row)
+
+        # The stuff column a build accepts decides the instance-style mode: Panoptic on a current
+        # Tempo, Instance on a build of the pre-merge panoptic branch (whose Instance mode had
+        # stuff), and plain Instance -- everything a thing, ids running out sooner -- before either.
+        column = await self._load_table(rows)
+        if self.label_type == "semantic":
+            label_type = Labels.LT_SEMANTIC
+        elif column == "bPanopticInstanced":
+            label_type = Labels.LT_PANOPTIC
+        else:
+            label_type = Labels.LT_INSTANCE
+            if column is None:
+                print("  [labels] this build's labeler has no stuff classes; re-package with a current "
+                      "Tempo for clean instance ids. Loaded the table without them.")
+        await self._set_label_override()
+        await ts.set_label_type(label_type=label_type)
+        print(f"  Label table: {len(self.classes)} classes, {len(self._assigned)} of "
+              f"{len(meshes)} loaded meshes matched ({self.label_type} labels).")
+
+    async def _load_table(self, rows: List[dict]) -> Optional[str]:
+        """Load the table with the first stuff column this build's labeler accepts; returns it, or
+        None if it took none. A table naming a column the labeler lacks is rejected whole, with the
+        column named in the error, which is how an older build is told apart."""
+        for i, column in enumerate(_STUFF_COLUMNS):
+            if i:
+                for row in rows:
+                    if _STUFF_COLUMNS[i - 1] in row:
+                        row[column] = row.pop(_STUFF_COLUMNS[i - 1])
+            try:
+                await ts.load_label_table(json=json.dumps(rows))
+                return column
+            except Exception as exc:
+                if column not in str(exc):
+                    raise
+        for row in rows:
+            row.pop(_STUFF_COLUMNS[-1], None)
+        await ts.load_label_table(json=json.dumps(rows))
+        return None
+
+    async def _set_label_override(self) -> None:
+        """Name the override pair, or clear it. The sim holds the row names apart from the table and
+        keeps them across loads, so this follows every load -- and clears whatever an earlier run
+        set when labels.json has no pair. Rows are the classes' names (see install)."""
+        o = self.label_override
+        await ts.set_label_row_overrides(overridable_row_name=o.overridable.name if o else "",
+                                         overriding_row_name=o.overriding.name if o else "")
+        if o:
+            print(f"  Label override: '{o.overridable.name}' pixels with a subsurface color are "
+                  f"'{o.overriding.name}'.")
+
+    async def sync_meshes(self) -> int:
+        """Assign classes to meshes streamed in since the last call. Returns how many."""
+        assigned = 0
+        for path, count, skeletal in await self._loaded_meshes():
+            if path in self._seen:
+                if path in self.unmatched:
+                    self.unmatched[path] = count
+                continue
+            self._seen.add(path)
+            sid = self.classify(path, skeletal)
+            if sid is None:
+                self.unmatched[path] = count
+                continue
+            if skeletal:
+                await ts.set_skeletal_mesh_type_semantic_id(skeletal_mesh_path=path, semantic_id=sid)
+            else:
+                await ts.set_static_mesh_type_semantic_id(static_mesh_path=path, semantic_id=sid)
+            self._assigned[path] = sid
+            assigned += 1
+        return assigned
+
+    async def run_mesh_sync(self, period_s: float = 5.0) -> None:
+        """Keep assigning streamed-in meshes, forever (run as a task)."""
+        while True:
+            await asyncio.sleep(period_s)
+            try:
+                n = await self.sync_meshes()
+                if n:
+                    print(f"  [labels] classified {n} newly streamed mesh(es)")
+            except Exception as exc:
+                print(f"  [labels] mesh sync failed: {exc}")
+
+    async def label_ego(self) -> None:
+        """Re-label actors tagged TempoEgo. Adding a tag doesn't re-label anything by itself; this
+        RPC un-labels and re-labels every actor carrying it, components and all, which is when the
+        components' own TempoEgo tags are seen."""
+        if self.ego_id is not None:
+            await ts.set_actor_tag_semantic_id(actor_tag=EGO_TAG, semantic_id=self.ego_id)
+
+    def coverage_report(self, top: int = 40) -> str:
+        """The unmatched loaded meshes, most-instanced first: where to add rules next."""
+        lines = [f"{len(self._assigned)} meshes matched, {len(self.unmatched)} unmatched. "
+                 f"Top unmatched by instance count:"]
+        for path, count in sorted(self.unmatched.items(), key=lambda x: -x[1])[:top]:
+            lines.append(f"  {count:6d}  {path}")
+        return "\n".join(lines)

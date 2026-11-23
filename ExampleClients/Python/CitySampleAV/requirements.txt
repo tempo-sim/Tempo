@@ -1,0 +1,8 @@
+# CitySampleAV dependencies (Python 3.10+).
+#
+# tempo-sim and city-sample are not listed: they are this build's own clients, from
+# Packaged/API/Python after Scripts/Package.sh. Install them from there (see README.md).
+
+rerun-sdk>=0.43         # viewer + logging; >= 0.43 for the 3D view's look target (it centers on the ego)
+numpy>=1.24
+pillow>=9.0             # PNG writing for --record

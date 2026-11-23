@@ -22,6 +22,7 @@
 #include "MassTrafficUpdateDistanceToNearestObstacleProcessor.h"
 #include "MassTrafficUtils.h"
 #include "Math/UnitConversion.h"
+#include "Misc/ScopeRWLock.h"
 #include "ZoneGraphDelegates.h"
 #include "ZoneGraphQuery.h"
 #include "ZoneGraphSubsystem.h"
@@ -1157,12 +1158,14 @@ TSet<FLaneEntityPair>& UMassTrafficSubsystem::GetMutableWildcardYieldOverrideSet
 
 void UMassTrafficSubsystem::AddCoreVehicleInfo(const FZoneGraphLaneHandle& LaneHandle, const FMassTrafficCoreVehicleInfo& CoreVehicleInfo)
 {
+	FWriteScopeLock WriteLock(CoreVehicleInfoMapLock);
 	TSet<FMassTrafficCoreVehicleInfo>& CoreVehicleInfos = CoreVehicleInfoMap.FindOrAdd(LaneHandle);
 	CoreVehicleInfos.Add(CoreVehicleInfo);
 }
 
 bool UMassTrafficSubsystem::TryGetCoreVehicleInfos(const FZoneGraphLaneHandle& LaneHandle, TSet<FMassTrafficCoreVehicleInfo>& OutCoreVehicleInfos) const
 {
+	FReadScopeLock ReadLock(CoreVehicleInfoMapLock);
 	if (const TSet<FMassTrafficCoreVehicleInfo>* CoreVehicleInfos = CoreVehicleInfoMap.Find(LaneHandle))
 	{
 		OutCoreVehicleInfos = *CoreVehicleInfos;
@@ -1174,7 +1177,20 @@ bool UMassTrafficSubsystem::TryGetCoreVehicleInfos(const FZoneGraphLaneHandle& L
 
 void UMassTrafficSubsystem::ClearCoreVehicleInfos()
 {
+	FWriteScopeLock WriteLock(CoreVehicleInfoMapLock);
 	CoreVehicleInfoMap.Reset();
+}
+
+void UMassTrafficSubsystem::SortCoreVehicleInfos()
+{
+	FWriteScopeLock WriteLock(CoreVehicleInfoMapLock);
+	for (TTuple<FZoneGraphLaneHandle, TSet<FMassTrafficCoreVehicleInfo>>& CoreVehicleInfoPair : CoreVehicleInfoMap)
+	{
+		CoreVehicleInfoPair.Value.Sort([](const FMassTrafficCoreVehicleInfo& FirstCoreVehicleInfo, const FMassTrafficCoreVehicleInfo& SecondCoreVehicleInfo)
+		{
+			return FirstCoreVehicleInfo.VehicleDistanceAlongLane < SecondCoreVehicleInfo.VehicleDistanceAlongLane;
+		});
+	}
 }
 
 const TMap<FZoneGraphLaneHandle, TSet<FMassTrafficCoreVehicleInfo>>& UMassTrafficSubsystem::GetCoreVehicleInfoMap() const

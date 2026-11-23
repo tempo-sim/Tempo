@@ -50,6 +50,31 @@ FMassTrafficLightInstanceCustomData::FMassTrafficLightInstanceCustomData(const b
 	*reinterpret_cast<uint32*>(&PackedParam1) = static_cast<uint8>(TrafficLightStateFlags);
 }
 
+FMassTrafficLightInstanceCustomData::FMassTrafficLightInstanceCustomData(const FMassTrafficLight& TrafficLight)
+	: FMassTrafficLightInstanceCustomData(TrafficLight.TrafficLightStateFlags)
+{
+	if (!TrafficLight.bUsesEpicLightStateLayout)
+	{
+		return;
+	}
+
+	// Epic's layout, which CitySample's light materials decode: vehicle go, vehicle prepare to stop, then pedestrian go
+	// on the front, left and right sides. It has no left arrow, so a protected left shows as a green light.
+	const auto HasFlag = [&TrafficLight](const EMassTrafficLightStateFlags Flag)
+	{
+		return (TrafficLight.TrafficLightStateFlags & Flag) != EMassTrafficLightStateFlags::None;
+	};
+
+	uint32 EpicLayoutBits = 0;
+	EpicLayoutBits |= HasFlag(EMassTrafficLightStateFlags::VehicleGo | EMassTrafficLightStateFlags::VehicleGoProtectedLeft) ? (1u << 0) : 0u;
+	EpicLayoutBits |= HasFlag(EMassTrafficLightStateFlags::VehiclePrepareToStop) ? (1u << 1) : 0u;
+	EpicLayoutBits |= HasFlag(EMassTrafficLightStateFlags::PedestrianGo_FrontSide) ? (1u << 2) : 0u;
+	EpicLayoutBits |= HasFlag(EMassTrafficLightStateFlags::PedestrianGo_LeftSide) ? (1u << 3) : 0u;
+	EpicLayoutBits |= HasFlag(EMassTrafficLightStateFlags::PedestrianGo_RightSide) ? (1u << 4) : 0u;
+
+	*reinterpret_cast<uint32*>(&PackedParam1) = EpicLayoutBits;
+}
+
 UMassTrafficLightVisualizationProcessor::UMassTrafficLightVisualizationProcessor()
 {
 	ExecutionFlags = static_cast<int32>(EProcessorExecutionFlags::Client | EProcessorExecutionFlags::Standalone);
@@ -141,7 +166,7 @@ void UMassTrafficLightUpdateCustomVisualizationProcessor::Execute(FMassEntityMan
 							FTransform IntersectionLightTransform(FRotator(0.0, TrafficLight.ZRotation, 0.0f), TrafficLight.Position);  
 
 							// Prepare custom data
-							const FMassTrafficLightInstanceCustomData PackedCustomData(TrafficLight.TrafficLightStateFlags);
+							const FMassTrafficLightInstanceCustomData PackedCustomData(TrafficLight);
 
 							// Add instance with custom data 
 							const int32 ISMInfoIndex = TrafficLightTypesStaticMeshDescHandle.ToIndex();
@@ -170,7 +195,7 @@ void UMassTrafficLightUpdateCustomVisualizationProcessor::Execute(FMassEntityMan
 
 						// Set light mesh primitive data (SetCustomPrimitiveDataFloat will check itself to noop if the
 						// data hasn't changed)
-						const FMassTrafficLightInstanceCustomData PackedCustomData(TrafficLight.TrafficLightStateFlags);
+						const FMassTrafficLightInstanceCustomData PackedCustomData(TrafficLight);
 						TrafficLightMeshComponent->SetCustomPrimitiveDataFloat(/*DataIndex*/1, PackedCustomData.PackedParam1);
 
 						LightIndex++;

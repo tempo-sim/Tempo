@@ -86,7 +86,9 @@ none gets the engine's: `Sandbox.Server.entitlements` for most configurations, a
 - a Shipping build has no network access at all, so it cannot serve gRPC;
 - it cannot read or write files outside the container.
 
-Turn the sandbox off in your project's `Config/DefaultEngine.ini` (TempoSample already does):
+`Setup.sh` turns the sandbox off for you (through `Scripts/ConfigureProject.sh`), writing this into
+your project's `Config/DefaultEngine.ini` when the project uses the engine's sandboxed
+entitlements:
 
 ```ini
 [/Script/MacTargetPlatform.XcodeProjectSettings]
@@ -94,9 +96,10 @@ PremadeMacEntitlements=(FilePath="/Game/Build/Mac/Resources/Unrestricted.entitle
 ShippingSpecificMacEntitlements=(FilePath="/Game/Build/Mac/Resources/Unrestricted.entitlements")
 ```
 
-This has to be the project's config: Tempo cannot set it for you. UnrealBuildTool picks the
-entitlements when it signs the app, and reads these settings without any plugin's config, so a
-plugin's `DefaultEngine.ini` would be ignored here.
+It has to be the project's config: UnrealBuildTool picks the entitlements when it signs the app,
+and reads these settings without any plugin's config, so a plugin's `DefaultEngine.ini` would be
+ignored here. A project that names entitlements files of its own keeps them; `Setup.sh` warns
+instead, and the setting above is what to use if they enable the sandbox.
 
 `Unrestricted.entitlements` is the engine's own empty entitlements file. You don't need to commit
 it: when the file named here is missing from the project, UnrealBuildTool copies the one with the

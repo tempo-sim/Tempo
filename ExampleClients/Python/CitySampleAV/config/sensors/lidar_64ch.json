@@ -1,0 +1,18 @@
+{
+  "_comment": [
+    "A 64-channel spinning lidar: uniform beams over a symmetric 45 degree vertical FOV. 360 degrees",
+    "renders as 3 views of 120. Participating media (attenuation and backscatter in dust, smoke and fog)",
+    "is off: CitySample's streets have none, and it costs GPU time every scan. Each range gets a",
+    "Gaussian error of 3 cm standard deviation along its beam (range_noise_stddev_m; add",
+    "range_noise_stddev_fraction for noise that grows with range)."
+  ],
+  "type": "lidar",
+  "rate_hz": 10.0,
+  "horizontal_beams": 1024,
+  "horizontal_fov_deg": 360.0,
+  "vertical_beams": 64,
+  "vertical_fov_deg": 45.0,
+  "range_m": [0.5, 120.0],
+  "participating_media": false,
+  "range_noise_stddev_m": 0.03
+}

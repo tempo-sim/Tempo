@@ -133,7 +133,9 @@ def build_descriptor_set(modules):
                 if not re.search(r"^\s*package\s+", content, re.MULTILINE):
                     content += f"\npackage {module_name};\n"
                 staged.write_text(content)
-                staged_to_source[str(staged.relative_to(staging))] = proto
+                # POSIX separators: protoc rejects a backslashed path, and the descriptor names files
+                # with forward slashes, which is what these keys are matched against.
+                staged_to_source[staged.relative_to(staging).as_posix()] = proto
 
         descriptor_path = staging / "descriptor.pb"
         args = [
