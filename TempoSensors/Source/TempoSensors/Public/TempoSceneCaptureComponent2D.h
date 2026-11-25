@@ -99,6 +99,11 @@ struct FTextureRead : public TSharedFromThis<FTextureRead>
 	// Set by whoever launches this read's decode, render thread or game thread, so the other does not.
 	std::atomic<bool> bDecodeLaunched{false};
 
+	// Run by the readback watcher on its thread once it has read this read, with the read itself. A
+	// sensor that can launch the decode from there sets it when it creates the read; left unset, the
+	// decode waits for the sensor's next poll.
+	TFunction<void(const TSharedRef<FTextureRead>&)> OnReadCompleteOffRenderThread;
+
 	// The staging texture assigned to this read for GPU->CPU copy.
 	FTextureRHIRef StagingTexture;
 
@@ -388,6 +393,20 @@ struct FTextureReadQueue
 			{
 				return PendingTextureReads[0];
 			}
+		}
+		return nullptr;
+	}
+
+	// Any thread. Claims Read for a decode if it is the head of the queue, read and unclaimed: the
+	// readback watcher's reads complete in queue order, so its read is the head unless an older one
+	// is still waiting for its decode.
+	TSharedPtr<FTextureRead> ClaimIfHead(const TSharedRef<FTextureRead>& Read)
+	{
+		FRWScopeLock_OnlyGTWrite ReadLock(Lock, SLT_ReadOnly);
+		if (!PendingTextureReads.IsEmpty() && PendingTextureReads[0] == Read && Read->State == FTextureRead::State::EReadComplete
+			&& !Read->bDecodeLaunched.exchange(true))
+		{
+			return PendingTextureReads[0];
 		}
 		return nullptr;
 	}
