@@ -1,8 +1,10 @@
 # Shared-memory transport for sensor payloads — plan
 
-Status: **investigation**. Nothing here is built yet except the measurement (`Tempo.WriteStats`,
-`Tests/Benchmarks/write_wait.py`). Whether to build the rest depends on what that measurement shows
-on target hardware (see [Decision gate](#decision-gate)).
+Status: **phase 2 built** (Linux and macOS server, Python client). On the target Linux GPU machine,
+transport was more than 5% of total time, which was enough to go ahead. The server half is
+`TempoCore/.../TempoSharedMemory.{h,cpp}`, whose header documents the wire layout. The client half
+is `tempo_sim/_shared_memory.py`. Rust, C++ and Windows are next (phase 3). The Design section is
+the original draft; [As built](#as-built) lists where the build departs from it, and why.
 
 ## Goal
 
@@ -50,6 +52,47 @@ Rendering dominated. Writes took a third of a frame to complete, but finished wh
 rendered, so FixedStep never waited on them. Transport becomes the limit once **frame time falls below
 write latency**: roughly under 150–180 ms per frame for the full set on this client. A faster GPU
 gets there.
+
+## As built
+
+These differ from the first draft of this plan:
+
+- **No field option.** Every top-level singular `bytes` field of at least `Tempo.SharedMemory.MinBytes`
+  (64 KiB) is eligible, in any streaming RPC, project ones included. That needs no `.proto` change and
+  no new `Options.proto`. A field option would also have needed protobuf extension support across
+  the shared `tempogrpc` library.
+- **The reference names its segment.** No initial metadata is sent back and there is no stream
+  token. Each 80-byte reference carries the segment's name and size, so the first message, and a
+  resize, need no separate announcement. The client recognises a reference by its exact length and
+  its `TEMPOREF` magic, and only on a stream that asked for shared memory.
+- **The payload is copied into the slot when the response arrives** (`OnResponse`), not when it is
+  written. What is written, or queued behind a write in flight, is the small envelope. This removes
+  the queue copy for shared-memory streams without changing `TResponseDelegate`. The `MoveTemp`
+  change would have broken every handler that binds a member function with a `const&` signature,
+  and several sensors answer many streams from one response.
+- **Names are unlinked once the client attaches.** The client sets the header's `attached` word after
+  mapping a segment, and the server unlinks the name on its next message. Nothing is left in
+  `/dev/shm` after that, even if either process crashes. So no PID-based cleanup sweep is needed.
+- **Field kinds come from `FieldDescriptor::CopyTo`.** The inline `FieldDescriptor::type()` and
+  `cpp_type()` go through an absl `call_once` whose spinlock `tempogrpc` does not export, so using
+  them fails to link.
+- **Linux reserves the segment's pages** with `posix_fallocate`. A container's `/dev/shm` is 64 MB by
+  default, and writing a page tmpfs can't supply raises SIGBUS instead of returning an error.
+- **The client reopens without shared memory if it cannot map a segment.** That drops the message in
+  hand, and no later stream in that process asks for shared memory again. The Python client frees a
+  slot with a plain 4-byte store, not an atomic release. That store is ordered after the copy on x86,
+  but only in practice on ARM. The C++ and Rust clients will use real release stores.
+
+Measured on the Mac (render-bound, so sim speed doesn't move; full 1080p rig, Python client):
+
+| | Write wait / frame | gRPC `Write` total | Payload via shared memory |
+|---|---|---|---|
+| `TEMPO_SHARED_MEMORY=0` | 5.7 ms (p95 15.4) | 0.67 s | none |
+| shared memory | 0.3 ms (p95 0.4) | 0.09 s | 7.3 GB in 1,431 messages, none inline |
+
+Write latency barely moved (p50 123 ms off, 115 ms on). A write's completion is seen only when the
+game thread next polls the completion queue, so on a 380 ms frame that number mostly measures the
+polling interval.
 
 ## Decision gate
 
@@ -224,8 +267,9 @@ through their RMW without Tempo's involvement.
 
 ## Phases
 
-1. **Cheap fixes.** `MoveTemp` into the response queue; encode once for N subscribers. Re-measure.
-2. **Shared memory, Linux and macOS, Python first.** Field option, negotiation, ring, reflection
+1. **Cheap fixes.** Encode once for N subscribers (not done). For shared-memory streams the `MoveTemp`
+   fix is superseded: their payload is copied once, into the slot.
+2. **Done: shared memory, Linux and macOS, Python first.** Field option, negotiation, ring, reflection
    envelope, Python runtime and codegen, `Tempo.WriteStats` counters for slot hits and inline fallbacks,
    and a `write_wait.py` A/B (`TEMPO_SHARED_MEMORY=0/1`).
 3. **Rust and C++ clients**, then Windows.
@@ -234,6 +278,14 @@ through their RMW without Tempo's involvement.
 5. **Optional zero-copy client APIs** (`memoryview`, borrowed slices) for clients that want them.
 
 ## Tests
+
+Built: `Tempo.Sensors.SharedMemory.*` (round trip, ring full goes inline, resize and unlinking);
+`Tests/Python/test_shared_memory.py` (the client reader, against a segment written by the test, in
+the `contract` group); and in the `sensors` group, color and lidar streams over shared memory compared
+byte for byte with a raw-stub stream of the same captures. Still to write: a cancelled stream unlinks
+its segment, and a resize seen end to end from a client.
+
+The original list:
 
 - **`codegen` group:** marked fields are found and validated, and the generated wrappers call the runtime.
 - **Python and Rust `integration` groups, shared memory on and off:**

@@ -36,6 +36,9 @@ namespace
 		int64 Bytes = 0;
 		int64 QueuedResponses = 0;
 		int64 Stalls = 0;
+		int64 SharedMemoryMessages = 0;
+		int64 SharedMemoryBytes = 0;
+		int64 SharedMemoryFallbacks = 0;
 		double WriteCallSeconds = 0.0;
 		double WaitSeconds = 0.0;
 
@@ -156,6 +159,23 @@ void FTempoWriteStats::RecordQueuedResponse()
 	++State.QueuedResponses;
 }
 
+void FTempoWriteStats::RecordSharedMemory(int64 Bytes)
+{
+	FState& State = GetState();
+	FScopeLock Lock(&State.Mutex);
+	++State.SharedMemoryMessages;
+	State.SharedMemoryBytes += Bytes;
+	State.Bytes += Bytes;
+	State.CurrentFrameBytes += Bytes;
+}
+
+void FTempoWriteStats::RecordSharedMemoryFallback()
+{
+	FState& State = GetState();
+	FScopeLock Lock(&State.Mutex);
+	++State.SharedMemoryFallbacks;
+}
+
 void FTempoWriteStats::RecordWait(double Seconds)
 {
 	FState& State = GetState();
@@ -181,6 +201,9 @@ void FTempoWriteStats::Reset()
 	State.Bytes = 0;
 	State.QueuedResponses = 0;
 	State.Stalls = 0;
+	State.SharedMemoryMessages = 0;
+	State.SharedMemoryBytes = 0;
+	State.SharedMemoryFallbacks = 0;
 	State.WriteCallSeconds = 0.0;
 	State.WaitSeconds = 0.0;
 	State.WriteLatencyMs.Reset();
@@ -202,10 +225,12 @@ FString FTempoWriteStats::ToJson()
 	return FString::Printf(
 		TEXT("{\"enabled\":%s,\"window_s\":%.3f,\"frames\":%llu,\"frames_per_s\":%.3f,")
 		TEXT("\"writes\":%lld,\"mb\":%.3f,\"mb_per_s\":%.3f,\"queued_responses\":%lld,\"stalls\":%lld,")
+		TEXT("\"shm_messages\":%lld,\"shm_mb\":%.3f,\"shm_fallbacks\":%lld,")
 		TEXT("\"wait_s\":%.4f,\"wait_fraction\":%.4f,\"write_call_s\":%.4f,")
 		TEXT("\"frame_ms\":%s,\"frame_wait_ms\":%s,\"frame_mb\":%s,\"write_latency_ms\":%s,\"write_call_ms\":%s}"),
 		IsEnabled() ? TEXT("true") : TEXT("false"), WindowSeconds, Frames, Frames / WindowSeconds,
 		State.Writes, State.Bytes / 1.e6, State.Bytes / 1.e6 / WindowSeconds, State.QueuedResponses, State.Stalls,
+		State.SharedMemoryMessages, State.SharedMemoryBytes / 1.e6, State.SharedMemoryFallbacks,
 		State.WaitSeconds, State.WaitSeconds / WindowSeconds, State.WriteCallSeconds,
 		*Distribution(State.FrameMs), *Distribution(State.FrameWaitMs), *Distribution(State.FrameMB),
 		*Distribution(State.WriteLatencyMs), *Distribution(State.WriteCallMs));

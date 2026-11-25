@@ -29,6 +29,7 @@ import time
 import tempo_sim.tempo_core as tc
 import tempo_sim.tempo_sensors as ts
 import tempo_sim.tempo_world as tw
+from tempo_sim import _shared_memory as shared_memory
 import tempo_sim.TempoCore.Geometry_pb2 as Geometry
 import tempo_sim.TempoCore.Time_pb2 as Time
 import tempo_sim.TempoWorld.WorldControl_pb2 as WorldControl
@@ -137,6 +138,10 @@ def report(args, stats, counters, client_window_s):
           "  (serialization into gRPC buffers)")
     print(f"  Queued responses:   {stats['queued_responses']}  (copied while a write was in flight)")
     print(f"  Stalls:             {stats['stalls']}")
+    if "shm_messages" in stats:
+        print(f"  Shared memory:      {stats['shm_mb']:.0f} MB in {stats['shm_messages']} messages, "
+              f"{stats['shm_fallbacks']} inline for want of a free slot"
+              + ("" if shared_memory.enabled() else " (off in this client: TEMPO_SHARED_MEMORY=0)"))
     received = sum(c.window_bytes for c in counters)
     print(f"  Client received:    {received / 1e6 / client_window_s:.0f} MB/s")
     slowest = min(counters, key=lambda c: c.window_messages)

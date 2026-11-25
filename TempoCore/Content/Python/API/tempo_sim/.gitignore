@@ -8,6 +8,7 @@
 # Except this file and the hand-written infra
 !.gitignore
 !__init__.py
+!_shared_memory.py
 !_tempo_context.py
 !_tempo_context.pyi
 !conversion.py

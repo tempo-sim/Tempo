@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include "TempoServiceProvider.h"
+#include "TempoSharedMemory.h"
 #include "TempoWriteStats.h"
 
 // gRPC's port_platform.h includes <windows.h> directly. Route it through Unreal's MinWindows.h
@@ -351,6 +352,10 @@ public:
 			// for the next write-completion event to drain.
 			// A sensor's decode task runs this from a worker thread while the game thread handles this
 			// stream's write completions below (see UTempoSensorServiceSubsystem::OnBetweenFramesPoll).
+			if (FTempoSharedMemoryStream::IsRequested(Base::Context))
+			{
+				SharedMemory = FTempoSharedMemoryStream::Create(ResponseType::descriptor());
+			}
 			Base::BindResponseDelegate();
 			Base::State = FRequestManager::EState::HANDLING;
 			Base::Handler->HandleRequest(Base::Request, Base::ResponseDelegate);
@@ -389,9 +394,41 @@ public:
 		return new TRequestManager(NewTag, Base::ServiceName, Base::Service, Base::Handler);
 	}
 
+	virtual void Close() override
+	{
+		Base::Close();
+		FScopeLock Lock(&Base::Gate->Mutex);
+		if (SharedMemory)
+		{
+			SharedMemory->Close();
+		}
+	}
+
 protected:
 	virtual void OnResponse(const ResponseType& Response, grpc::Status Result) override
 	{
+		// On a shared-memory stream, the payload is copied into the ring here, once, and what is written or
+		// queued is the small message that refers to it.
+		if (SharedMemory && Result.ok())
+		{
+			ResponseType Envelope;
+			if (SharedMemory->Encode(Response, Envelope))
+			{
+				if (Base::State == FRequestManager::EState::HANDLING)
+				{
+					Respond(Envelope, Result);
+				}
+				else
+				{
+					if (FTempoWriteStats::IsEnabled())
+					{
+						FTempoWriteStats::RecordQueuedResponse();
+					}
+					ResponseQueue.Enqueue(TPair<ResponseType, grpc::Status>(MoveTemp(Envelope), Result));
+				}
+				return;
+			}
+		}
 		if (Base::State == FRequestManager::EState::HANDLING)
 		{
 			Respond(Response, Result);
@@ -430,6 +467,10 @@ protected:
 
 	// Under the gate's lock.
 	TQueue<TPair<ResponseType, grpc::Status>> ResponseQueue;
+
+	// The stream's shared-memory channel, if its client asked for one and can have it. Set before the
+	// response delegate is bound; used under the gate's lock.
+	TUniquePtr<FTempoSharedMemoryStream> SharedMemory;
 
 	// When the write in flight was issued, while write stats are recording; otherwise negative. Under
 	// the gate's lock.

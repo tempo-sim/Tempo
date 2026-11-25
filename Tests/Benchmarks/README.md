@@ -32,6 +32,16 @@ the client's flow-control window has room for it. `write_call_ms` is the time in
 which serializes the message. `queued_responses` counts responses that arrived while a write was
 still in flight on their stream and were copied into its queue.
 
+On this machine the client streams through shared memory (see `TempoSharedMemory.h`): `shm_mb` and
+`shm_messages` count the payloads that went through it, and `shm_fallbacks` the messages that went
+inline because their stream's ring had no free slot. `TEMPO_SHARED_MEMORY=0` turns it off in the client,
+for an A/B:
+
+```bash
+TEMPO_SHARED_MEMORY=0 python Tests/Benchmarks/write_wait.py --measurements color,depth,label
+python Tests/Benchmarks/write_wait.py --measurements color,depth,label
+```
+
 Only the measurement window is counted, so measure with the world playing: paused frames count as
 frames too. The client counts only bytes and never decodes, so it is the best case for a Python
 client.

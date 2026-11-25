@@ -33,6 +33,13 @@ public:
 	// into the stream's queue.
 	static void RecordQueuedResponse();
 
+	// Payload bytes a shared-memory stream moved into its ring instead of the message. Counted in the
+	// window's bytes too.
+	static void RecordSharedMemory(int64 Bytes);
+
+	// A message on a shared-memory stream that went inline because its ring had no free slot.
+	static void RecordSharedMemoryFallback();
+
 	// Time the game thread spent blocked on unflushed writes.
 	static void RecordWait(double Seconds);
 
