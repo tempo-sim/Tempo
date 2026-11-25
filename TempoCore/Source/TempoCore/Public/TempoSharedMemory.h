@@ -4,6 +4,8 @@
 
 #include "CoreMinimal.h"
 
+#include <string>
+
 namespace google::protobuf_tempo
 {
 	class Descriptor;
@@ -18,7 +20,10 @@ namespace grpc
 
 // The shared-memory side channel of one server stream, for a client on the same machine.
 //
-// A client asks for it with the request metadata `tempo-shm: 1`. On a stream that has it, each top-level
+// A client asks for it with the request metadata `tempo-shm: 1`. The server answers in the initial metadata
+// with the stream's first segment (see Announce), and sends every message inline until the client has mapped
+// that segment and marked it attached; a client that cannot map it keeps receiving inline payloads, so
+// nothing is lost. From then on, each top-level
 // singular `bytes` field of at least Tempo.SharedMemory.MinBytes is copied into a slot of a ring in a
 // shared-memory segment, and the message on the wire carries a fixed-size reference in that field
 // instead. Every message still travels on the gRPC stream, in order and under gRPC's flow control; only
@@ -78,6 +83,14 @@ public:
 	// large field, no slot is free, or a segment could not be made.
 	bool Encode(const google::protobuf_tempo::Message& Response, google::protobuf_tempo::Message& Envelope);
 
+	// Names the stream's first segment, which the first Encode made, in the call's initial metadata
+	// (`tempo-shm-segment`, the name; `tempo-shm-size`, its size in bytes). Called once, after the first
+	// Encode and before the first write; later calls do nothing.
+	void Announce(grpc::ServerContext& Context);
+
+	// The segment Announce names: the one the first Encode made, until the client has attached.
+	bool GetFirstSegment(std::string& Name, uint64& Size) const;
+
 	// Releases every segment. Encode returns false from here on.
 	void Close();
 
@@ -98,6 +111,9 @@ private:
 	TUniquePtr<FSegment> Current;
 	// Segments a client may still have to attach to, to read messages sent before a resize.
 	TArray<TUniquePtr<FSegment>> Retired;
+	bool bAnnounced = false;
+	// Whether the client has mapped a segment of this stream. Until it has, every message goes inline.
+	bool bClientAttached = false;
 	uint64 NextSequence = 1;
 	uint32 NextSlot = 0;
 	bool bClosed = false;

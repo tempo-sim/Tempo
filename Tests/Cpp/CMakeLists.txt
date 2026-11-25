@@ -31,3 +31,7 @@ else()
     tempo_add_group(contract tempo::tempo)
 endif()
 tempo_add_group(integration tempo::tempo)
+
+# The shared-memory transport against a rendering sim; built with the groups but not run by
+# TestCppAPI.sh (see shared_memory.cc).
+tempo_add_group(shared_memory tempo::tempo)

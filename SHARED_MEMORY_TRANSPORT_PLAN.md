@@ -1,9 +1,10 @@
 # Shared-memory transport for sensor payloads — plan
 
-Status: **phase 2 built** (Linux and macOS server, Python client). On the target Linux GPU machine,
-transport was more than 5% of total time, which was enough to go ahead. The server half is
-`TempoCore/.../TempoSharedMemory.{h,cpp}`, whose header documents the wire layout. The client half
-is `tempo_sim/_shared_memory.py`. Rust, C++ and Windows are next (phase 3). The Design section is
+Status: **phases 2 and 3 (clients) built**: Linux and macOS server; Python, Rust and C++ clients. On
+the target Linux GPU machine, transport was more than 5% of total time, which was enough to go ahead.
+The server half is `TempoCore/.../TempoSharedMemory.{h,cpp}`, whose header documents the wire layout.
+The client halves are `tempo_sim/_shared_memory.py`, `tempo_sim::shared_memory` and the C++ client's
+`tempo/shared_memory.h`. The Design section is
 the original draft; [As built](#as-built) lists where the build departs from it, and why.
 
 ## Goal
@@ -61,10 +62,14 @@ These differ from the first draft of this plan:
   (64 KiB) is eligible, in any streaming RPC, project ones included. That needs no `.proto` change and
   no new `Options.proto`. A field option would also have needed protobuf extension support across
   the shared `tempogrpc` library.
-- **The reference names its segment.** No initial metadata is sent back and there is no stream
-  token. Each 80-byte reference carries the segment's name and size, so the first message, and a
-  resize, need no separate announcement. The client recognises a reference by its exact length and
-  its `TEMPOREF` magic, and only on a stream that asked for shared memory.
+- **A handshake, then references that name their segment.** There is no stream token. The server
+  makes the stream's first segment with its first message, names it in the initial metadata
+  (`tempo-shm-segment`, `tempo-shm-size`), and sends payloads inline until the client has mapped it and
+  set its `attached` word. After that, each 80-byte reference carries its segment's name and size, so
+  a resize needs no announcement of its own. The client recognises a reference by its exact length
+  and its `TEMPOREF` magic, and only on a stream that asked for shared memory.
+- **Fields in a `oneof` stay inline**, proto3 `optional` included. prost folds a oneof into an enum, so
+  a client could not reach the field without knowing the message.
 - **The payload is copied into the slot when the response arrives** (`OnResponse`), not when it is
   written. What is written, or queued behind a write in flight, is the small envelope. This removes
   the queue copy for shared-memory streams without changing `TResponseDelegate`. The `MoveTemp`
@@ -78,10 +83,18 @@ These differ from the first draft of this plan:
   them fails to link.
 - **Linux reserves the segment's pages** with `posix_fallocate`. A container's `/dev/shm` is 64 MB by
   default, and writing a page tmpfs can't supply raises SIGBUS instead of returning an error.
-- **The client reopens without shared memory if it cannot map a segment.** That drops the message in
-  hand, and no later stream in that process asks for shared memory again. The Python client frees a
-  slot with a plain 4-byte store, not an atomic release. That store is ordered after the copy on x86,
-  but only in practice on ARM. The C++ and Rust clients will use real release stores.
+- **A client that cannot map the announced segment just never attaches.** The server goes on sending
+  inline, so nothing is lost and nothing reopens, and no later stream in that process asks for shared
+  memory again. A first draft reopened the stream instead and lost the message in hand; that could
+  not be done in the Rust and C++ wrappers without changing what they return.
+- **The Rust and C++ wrappers keep their signatures.** Rust's calls `tonic::client::Grpc` directly,
+  with a codec whose decoder restores the payloads, so it still returns `tonic::Streaming<T>`. C++'s
+  `ServerStream<T>::read` restores them. Neither uses protobuf reflection (C++ links the same
+  `tempogrpc`, so it would hit the same `call_once` link failure). Instead the generators emit, for
+  each response type, the list of its eligible fields: a `SharedMemoryMessage` impl in Rust, and a
+  lambda in C++.
+- **Slot release ordering:** Rust and C++ free a slot with a release store. Python uses a plain 4-byte
+  store, which is ordered after the copy on x86, but only in practice on ARM.
 
 Measured on the Mac (render-bound, so sim speed doesn't move; full 1080p rig, Python client):
 
@@ -272,14 +285,17 @@ through their RMW without Tempo's involvement.
 2. **Done: shared memory, Linux and macOS, Python first.** Field option, negotiation, ring, reflection
    envelope, Python runtime and codegen, `Tempo.WriteStats` counters for slot hits and inline fallbacks,
    and a `write_wait.py` A/B (`TEMPO_SHARED_MEMORY=0/1`).
-3. **Rust and C++ clients**, then Windows.
+3. **Done: Rust and C++ clients.** Then Windows.
 4. **Write straight into the slot.** A `FTempoServer` payload-allocation call lets readback decode into
    the slot directly, removing copy 1. Sensor code changes here, not before.
 5. **Optional zero-copy client APIs** (`memoryview`, borrowed slices) for clients that want them.
 
 ## Tests
 
-Built: `Tempo.Sensors.SharedMemory.*` (round trip, ring full goes inline, resize and unlinking);
+Built: `Tempo.Sensors.SharedMemory.*` (handshake, round trip, ring full goes inline, resize and
+unlinking); unit tests of the Rust reader (`cargo test --lib shared_memory`); `Tests/Rust/examples/shared_memory.rs`
+and `Tests/Cpp/shared_memory.cc`, which compare a camera's captures over shared memory and through a
+raw stub against a rendering sim;
 `Tests/Python/test_shared_memory.py` (the client reader, against a segment written by the test, in
 the `contract` group); and in the `sensors` group, color and lidar streams over shared memory compared
 byte for byte with a raw-stub stream of the same captures. Still to write: a cancelled stream unlinks

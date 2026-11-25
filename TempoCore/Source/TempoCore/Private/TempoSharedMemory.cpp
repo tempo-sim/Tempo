@@ -10,6 +10,8 @@
 #include "HAL/PlatformAtomics.h"
 #include "HAL/PlatformProcess.h"
 
+#include <string>
+
 #include "google/protobuf/descriptor.h"
 #include "google/protobuf/descriptor.pb.h"
 #include "google/protobuf/message.h"
@@ -106,8 +108,11 @@ namespace
 	{
 		google::protobuf_tempo::FieldDescriptorProto Proto;
 		Field->CopyTo(&Proto);
+		// Not a oneof member (nor proto3 `optional`, a oneof of one): every client must be able to reach the
+		// field without knowing the message, and Rust's prost folds a oneof into an enum.
 		return Proto.type() == google::protobuf_tempo::FieldDescriptorProto::TYPE_BYTES
-			&& Proto.label() != google::protobuf_tempo::FieldDescriptorProto::LABEL_REPEATED;
+			&& Proto.label() != google::protobuf_tempo::FieldDescriptorProto::LABEL_REPEATED
+			&& !Proto.has_oneof_index();
 	}
 
 	// Copies one set field of From into To, which is the same type.
@@ -311,15 +316,49 @@ void FTempoSharedMemoryStream::Close()
 	Retired.Reset();
 }
 
+void FTempoSharedMemoryStream::Announce(grpc::ServerContext& Context)
+{
+	if (bAnnounced)
+	{
+		return;
+	}
+	bAnnounced = true;
+	std::string Name;
+	uint64 Size;
+	if (GetFirstSegment(Name, Size))
+	{
+		Context.AddInitialMetadata("tempo-shm-segment", Name);
+		Context.AddInitialMetadata("tempo-shm-size", std::to_string(Size));
+	}
+}
+
+bool FTempoSharedMemoryStream::GetFirstSegment(std::string& Name, uint64& Size) const
+{
+	if (!Current || bClosed || bClientAttached || Current->IsAttached())
+	{
+		return false;
+	}
+	Name = Current->Name;
+	Size = Current->Size;
+	return true;
+}
+
 void FTempoSharedMemoryStream::ReleaseAttachedSegments()
 {
-	if (Current && !Current->bUnlinked && Current->IsAttached())
+	if (Current && Current->IsAttached())
 	{
-		Current->Unlink();
+		bClientAttached = true;
+		if (!Current->bUnlinked)
+		{
+			Current->Unlink();
+		}
 	}
 	// The client maps a segment the first time a reference names it, so once it has attached it holds its own
 	// mapping and needs neither the name nor ours.
-	Retired.RemoveAll([](const TUniquePtr<FSegment>& Segment) { return Segment->IsAttached(); });
+	if (Retired.RemoveAll([](const TUniquePtr<FSegment>& Segment) { return Segment->IsAttached(); }) > 0)
+	{
+		bClientAttached = true;
+	}
 }
 
 FTempoSharedMemoryStream::FSegment* FTempoSharedMemoryStream::EnsureSegment(uint64 SlotSize)
@@ -370,7 +409,15 @@ bool FTempoSharedMemoryStream::Encode(const google::protobuf_tempo::Message& Res
 			SlotBytes += AlignUp(Value.size(), PayloadAlignment);
 		}
 	}
-	if (Payloads.IsEmpty())
+
+	// The first message makes the segment Announce names, and it and every message after it go inline until
+	// the client has mapped that segment. A client that cannot map it never does, and so gets inline
+	// payloads throughout, with nothing lost.
+	if (!bAnnounced && !Current)
+	{
+		EnsureSegment(FMath::Max<uint64>(SlotBytes, 1));
+	}
+	if (!bClientAttached || Payloads.IsEmpty())
 	{
 		return false;
 	}

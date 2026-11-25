@@ -3,15 +3,15 @@
 """The client half of the shared-memory transport for streams with large ``bytes`` fields.
 
 A generated stream wrapper whose response type has a top-level ``bytes`` field opens its call through
-``stream``. That asks the server for shared memory; a server on this machine that can offer it then
-moves each large ``bytes`` field into a ring in a shared-memory segment, and sends a fixed-size
-reference in its place. ``stream`` puts the payload back before the caller sees the message, so a
+``stream``. That asks the server for shared memory. A server on this machine that can offer it names
+the stream's first segment in the call's initial metadata, and once this client has mapped it, moves
+each large ``bytes`` field into a ring in shared memory and sends a fixed-size reference in its place. ``stream`` puts the payload back before the caller sees the message, so a
 caller gets the same messages either way. The layout is documented in TempoCore's
 ``TempoSharedMemory.h``.
 
-``TEMPO_SHARED_MEMORY=0`` turns it off. If a segment cannot be mapped (a client in a container
-without the sim's ``/dev/shm``, say), the stream reopens without it, which drops the message in hand,
-and no later stream in this process asks again.
+``TEMPO_SHARED_MEMORY=0`` turns it off. If the announced segment cannot be mapped (a client in a
+container without the sim's ``/dev/shm``, say), the server goes on sending every payload inline, and no
+later stream in this process asks again.
 """
 
 import mmap
@@ -82,7 +82,8 @@ class Reader:
 
     def __init__(self, descriptor):
         self._fields = [field.name for field in descriptor.fields
-                        if field.type == FieldDescriptor.TYPE_BYTES and not _is_repeated(field)]
+                        if field.type == FieldDescriptor.TYPE_BYTES and not _is_repeated(field)
+                        and field.containing_oneof is None]
         self._segments = {}
 
     def _segment(self, name: str, size: int) -> mmap.mmap:
@@ -99,6 +100,26 @@ class Reader:
         self.close()
         self._segments[name] = segment
         return segment
+
+    def attach(self, initial_metadata) -> bool:
+        """Maps the segment the server announced in the call's initial metadata, if it announced one.
+
+        Returns whether this client can now receive payloads through shared memory. Until it has mapped
+        the announced segment, the server sends them inline.
+        """
+        global _unavailable_reason
+        announced = {key: value for key, value in (initial_metadata or ())}
+        name = announced.get("tempo-shm-segment")
+        if not name:
+            return False
+        try:
+            self._segment(name, int(announced.get("tempo-shm-size", "0")))
+        except (Unavailable, ValueError) as e:
+            _unavailable_reason = str(e)
+            warnings.warn(f"Tempo shared memory is unavailable ({e}); payloads arrive inline.",
+                          RuntimeWarning, stacklevel=3)
+            return False
+        return True
 
     def restore(self, message):
         """Replaces each reference in message with the payload it names, and frees its slot."""
@@ -136,25 +157,15 @@ async def stream(open_call: OpenCall, response_type) -> AsyncIterator:
 
     open_call takes the request metadata to send, or None. The call is cancelled however this ends.
     """
-    global _unavailable_reason
     reader = Reader(response_type.DESCRIPTOR) if enabled() else None
     call = open_call(METADATA if reader is not None else None)
     try:
-        while True:
-            try:
-                async for response in call:
-                    if reader is not None:
-                        reader.restore(response)
-                    yield response
-                return
-            except Unavailable as e:
-                _unavailable_reason = str(e)
-                warnings.warn(f"Tempo shared memory is unavailable ({e}); streams send payloads inline.",
-                              RuntimeWarning, stacklevel=2)
-                call.cancel()
-                reader.close()
-                reader = None
-                call = open_call(None)
+        if reader is not None:
+            reader.attach(await call.initial_metadata())
+        async for response in call:
+            if reader is not None:
+                reader.restore(response)
+            yield response
     finally:
         call.cancel()
         if reader is not None:

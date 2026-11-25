@@ -64,16 +64,21 @@ namespace
 		uint64 Size = 0;
 
 		explicit FClientMapping(const FRef& Ref)
+			: FClientMapping(std::string(TCHAR_TO_UTF8(*Ref.Name)), Ref.SegmentSize)
 		{
-			const int Fd = shm_open(TCHAR_TO_UTF8(*Ref.Name), O_RDWR, 0);
+		}
+
+		FClientMapping(const std::string& Name, uint64 SegmentSize)
+		{
+			const int Fd = shm_open(Name.c_str(), O_RDWR, 0);
 			if (Fd >= 0)
 			{
-				void* Mapped = mmap(nullptr, Ref.SegmentSize, PROT_READ | PROT_WRITE, MAP_SHARED, Fd, 0);
+				void* Mapped = mmap(nullptr, SegmentSize, PROT_READ | PROT_WRITE, MAP_SHARED, Fd, 0);
 				close(Fd);
 				if (Mapped != MAP_FAILED)
 				{
 					Base = static_cast<uint8*>(Mapped);
-					Size = Ref.SegmentSize;
+					Size = SegmentSize;
 					FPlatformAtomics::AtomicStore(reinterpret_cast<volatile int32*>(Base + 24), 1);
 				}
 			}
@@ -108,6 +113,24 @@ namespace
 		}
 	};
 
+	// The client's half of the handshake: the first message goes inline, and the client maps the segment
+	// the stream announced with it.
+	TUniquePtr<FClientMapping> Handshake(FAutomationTestBase& Test, FTempoSharedMemoryStream& Stream, const google::protobuf_tempo::Message& First)
+	{
+		TUniquePtr<google::protobuf_tempo::Message> Envelope(First.New());
+		Test.TestFalse(TEXT("the first message goes inline"), Stream.Encode(First, *Envelope));
+		std::string Name;
+		uint64 Size = 0;
+		if (!Test.TestTrue(TEXT("the first message makes a segment to announce"), Stream.GetFirstSegment(Name, Size)))
+		{
+			return nullptr;
+		}
+		Test.TestFalse(TEXT("and still goes inline before the client attaches"), Stream.Encode(First, *Envelope));
+		TUniquePtr<FClientMapping> Mapping = MakeUnique<FClientMapping>(Name, Size);
+		Test.TestNotNull(TEXT("the client maps the announced segment"), Mapping->Base);
+		return Mapping;
+	}
+
 	TempoSensors::LidarScanSegment MakeScan(int32 Returns, uint8 Fill)
 	{
 		TempoSensors::LidarScanSegment Scan;
@@ -133,8 +156,9 @@ bool FTempoSharedMemoryRoundTripTest::RunTest(const FString& Parameters)
 		return false;
 	}
 	const TempoSensors::LidarScanSegment Scan = MakeScan(64 * 1024, 7);
+	const TUniquePtr<FClientMapping> Attached = Handshake(*this, *Stream, Scan);
 	TempoSensors::LidarScanSegment Envelope;
-	if (!TestTrue(TEXT("the scan is encoded"), Stream->Encode(Scan, Envelope)))
+	if (!TestTrue(TEXT("once attached, the scan is encoded"), Stream->Encode(Scan, Envelope)))
 	{
 		return false;
 	}
@@ -145,11 +169,12 @@ bool FTempoSharedMemoryRoundTripTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("both share a slot"), Distances.Slot, Intensities.Slot);
 	TestEqual(TEXT("a small field stays inline"), Envelope.reflectivities(), Scan.reflectivities());
 
-	const FClientMapping Mapping(Distances);
-	if (!TestNotNull(TEXT("the client maps the segment"), Mapping.Base))
+	// The client's mapping from the handshake: once it attached, the server unlinked the name.
+	if (!Attached || !Attached->Base)
 	{
 		return false;
 	}
+	const FClientMapping& Mapping = *Attached;
 	TestEqual(TEXT("the slot is written"), Mapping.SlotState(Distances.Slot), 1);
 	TestEqual(TEXT("the slot holds this message"), Mapping.SlotSequence(Distances.Slot), Distances.Sequence);
 
@@ -170,15 +195,18 @@ bool FTempoSharedMemoryRingFullTest::RunTest(const FString& Parameters)
 
 	TUniquePtr<FTempoSharedMemoryStream> Stream = FTempoSharedMemoryStream::Create(TempoSensors::LidarScanSegment::descriptor());
 	const TempoSensors::LidarScanSegment Scan = MakeScan(64 * 1024, 1);
+	const TUniquePtr<FClientMapping> Attached = Handshake(*this, *Stream, Scan);
 	TempoSensors::LidarScanSegment First, Second, Third;
 	TestTrue(TEXT("the first message takes a slot"), Stream->Encode(Scan, First));
 	TestTrue(TEXT("the second takes the other"), Stream->Encode(Scan, Second));
 	TestFalse(TEXT("with no slot free, the third goes inline"), Stream->Encode(Scan, Third));
 
 	FRef Ref;
-	ParseRef(First.distances_m(), Ref);
-	const FClientMapping Mapping(Ref);
-	Mapping.Free(Ref.Slot);
+	if (!Attached || !Attached->Base || !TestTrue(TEXT("the first is a reference"), ParseRef(First.distances_m(), Ref)))
+	{
+		return false;
+	}
+	Attached->Free(Ref.Slot);
 	TestTrue(TEXT("once the client frees one, the next takes it"), Stream->Encode(Scan, Third));
 	FRef ThirdRef;
 	ParseRef(Third.distances_m(), ThirdRef);
@@ -190,31 +218,34 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTempoSharedMemoryResizeTest, "Tempo.Sensors.Sh
 bool FTempoSharedMemoryResizeTest::RunTest(const FString& Parameters)
 {
 	TUniquePtr<FTempoSharedMemoryStream> Stream = FTempoSharedMemoryStream::Create(TempoSensors::LidarScanSegment::descriptor());
+	const TempoSensors::LidarScanSegment SmallScan = MakeScan(64 * 1024, 1);
+	const TUniquePtr<FClientMapping> Attached = Handshake(*this, *Stream, SmallScan);
+	std::string FirstName;
+	uint64 FirstSize;
+	TestFalse(TEXT("once the client attaches, the segment is no longer announced"), Stream->GetFirstSegment(FirstName, FirstSize));
+
 	TempoSensors::LidarScanSegment Small, Large;
-	TestTrue(TEXT("a small scan is encoded"), Stream->Encode(MakeScan(64 * 1024, 1), Small));
+	TestTrue(TEXT("a small scan is encoded"), Stream->Encode(SmallScan, Small));
 	const TempoSensors::LidarScanSegment LargeScan = MakeScan(256 * 1024, 2);
-	TestTrue(TEXT("a larger one is encoded"), Stream->Encode(LargeScan, Large));
+	TestTrue(TEXT("a larger one is encoded without a new handshake"), Stream->Encode(LargeScan, Large));
 
 	FRef SmallRef, LargeRef;
 	ParseRef(Small.distances_m(), SmallRef);
 	ParseRef(Large.distances_m(), LargeRef);
 	TestNotEqual(TEXT("the larger one is in a new segment"), LargeRef.Name, SmallRef.Name);
+	TestTrue(TEXT("the attached segment's name is gone"), shm_open(TCHAR_TO_UTF8(*SmallRef.Name), O_RDWR, 0) < 0);
 
-	// The client has not read the first segment yet, so it must still be there to map.
-	const FClientMapping SmallMapping(SmallRef);
-	TestNotNull(TEXT("the earlier segment can still be mapped"), SmallMapping.Base);
 	const FClientMapping LargeMapping(LargeRef);
 	if (TestNotNull(TEXT("the new segment can be mapped"), LargeMapping.Base))
 	{
 		TestTrue(TEXT("and holds the larger payload"), LargeMapping.Payload(LargeRef) == LargeScan.distances_m());
 	}
-
-	// Once the client has attached, the server unlinks the name; nothing is left behind.
 	TempoSensors::LidarScanSegment Next;
 	Stream->Encode(LargeScan, Next);
-	TestTrue(TEXT("an attached segment's name is gone"), shm_open(TCHAR_TO_UTF8(*LargeRef.Name), O_RDWR, 0) < 0);
+	TestTrue(TEXT("once attached, its name is gone too"), shm_open(TCHAR_TO_UTF8(*LargeRef.Name), O_RDWR, 0) < 0);
 	Stream->Close();
-	TestTrue(TEXT("Close removes the rest"), shm_open(TCHAR_TO_UTF8(*SmallRef.Name), O_RDWR, 0) < 0);
+	TempoSensors::LidarScanSegment AfterClose;
+	TestFalse(TEXT("a closed stream goes inline"), Stream->Encode(LargeScan, AfterClose));
 	return true;
 }
 

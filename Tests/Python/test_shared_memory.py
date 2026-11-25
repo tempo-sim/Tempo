@@ -110,3 +110,26 @@ def test_unmappable_segment_is_unavailable():
     reader = _shared_memory.Reader(Camera.ColorImage.DESCRIPTOR)
     with pytest.raises(_shared_memory.Unavailable):
         reader.restore(Camera.ColorImage(data=reference))
+
+
+def test_attach_maps_the_announced_segment(segment):
+    reader = _shared_memory.Reader(Camera.ColorImage.DESCRIPTOR)
+    try:
+        assert reader.attach((("tempo-shm-segment", segment.name), ("tempo-shm-size", str(segment.size))))
+    finally:
+        reader.close()
+    assert segment.attached() == 1
+
+
+def test_attach_without_an_announcement_does_nothing():
+    reader = _shared_memory.Reader(Camera.ColorImage.DESCRIPTOR)
+    assert not reader.attach((("content-type", "application/grpc"),))
+    assert not reader.attach(None)
+
+
+def test_a_segment_that_cannot_be_mapped_leaves_payloads_inline(monkeypatch):
+    monkeypatch.setattr(_shared_memory, "_unavailable_reason", None)
+    reader = _shared_memory.Reader(Camera.ColorImage.DESCRIPTOR)
+    with pytest.warns(RuntimeWarning):
+        assert not reader.attach((("tempo-shm-segment", "/tempo.test.missing"), ("tempo-shm-size", "8192")))
+    assert not _shared_memory.enabled(), "a later stream would ask again"

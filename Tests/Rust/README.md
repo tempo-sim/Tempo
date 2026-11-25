@@ -49,3 +49,6 @@ log to `Saved/RustTestReport/` (override with `TEMPO_TEST_REPORT_DIR`).
 `TEMPO_SERVER_PORT` picks the port. `TEMPO_SERVER_SOCKET=run-a.sock` runs the sim on a Unix domain
 socket instead (Linux/macOS), so several test runs can share a machine without each claiming a
 port; it takes precedence over the port.
+
+`cargo run --example shared_memory` checks the shared-memory transport against a rendering sim on this
+machine (`-RenderOffScreen`), which the integration group does not launch.

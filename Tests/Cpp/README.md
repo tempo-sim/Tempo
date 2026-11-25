@@ -18,3 +18,7 @@ The runner builds the group, launches the packaged sim for the groups that need 
 logs to `Saved/CppTestReport` (or `TEMPO_TEST_REPORT_DIR`). The harness is `harness.h`: cases
 register themselves with `TEMPO_TEST`, `CHECK` records a failure and goes on, `REQUIRE` and
 `REQUIRE_OK` leave the case. An argument to an executable runs only the cases whose names contain it.
+
+`shared_memory` is built with the groups but run by hand. It checks the shared-memory transport
+against a rendering sim on this machine (`-RenderOffScreen`), which none of the groups launch:
+`TEMPO_SERVER_PORT=<port> <build dir>/shared_memory`.

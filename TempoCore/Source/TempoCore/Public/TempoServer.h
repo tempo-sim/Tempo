@@ -412,7 +412,10 @@ protected:
 		if (SharedMemory && Result.ok())
 		{
 			ResponseType Envelope;
-			if (SharedMemory->Encode(Response, Envelope))
+			const bool bEncoded = SharedMemory->Encode(Response, Envelope);
+			// Before the first write, which sends the initial metadata.
+			SharedMemory->Announce(Base::Context);
+			if (bEncoded)
 			{
 				if (Base::State == FRequestManager::EState::HANDLING)
 				{

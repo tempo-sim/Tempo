@@ -58,6 +58,21 @@ def is_proto3_optional(field):
             and field.containing_oneof == f"_{field.name}")
 
 
+# Rust's strict and reserved keywords, which prost escapes as raw identifiers in a field name.
+RUST_KEYWORDS = {
+    "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn", "for", "if",
+    "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return", "self", "Self",
+    "static", "struct", "super", "trait", "true", "type", "unsafe", "use", "where", "while", "async",
+    "await", "dyn", "abstract", "become", "box", "do", "final", "macro", "override", "priv", "typeof",
+    "unsized", "virtual", "yield", "try", "gen",
+}
+
+
+def rust_field_name(name):
+    """The name prost gives a message field."""
+    return f"r#{name}" if name in RUST_KEYWORDS else name
+
+
 def _crate_prefix_for(target_module_pascal, current_owner, module_owners):
     """Pick the path root for referencing a proto module from inside `current_owner`'s crate.
 
@@ -272,6 +287,43 @@ pub fn {{ name }}(''' + request_param_fragment + ''') -> Result<impl Iterator<It
 
 '''
 
+    # A stream whose response has a top-level bytes field: the same signature, but the call is made
+    # directly, so it can ask for shared memory and decode with a codec that puts the payloads back.
+    shared_memory_streaming_rpc_template = '''
+/// {{ rpc.name }} (server streaming)''' + deprecated_fragment + '''
+pub async fn {{ name }}_async(''' + request_param_fragment + ''') -> Result<tonic::Streaming<{{ response_rust_type }}>, {{ infra }}::TempoError> {
+    let channel = {{ infra }}::context::connected_channel().await?;
+    let mut grpc = tonic::client::Grpc::new(channel)
+        .max_decoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE)
+        .max_encoding_message_size({{ infra }}::context::MAX_MESSAGE_SIZE);''' + request_build_fragment + '''
+
+    grpc.ready().await.map_err(|e| tonic::Status::unknown(format!("Service was not ready: {e}")))?;
+    // Large bytes fields may arrive through shared memory; the codec puts them back.
+    let reader = std::sync::Arc::new(std::sync::Mutex::new({{ infra }}::shared_memory::Reader::default()));
+    let codec = {{ infra }}::shared_memory::SharedMemoryCodec::<{{ request_rust_type }}, {{ response_rust_type }}>::new(reader.clone());
+    let path = tonic::codegen::http::uri::PathAndQuery::from_static("/{{ service_full_name }}/{{ rpc.name }}");
+    ''' + allow_deprecated_fragment + '''let response = grpc.server_streaming({{ infra }}::shared_memory::request(request), path, codec).await?;
+    reader.lock().unwrap().attach(response.metadata());
+    Ok(response.into_inner())
+}
+
+/// Synchronous iterator version of {{ name }}''' + deprecated_fragment + '''
+pub fn {{ name }}(''' + request_param_fragment + ''') -> Result<impl Iterator<Item = Result<{{ response_rust_type }}, tonic::Status>>, {{ infra }}::TempoError> {
+    ''' + allow_deprecated_fragment + '''let stream = {{ infra }}::context::RUNTIME.block_on({{ name }}_async(''' + call_arg_fragment + '''))?;
+
+    Ok(SyncStreamIterator::new(stream))
+}
+
+'''
+
+    shared_memory_message_template = '''
+impl {{ infra }}::shared_memory::SharedMemoryMessage for {{ response_rust_type }} {
+    fn shared_memory_fields(&mut self) -> Vec<&mut Vec<u8>> {
+        vec![{% for field in fields %}&mut self.{{ field }}{% if not loop.last %}, {% endif %}{% endfor %}]
+    }
+}
+'''
+
     # Template for a Batch struct that wraps a oneof-of-Set*PropertyRequest into
     # a fluent builder. Each method appends an op and returns self; execute /
     # execute_async send one SetProperties RPC for the staged ops.
@@ -444,6 +496,7 @@ impl Call {
 """
 
     j2_environment = jinja2.Environment()
+    service_full_names = {id(descriptor): name for name, descriptor in all_services.items()}
 
     # Group services by module first
     services_by_module = {}
@@ -473,6 +526,8 @@ impl Call {
 
             has_streaming = False
             rpc_code = []
+            # Response types given a SharedMemoryMessage impl in this module.
+            shared_memory_messages = set()
             # Short name -> path of each request type this module's wrappers take, re-exported so a
             # caller can build one without reaching into `proto`.
             reexports = {}
@@ -516,7 +571,21 @@ impl Call {
                     deprecated = (service_module_pascal, tempo_service_descriptor.object_name,
                                   rpc_descriptor.name) in deprecated_rpcs
 
-                    if rpc_descriptor.server_streaming:
+                    # The fields a server may move into shared memory: top-level singular bytes, outside
+                    # any oneof (TempoSharedMemory.cpp's IsSingularBytes).
+                    shared_memory_fields = [
+                        rust_field_name(field.name) for field in tempo_response_descriptor.fields
+                        if field.proto_type == gpd.FieldDescriptor.TYPE_BYTES and field.label != "repeated"
+                        and not field.in_any_oneof
+                    ] if rpc_descriptor.server_streaming else []
+                    if shared_memory_fields:
+                        has_streaming = True
+                        template = j2_environment.from_string(shared_memory_streaming_rpc_template)
+                        if response_rust_type not in shared_memory_messages:
+                            shared_memory_messages.add(response_rust_type)
+                            rpc_code.append(j2_environment.from_string(shared_memory_message_template).render(
+                                infra=infra, response_rust_type=response_rust_type, fields=shared_memory_fields))
+                    elif rpc_descriptor.server_streaming:
                         has_streaming = True
                         template = j2_environment.from_string(streaming_rpc_template)
                     else:
@@ -533,6 +602,7 @@ impl Call {
                         request_rust_type=request_rust_type,
                         response_rust_type=response_rust_type,
                         client_type=client_type,
+                        service_full_name=service_full_names[id(tempo_service_descriptor)],
                         method_name=prost_to_snake(rpc_descriptor.name),
                     ))
 
@@ -719,7 +789,7 @@ impl Call {
     update_lib_rs(tempo_root_dir, tempo_generated)
     # Sweep stale wrappers: anything that's not infra (context/error/streaming),
     # not lib.rs/proto.rs, and not in the current generated set.
-    _tempo_keep = {"context.rs", "conversion.rs", "error.rs", "streaming.rs", "lib.rs",
+    _tempo_keep = {"context.rs", "conversion.rs", "error.rs", "shared_memory.rs", "streaming.rs", "lib.rs",
                    "proto.rs", "unreal.rs", "world.rs"}
     _tempo_keep |= {f"{m}.rs" for m in tempo_generated}
     for entry in os.listdir(tempo_root_dir):
@@ -798,6 +868,7 @@ def update_lib_rs(rust_root_dir, generated_modules):
 pub mod context;
 pub mod error;
 pub mod proto;
+pub mod shared_memory;
 pub mod streaming;
 
 // The reflected API's runtime: hand-written, unlike everything below. The base a project's

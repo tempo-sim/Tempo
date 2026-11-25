@@ -334,9 +334,27 @@ Result<ServerStream<{{ rpc.response_cpp }}>> {{ rpc.name }}({% if rpc.args %}con
 {%- endfor %}
 
     auto context = std::make_unique<grpc::ClientContext>();
+{%- if rpc.shared_memory_fields %}
+    // Large bytes fields may arrive through shared memory; the stream puts them back.
+    const bool shared_memory = SharedMemoryReader::enabled();
+    if (shared_memory) {
+        context->AddMetadata("tempo-shm", "1");
+    }
+    auto reader = stub->{{ rpc.original_name }}(context.get(), request);
+    if (!shared_memory) {
+        return ServerStream<{{ rpc.response_cpp }}>(
+            std::move(channel), std::move(context), std::move(reader));
+    }
+    return ServerStream<{{ rpc.response_cpp }}>(
+        std::move(channel), std::move(context), std::move(reader),
+        []({{ rpc.response_cpp }}& message) {
+            return std::vector<std::string*>{ {%- for field in rpc.shared_memory_fields %}message.mutable_{{ field }}(){% if not loop.last %}, {% endif %}{% endfor -%} };
+        });
+{%- else %}
     auto reader = stub->{{ rpc.original_name }}(context.get(), request);
     return ServerStream<{{ rpc.response_cpp }}>(
         std::move(channel), std::move(context), std::move(reader));
+{%- endif %}
 }
 {%- else -%}
 Result<{{ rpc.response_cpp }}> {{ rpc.name }}({% if rpc.args %}const {{ rpc.args }}& args{% endif %}) {
@@ -701,6 +719,14 @@ class CppApiGenerator:
                         # consumers need the full type definition.
                         proto_includes.add(descriptor_pbh_path(response_desc))
 
+                    # The fields a server may move into shared memory: top-level singular bytes,
+                    # outside any oneof (TempoSharedMemory.cpp's IsSingularBytes).
+                    shared_memory_fields = [
+                        field.name for field in response_desc.fields
+                        if field.proto_type == gpd.FieldDescriptor.TYPE_BYTES and field.label != "repeated"
+                        and not field.in_any_oneof
+                    ] if rpc.server_streaming else []
+
                     rpc_renderings.append(_RpcRender(
                         name=pascal_to_snake(rpc.name),
                         original_name=rpc.name,
@@ -711,6 +737,7 @@ class CppApiGenerator:
                         deprecated=f"{service_full_name}.{rpc.name}" in self.deprecated_rpcs,
                         args=args,
                         setter_lines=setter,
+                        shared_memory_fields=shared_memory_fields,
                     ))
 
             if not rpc_renderings:
@@ -910,11 +937,14 @@ class CppApiGenerator:
 
 class _RpcRender:
     __slots__ = ("name", "original_name", "request_cpp", "response_cpp",
-                 "client_cpp", "server_streaming", "deprecated", "args", "setter_lines")
+                 "client_cpp", "server_streaming", "deprecated", "args", "setter_lines",
+                 "shared_memory_fields")
 
     def __init__(self, name, original_name, request_cpp, response_cpp,
-                 client_cpp, server_streaming, deprecated, args, setter_lines):
+                 client_cpp, server_streaming, deprecated, args, setter_lines,
+                 shared_memory_fields=()):
         self.name = name
+        self.shared_memory_fields = list(shared_memory_fields)
         self.original_name = original_name
         self.request_cpp = request_cpp
         self.response_cpp = response_cpp

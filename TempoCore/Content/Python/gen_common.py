@@ -138,6 +138,8 @@ class TempoMessageDescriptor(TempoObjectDescriptor):
             # generators emit oneof members differently from plain fields. Synthetic
             # oneofs (proto3 `optional`) are ignored — we don't use them.
             oneof = field_descriptor.containing_oneof
+            # Any oneof, synthetic ones (proto3 `optional`) included.
+            self.in_any_oneof = oneof is not None
             self.containing_oneof = (
                 oneof.name if oneof is not None and not getattr(oneof, "is_synthetic", False)
                 else None
