@@ -111,8 +111,13 @@ frame runs between frames:
 - **Earlier captures still arrive.** With `Pipelined Rendering`, a frame's measurements are read
   back after the frame, so they reach the client between the next game frame's steps as soon as
   the GPU has finished them.
-- **Some RPCs need a game frame.** Time settings, level loads and console commands run the rest of
-  the game frame's steps and are handled once it has ticked.
+- **Some RPCs need a game frame.** Time settings, level loads and console commands are handled
+  once the game frame has ticked. They wait for the stepping client's Steps to finish it, so a
+  second client's request doesn't move the sim past the Steps the stepping client sends. If no
+  Step comes within `Tempo.StepWaitTimeoutMs` (50 ms by default), as when the stepping client
+  itself waits on such a request, the game frame runs the rest of its steps on its own. A stepping
+  client that can pause for longer part-way through a game frame, while another client sends such
+  requests, needs a longer `Tempo.StepWaitTimeoutMs`.
 
 Sensors capture only when the world ticks, so their rates are rounded to game frames. In Fixed Step
 mode a sensor's captures fall on multiples of its period in sim time, so every sensor at a rate

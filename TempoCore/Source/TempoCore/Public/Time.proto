@@ -71,8 +71,10 @@ service TimeService {
   // frame runs between frames: sim time advances, and RPCs sent between such steps are
   // handled between them, but nothing else that a frame does happens until the game frame
   // ticks: actors don't tick, timers don't fire, and sensors don't capture. RPCs that need
-  // a game frame (time settings, level loads, console commands) instead run the rest of the
-  // game frame's steps and are handled once it has ticked.
+  // a game frame (time settings, level loads, console commands), from any client, wait for
+  // the Steps that finish it and are handled once it has ticked. If no Step comes within
+  // Tempo.StepWaitTimeoutMs (as when the stepping client itself waits on such an RPC), the
+  // game frame runs the rest of its steps on its own.
   //
   // The return signals only that the world has ticked. Data delivered on separate
   // streams (e.g. sensor measurements) is not guaranteed to have arrived at the client
