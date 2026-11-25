@@ -273,10 +273,27 @@ void FTempoServer::Initialize()
 
 	UE_LOG(LogTempoCore, Display, TEXT("Tempo gRPC server listening on %s"), *Endpoint.Target);
 
+	// Handles the streaming requests' write and finish events. A manager it is handed an event for is alive: the
+	// game thread releases a streaming request only on an event it handed over, or after this thread has ended.
+	StreamCompletionQueue = MakeUnique<grpc::CompletionQueue>();
+	StreamThread = MakeUnique<FThread>(TEXT("TempoServerStreams"), [this, Queue = StreamCompletionQueue.Get()]()
+	{
+		void* Tag;
+		bool bOk;
+		while (Queue->Next(&Tag, &bOk))
+		{
+			FRequestManager* RequestManager = static_cast<FRequestManager*>(Tag);
+			if (!RequestManager->HandleStreamEvent(bOk))
+			{
+				StreamEvents.Enqueue(TPair<int32, bool>(RequestManager->GetTag(), bOk));
+			}
+		}
+	}, 0, TPri_AboveNormal);
+
 	// Now that the server has started we can initialize the request managers.
 	for (const auto& RequestManager : RequestManagers)
 	{
-		RequestManager.Value->Init(CompletionQueue.Get());
+		RequestManager.Value->Init(CompletionQueue.Get(), StreamCompletionQueue.Get());
 	}
 
 	bIsInitialized = true;
@@ -304,6 +321,11 @@ void FTempoServer::Deinitialize()
 	static constexpr int32 MaxShutdownTimeNanoSeconds = 5e7; // 0.05s
 	static constexpr gpr_timespec MaxShutdownWaitTime {0, MaxShutdownTimeNanoSeconds, GPR_TIMESPAN};
 	Server->Shutdown(MaxShutdownWaitTime);
+	StreamCompletionQueue->Shutdown();
+	StreamThread->Join();
+	StreamThread.Reset();
+	StreamCompletionQueue.Reset();
+	StreamEvents.Empty();
 	CompletionQueue->Shutdown();
 
 	// Flush (and discard) all pending events (until we get the shutdown event).
@@ -383,6 +405,7 @@ void FTempoServer::TickInternal()
 	}
 
 	HandleDeferredEvents();
+	HandleStreamEvents();
 
 	const UTempoCoreSettings* Settings = GetDefault<UTempoCoreSettings>();
 	const ETimeMode TimeMode = Settings->GetTimeMode();
@@ -405,7 +428,9 @@ void FTempoServer::TickInternal()
 		int32* Tag;
 		bool bOk;
 		const gpr_timespec MaxEventWaitTime {0, MaxEventWaitTimeNanoSeconds, GPR_TIMESPAN};
-		switch (grpc::CompletionQueue::NextStatus Status = CompletionQueue->AsyncNext(reinterpret_cast<void**>(&Tag), &bOk, MaxEventWaitTime))
+		const grpc::CompletionQueue::NextStatus Status = CompletionQueue->AsyncNext(reinterpret_cast<void**>(&Tag), &bOk, MaxEventWaitTime);
+		HandleStreamEvents();
+		switch (Status)
 		{
 		case grpc::CompletionQueue::GOT_EVENT:
 			{
@@ -460,6 +485,7 @@ bool FTempoServer::PumpEvents(TFunctionRef<bool()> ShouldStop, double TimeoutSec
 	}
 
 	HandleDeferredEvents();
+	HandleStreamEvents();
 
 	const int64 PollIntervalNanoSeconds = FMath::Max<int64>(1, static_cast<int64>(PollIntervalSeconds * 1.e9));
 	const gpr_timespec PollInterval {PollIntervalNanoSeconds / 1000000000, static_cast<int32>(PollIntervalNanoSeconds % 1000000000), GPR_TIMESPAN};
@@ -471,7 +497,9 @@ bool FTempoServer::PumpEvents(TFunctionRef<bool()> ShouldStop, double TimeoutSec
 		bool bOk;
 		bool bPollDue = false;
 		// AsyncNext returns as soon as an event arrives, so the interval adds no latency to a request.
-		switch (CompletionQueue->AsyncNext(reinterpret_cast<void**>(&Tag), &bOk, PollInterval))
+		const grpc::CompletionQueue::NextStatus Status = CompletionQueue->AsyncNext(reinterpret_cast<void**>(&Tag), &bOk, PollInterval);
+		HandleStreamEvents();
+		switch (Status)
 		{
 		case grpc::CompletionQueue::GOT_EVENT:
 			{
@@ -565,7 +593,9 @@ void FTempoServer::FinishWrites()
 
 		int32* Tag;
 		bool bOk;
-		switch (CompletionQueue->AsyncNext(reinterpret_cast<void**>(&Tag), &bOk, MaxEventWaitTime))
+		const grpc::CompletionQueue::NextStatus Status = CompletionQueue->AsyncNext(reinterpret_cast<void**>(&Tag), &bOk, MaxEventWaitTime);
+		HandleStreamEvents();
+		switch (Status)
 		{
 		case grpc::CompletionQueue::GOT_EVENT:
 			{
@@ -602,6 +632,15 @@ void FTempoServer::HandleDeferredEvents()
 	}
 	const TArray<TPair<int32, bool>> Events = MoveTemp(DeferredEvents);
 	for (const TPair<int32, bool>& Event : Events)
+	{
+		HandleEventForTag(Event.Key, Event.Value);
+	}
+}
+
+void FTempoServer::HandleStreamEvents()
+{
+	TPair<int32, bool> Event;
+	while (StreamEvents.Dequeue(Event))
 	{
 		HandleEventForTag(Event.Key, Event.Value);
 	}
@@ -646,7 +685,7 @@ void FTempoServer::HandleEventForTag(int32 Tag, bool bOk)
 
 			// Immediately prepare to receive another request.
 			const int32 NewTag = TagAllocator++;
-			RequestManagers.Emplace(NewTag, RequestManager->Duplicate(NewTag))->Init(CompletionQueue.Get());
+			RequestManagers.Emplace(NewTag, RequestManager->Duplicate(NewTag))->Init(CompletionQueue.Get(), StreamCompletionQueue.Get());
 
 			RequestManager->HandleAndRespond();
 			break;

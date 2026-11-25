@@ -3,6 +3,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Containers/Queue.h"
+#include "HAL/Thread.h"
 #include "Misc/ScopeLock.h"
 
 #include <atomic>
@@ -73,10 +75,11 @@ struct TRequestHandler
 
 	bool IsGameFrameOnly() const { return bGameFrameOnly; }
 
-	void AcceptRequests(grpc::ServerContext* Context, RequestType* Request, ResponderType<ResponseType>* Responder, grpc::ServerCompletionQueue* CompletionQueue, void* Tag)
+	// The new request's event goes to CompletionQueue, and the events of the operations on its call to CallCompletionQueue.
+	void AcceptRequests(grpc::ServerContext* Context, RequestType* Request, ResponderType<ResponseType>* Responder, grpc::CompletionQueue* CallCompletionQueue, grpc::ServerCompletionQueue* CompletionQueue, void* Tag)
 	{
 		check(AcceptDelegate.IsBound());
-		AcceptDelegate.Execute(Context, Request, Responder, CompletionQueue, CompletionQueue, Tag);
+		AcceptDelegate.Execute(Context, Request, Responder, CallCompletionQueue, CompletionQueue, Tag);
 	}
 
 	void HandleRequest(const RequestType& Request, const TResponseDelegate<ResponseType>& ResponseDelegate)
@@ -166,8 +169,14 @@ struct FRequestManager : TSharedFromThis<FRequestManager>
 	enum EState { UNINITIALIZED, REQUESTED, HANDLING, RESPONDING, FINISHING };
 	virtual EState GetState() const = 0;
 	virtual bool HasUnflushedWork() const = 0;
-	virtual void Init(grpc::ServerCompletionQueue* CompletionQueue) = 0;
+	// A streaming request's writes and finish complete on StreamCompletionQueue (see FTempoServer::StreamThread);
+	// everything else on CompletionQueue.
+	virtual void Init(grpc::ServerCompletionQueue* CompletionQueue, grpc::CompletionQueue* StreamCompletionQueue) = 0;
 	virtual void HandleAndRespond() = 0;
+	// On the stream thread, for a write or finish of this request. Returns whether it handled the event there;
+	// one it did not is handed to the game thread, as its tag.
+	virtual bool HandleStreamEvent(bool bOk) { return false; }
+	virtual int32 GetTag() const = 0;
 	virtual FRequestManager* Duplicate(int32 NewTag) const = 0;
 	virtual const FName GetServiceName() const = 0;
 	virtual bool IsGameFrameOnly() const = 0;
@@ -194,11 +203,16 @@ public:
 		return State == FRequestManager::EState::RESPONDING || State == FRequestManager::EState::FINISHING;
 	}
 
-	virtual void Init(grpc::ServerCompletionQueue* CompletionQueue) override
+	virtual void Init(grpc::ServerCompletionQueue* CompletionQueue, grpc::CompletionQueue* StreamCompletionQueue) override
 	{
 		check(State == UNINITIALIZED);
-		Handler->AcceptRequests(&Context, &Request, &Responder, CompletionQueue, &Tag);
+		Handler->AcceptRequests(&Context, &Request, &Responder, GetCallCompletionQueue(CompletionQueue, StreamCompletionQueue), CompletionQueue, &Tag);
 		State = REQUESTED;
+	}
+
+	virtual int32 GetTag() const override
+	{
+		return Tag;
 	}
 
 	virtual const FName GetServiceName() const override
@@ -273,6 +287,11 @@ protected:
 
 	// A response, with the gate's lock held and the manager open.
 	virtual void OnResponse(const ResponseType& Response, grpc::Status Result) = 0;
+
+	virtual grpc::CompletionQueue* GetCallCompletionQueue(grpc::ServerCompletionQueue* CompletionQueue, grpc::CompletionQueue* StreamCompletionQueue) const
+	{
+		return CompletionQueue;
+	}
 
 	// Read on the game thread while a delegate on a worker writes it.
 	std::atomic<EState> State;
@@ -383,7 +402,27 @@ public:
 		return new TRequestManager(NewTag, Base::ServiceName, Base::Service, Base::Handler);
 	}
 
+	// A write completed: write the next queued response from here, rather than when the game thread next
+	// handles events, which it does not while it runs a step. The rest (no queued response, a finish, a
+	// failure) is the game thread's, as before.
+	virtual bool HandleStreamEvent(bool bOk) override
+	{
+		FScopeLock Lock(&Base::Gate->Mutex);
+		TPair<ResponseType, grpc::Status> ResponseItem;
+		if (!bOk || Base::Gate->bClosed || Base::State != FRequestManager::EState::RESPONDING || !ResponseQueue.Dequeue(ResponseItem))
+		{
+			return false;
+		}
+		Respond(ResponseItem.Key, ResponseItem.Value);
+		return true;
+	}
+
 protected:
+	virtual grpc::CompletionQueue* GetCallCompletionQueue(grpc::ServerCompletionQueue* CompletionQueue, grpc::CompletionQueue* StreamCompletionQueue) const override
+	{
+		return StreamCompletionQueue;
+	}
+
 	virtual void OnResponse(const ResponseType& Response, grpc::Status Result) override
 	{
 		if (Base::State == FRequestManager::EState::HANDLING)
@@ -403,11 +442,11 @@ protected:
 		{
 			// Consider non-OK result to mean there are no more responses available.
 			Base::State = FRequestManager::EState::FINISHING;
-			Base::Responder.Finish(Result, &(Base::Tag));
+			Base::Responder.Finish(Result, static_cast<FRequestManager*>(this));
 			return;
 		}
 		Base::State = FRequestManager::EState::RESPONDING;
-		Base::Responder.Write(Response, &(Base::Tag));
+		Base::Responder.Write(Response, static_cast<FRequestManager*>(this));
 	}
 
 	// Under the gate's lock.
@@ -564,6 +603,10 @@ protected:
 	TArray<TPair<int32, bool>> DeferredEvents;
 	void HandleDeferredEvents();
 
+	// The streaming requests' write and finish events the stream thread handed to the game thread.
+	TQueue<TPair<int32, bool>, EQueueMode::Mpsc> StreamEvents;
+	void HandleStreamEvents();
+
 	// Requests whose write or finish outlasted Tempo.WriteStallTimeoutMs, which HasUnflushedWork ignores
 	// until their next event.
 	TSet<int32> StalledTags;
@@ -580,6 +623,11 @@ protected:
 
 	TUniquePtr<grpc::Server> Server;
 	TUniquePtr<grpc::ServerCompletionQueue> CompletionQueue;
+
+	// The streaming requests' writes and finishes complete here, on a thread of their own, so a stream with
+	// queued responses writes the next as soon as the last is written, even while the game thread runs a step.
+	TUniquePtr<grpc::CompletionQueue> StreamCompletionQueue;
+	TUniquePtr<FThread> StreamThread;
 
 	// The Unix domain socket this server bound, to remove on shutdown. Empty for the Tcp transport.
 	FString BoundSocketPath;
