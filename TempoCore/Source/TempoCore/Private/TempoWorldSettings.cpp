@@ -718,7 +718,9 @@ void ATempoWorldSettings::RunStepsBetweenFrames()
 			// Between a client's steps, serve its RPCs until it asks for the next one, which then runs in
 			// this frame rather than landing in its RPC pump and running in the next. If the next Step
 			// doesn't come within the wait timeout, stop waiting (other RPCs don't extend it), and let
-			// paused frames run until the client steps again.
+			// paused frames run until the client steps again. A request held for the game frame doesn't end
+			// the wait: it may come from another client, and the client stepping still means to send the
+			// Steps that finish this game frame.
 			//
 			// A queued step doesn't wait for writes in flight. A stream asks for its next measurement only
 			// once its last response is written, and a readback that completes before then is kept for that
@@ -732,7 +734,7 @@ void ATempoWorldSettings::RunStepsBetweenFrames()
 					break;
 				}
 				if (!Server.PumpEvents(
-					[this, &Server, World]() { return HasStepsToRun() || Server.HasHeldRequests() || !World->IsPaused(); },
+					[this, World]() { return HasStepsToRun() || !World->IsPaused(); },
 					WaitTimeoutSeconds, PollIntervalSeconds,
 					[World]() { OnBetweenFramesPoll.Broadcast(World); })
 					&& !HasStepsToRun())
@@ -743,7 +745,7 @@ void ATempoWorldSettings::RunStepsBetweenFrames()
 			}
 
 			// A Play has taken the world over, and its frames run the rest of the game frame's steps. Or
-			// the client went quiet, or sent a request that needs a game frame.
+			// the client went quiet.
 			if (!World->IsPaused() || !HasStepsToRun())
 			{
 				break;
@@ -776,8 +778,9 @@ void ATempoWorldSettings::RunStepsBetweenFrames()
 	}
 
 	// A request held for the game frame, whether it arrived while waiting here or in an earlier paused
-	// frame's RPC pump, ends the wait for the client's next step but not the game frame's steps: the
-	// frame runs the rest of them, so it lands where it would have, and the request is handled after.
+	// frame's RPC pump, is handled once the client's Steps finish the game frame. If the client went
+	// quiet first (it may be waiting on that request itself), the frame runs the rest of its steps, so
+	// it lands where it would have, and the request is handled after.
 	if (StepsIntoGameFrame > 0 && !HasStepsToRun() && Server.HasHeldRequests() && World->IsPaused())
 	{
 		StepsToSimulate = StepsPerGameFrame - StepsIntoGameFrame;

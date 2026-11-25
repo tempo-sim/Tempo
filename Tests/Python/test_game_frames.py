@@ -2,6 +2,7 @@
 
 """Integration tests for FixedStep game frames (StepsPerGameFrame) against a packaged sim."""
 
+import threading
 import time
 
 import pytest
@@ -128,6 +129,24 @@ def test_console_command_waits_for_a_game_frame_but_engine_info_does_not(game_fr
     assert sim_time() == pytest.approx(t0 + step_seconds, abs=1e-9)
     # A console variable typed as a command is the one command every build handles the same way.
     tc.exec_console_command(command=f"t.MaxFPS {max_fps}")
+    assert sim_time() == pytest.approx(t0 + STEPS_PER_GAME_FRAME * step_seconds, abs=1e-9)
+
+
+def test_game_frame_only_rpc_from_another_client_waits_for_the_stepping_clients_steps(game_frames):
+    step_seconds = game_frames
+    t0 = sim_time()
+    tc.step()
+    max_fps = tc.get_console_variable(name="t.MaxFPS").value
+    # Another client asks for a console command part-way through the game frame. It must not run the
+    # game frame's steps itself: the stepping client still sends them.
+    other_client = threading.Thread(target=tc.exec_console_command,
+                                    kwargs={"command": f"t.MaxFPS {max_fps}"})
+    other_client.start()
+    # Long enough for the request to be held, well inside the step wait timeout (50 ms).
+    time.sleep(0.02)
+    for _ in range(STEPS_PER_GAME_FRAME - 1):
+        tc.step()
+    other_client.join()
     assert sim_time() == pytest.approx(t0 + STEPS_PER_GAME_FRAME * step_seconds, abs=1e-9)
 
 
