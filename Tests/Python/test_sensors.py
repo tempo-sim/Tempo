@@ -100,10 +100,6 @@ def _check_shared_memory_against_inline(shared_messages, inline_messages, stats_
 
 def test_shared_memory_color_images_match_inline(sim_server):
     import asyncio
-    import sys
-
-    if sys.platform == "win32":
-        pytest.skip("No shared-memory transport on Windows yet")
     import tempo_sim.TempoSensors.Camera_pb2 as Camera
 
     spawned = tw.spawn_actor(actor_type=SENSOR_RIG_TYPE)
@@ -122,10 +118,6 @@ def test_shared_memory_color_images_match_inline(sim_server):
 
 def test_shared_memory_lidar_scans_match_inline(sim_server):
     import asyncio
-    import sys
-
-    if sys.platform == "win32":
-        pytest.skip("No shared-memory transport on Windows yet")
     import tempo_sim.TempoSensors.Lidar_pb2 as Lidar
 
     spawned = tw.spawn_actor(actor_type=SENSOR_RIG_TYPE)

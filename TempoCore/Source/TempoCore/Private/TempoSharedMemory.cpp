@@ -16,9 +16,15 @@
 #include "google/protobuf/descriptor.pb.h"
 #include "google/protobuf/message.h"
 
-#define TEMPO_HAS_SHARED_MEMORY (PLATFORM_LINUX || PLATFORM_MAC)
+#define TEMPO_POSIX_SHARED_MEMORY (PLATFORM_LINUX || PLATFORM_MAC)
+#define TEMPO_HAS_SHARED_MEMORY (TEMPO_POSIX_SHARED_MEMORY || PLATFORM_WINDOWS)
 
-#if TEMPO_HAS_SHARED_MEMORY
+#if PLATFORM_WINDOWS
+#include "Windows/AllowWindowsPlatformTypes.h"
+#include "Windows/WindowsHWrapper.h"
+#endif
+
+#if TEMPO_POSIX_SHARED_MEMORY
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
@@ -164,6 +170,10 @@ struct FTempoSharedMemoryStream::FSegment
 	uint64 SlotSize = 0;
 	uint64 DataOffset = 0;
 	bool bUnlinked = false;
+#if PLATFORM_WINDOWS
+	// The file mapping's name lasts as long as a handle to it does; the view keeps the memory.
+	HANDLE Mapping = nullptr;
+#endif
 
 	bool IsAttached() const
 	{
@@ -180,13 +190,22 @@ struct FTempoSharedMemoryStream::FSegment
 		return Base + DataOffset + Slot * SlotSize;
 	}
 
+	// Removes the segment's name, so nothing else can open it. Mappings already made stay valid.
 	void Unlink()
 	{
-#if TEMPO_HAS_SHARED_MEMORY
-		if (!bUnlinked)
+		if (bUnlinked)
 		{
-			shm_unlink(Name);
-			bUnlinked = true;
+			return;
+		}
+		bUnlinked = true;
+#if TEMPO_POSIX_SHARED_MEMORY
+		shm_unlink(Name);
+#elif PLATFORM_WINDOWS
+		// The name goes once the client, which closes its handle as soon as it has mapped the view, has too.
+		if (Mapping)
+		{
+			CloseHandle(Mapping);
+			Mapping = nullptr;
 		}
 #endif
 	}
@@ -194,12 +213,14 @@ struct FTempoSharedMemoryStream::FSegment
 	~FSegment()
 	{
 		Unlink();
-#if TEMPO_HAS_SHARED_MEMORY
 		if (Base)
 		{
+#if TEMPO_POSIX_SHARED_MEMORY
 			munmap(Base, Size);
-		}
+#elif PLATFORM_WINDOWS
+			UnmapViewOfFile(Base);
 #endif
+		}
 	}
 
 	static TUniquePtr<FSegment> Make(uint32 SlotCount, uint64 SlotSize)
@@ -211,43 +232,10 @@ struct FTempoSharedMemoryStream::FSegment
 		Segment->SlotSize = SlotSize;
 		Segment->DataOffset = AlignUp(HeaderSize + SlotCount * SlotEntrySize, 4096);
 		Segment->Size = Segment->DataOffset + SlotCount * SlotSize;
-
-		// macOS limits a name to 31 characters, the leading slash included.
-		int Fd = -1;
-		for (int32 Attempt = 0; Attempt < 8 && Fd < 0; ++Attempt)
+		if (!Segment->Create(Counter))
 		{
-			FCStringAnsi::Snprintf(Segment->Name, MaxNameLength, "/tempo.%x.%x%04x",
-				static_cast<uint32>(FPlatformProcess::GetCurrentProcessId()), Counter.fetch_add(1),
-				static_cast<uint32>(FMath::Rand() & 0xffff));
-			Fd = shm_open(Segment->Name, O_CREAT | O_EXCL | O_RDWR, S_IRUSR | S_IWUSR);
-			if (Fd < 0 && errno != EEXIST)
-			{
-				break;
-			}
-		}
-		if (Fd < 0)
-		{
-			UE_LOG(LogTempoCore, Warning, TEXT("Could not create a shared-memory segment: %hs. Streams go inline."), strerror(errno));
-			Segment->bUnlinked = true;
-			return nullptr;
-		}
-
-		bool bSized = ftruncate(Fd, static_cast<off_t>(Segment->Size)) == 0;
-#if PLATFORM_LINUX
-		// Reserve the pages now. /dev/shm may be smaller than the segment (a container's is 64 MB by default),
-		// and a write to a page tmpfs cannot supply raises SIGBUS rather than failing.
-		bSized = bSized && posix_fallocate(Fd, 0, static_cast<off_t>(Segment->Size)) == 0;
-#endif
-		void* Mapped = bSized ? mmap(nullptr, Segment->Size, PROT_READ | PROT_WRITE, MAP_SHARED, Fd, 0) : MAP_FAILED;
-		close(Fd);
-		if (Mapped == MAP_FAILED)
-		{
-			UE_LOG(LogTempoCore, Warning, TEXT("Could not size a %.1f MB shared-memory segment (is /dev/shm full?). Streams go inline."),
-				Segment->Size / 1.e6);
 			return nullptr; // Unlinks it.
 		}
-		Segment->Base = static_cast<uint8*>(Mapped);
-
 		Put<uint64>(Segment->Base, 0, SegmentMagic);
 		Put<uint32>(Segment->Base, 8, LayoutVersion);
 		Put<uint32>(Segment->Base, 12, SlotCount);
@@ -256,6 +244,91 @@ struct FTempoSharedMemoryStream::FSegment
 		return Segment;
 #else
 		return nullptr;
+#endif
+	}
+
+private:
+	// At most 31 characters, as macOS requires, the prefix included.
+	void NameSegment(std::atomic<uint32>& Counter, const ANSICHAR* Prefix)
+	{
+		FCStringAnsi::Snprintf(Name, MaxNameLength, "%s%x.%x%04x", Prefix,
+			static_cast<uint32>(FPlatformProcess::GetCurrentProcessId()), Counter.fetch_add(1),
+			static_cast<uint32>(FMath::Rand() & 0xffff));
+	}
+
+	// Creates and maps a segment of Size bytes, zeroed, readable and writable only by this user.
+	bool Create(std::atomic<uint32>& Counter)
+	{
+#if TEMPO_POSIX_SHARED_MEMORY
+		int Fd = -1;
+		for (int32 Attempt = 0; Attempt < 8 && Fd < 0; ++Attempt)
+		{
+			NameSegment(Counter, "/tempo.");
+			Fd = shm_open(Name, O_CREAT | O_EXCL | O_RDWR, S_IRUSR | S_IWUSR);
+			if (Fd < 0 && errno != EEXIST)
+			{
+				break;
+			}
+		}
+		if (Fd < 0)
+		{
+			UE_LOG(LogTempoCore, Warning, TEXT("Could not create a shared-memory segment: %hs. Streams go inline."), strerror(errno));
+			bUnlinked = true;
+			return false;
+		}
+
+		bool bSized = ftruncate(Fd, static_cast<off_t>(Size)) == 0;
+#if PLATFORM_LINUX
+		// Reserve the pages now. /dev/shm may be smaller than the segment (a container's is 64 MB by default),
+		// and a write to a page tmpfs cannot supply raises SIGBUS rather than failing.
+		bSized = bSized && posix_fallocate(Fd, 0, static_cast<off_t>(Size)) == 0;
+#endif
+		void* Mapped = bSized ? mmap(nullptr, Size, PROT_READ | PROT_WRITE, MAP_SHARED, Fd, 0) : MAP_FAILED;
+		close(Fd);
+		if (Mapped == MAP_FAILED)
+		{
+			UE_LOG(LogTempoCore, Warning, TEXT("Could not size a %.1f MB shared-memory segment (is /dev/shm full?). Streams go inline."),
+				Size / 1.e6);
+			return false;
+		}
+		Base = static_cast<uint8*>(Mapped);
+		return true;
+#elif PLATFORM_WINDOWS
+		// Backed by the paging file and committed whole, so running out fails here rather than on a write.
+		// "Local\" keeps it in this session; the default security descriptor admits only this user (and
+		// SYSTEM and administrators).
+		for (int32 Attempt = 0; Attempt < 8 && !Mapping; ++Attempt)
+		{
+			NameSegment(Counter, "Local\\t.");
+			Mapping = CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
+				static_cast<DWORD>(Size >> 32), static_cast<DWORD>(Size & 0xffffffffull), Name);
+			if (Mapping && GetLastError() == ERROR_ALREADY_EXISTS)
+			{
+				CloseHandle(Mapping);
+				Mapping = nullptr;
+			}
+			else if (!Mapping)
+			{
+				break;
+			}
+		}
+		if (!Mapping)
+		{
+			UE_LOG(LogTempoCore, Warning, TEXT("Could not create a %.1f MB shared-memory segment (error %u). Streams go inline."),
+				Size / 1.e6, static_cast<uint32>(GetLastError()));
+			bUnlinked = true;
+			return false;
+		}
+		Base = static_cast<uint8*>(MapViewOfFile(Mapping, FILE_MAP_ALL_ACCESS, 0, 0, static_cast<SIZE_T>(Size)));
+		if (!Base)
+		{
+			UE_LOG(LogTempoCore, Warning, TEXT("Could not map a %.1f MB shared-memory segment (error %u). Streams go inline."),
+				Size / 1.e6, static_cast<uint32>(GetLastError()));
+			return false;
+		}
+		return true;
+#else
+		return false;
 #endif
 	}
 };
@@ -494,3 +567,7 @@ bool FTempoSharedMemoryStream::Encode(const google::protobuf_tempo::Message& Res
 	return false;
 #endif
 }
+
+#if PLATFORM_WINDOWS
+#include "Windows/HideWindowsPlatformTypes.h"
+#endif

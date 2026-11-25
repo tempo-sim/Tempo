@@ -15,7 +15,7 @@ import pytest
 
 pytestmark = pytest.mark.contract
 
-_posixshmem = pytest.importorskip("_posixshmem")
+_posixshmem = pytest.importorskip("_posixshmem")  # The fake server segment is POSIX; Windows is covered by the sensors group.
 
 from tempo_sim import _shared_memory  # noqa: E402
 import tempo_sim.TempoSensors.Camera_pb2 as Camera  # noqa: E402

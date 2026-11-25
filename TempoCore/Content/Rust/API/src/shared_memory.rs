@@ -39,7 +39,7 @@ const ATTACHED_OFFSET: usize = 24;
 
 /// Whether new streams ask for shared memory.
 pub fn enabled() -> bool {
-    cfg!(unix)
+    cfg!(any(unix, windows))
         && std::env::var("TEMPO_SHARED_MEMORY").map(|v| v != "0").unwrap_or(true)
         && !UNAVAILABLE.load(Ordering::Relaxed)
 }
@@ -63,10 +63,9 @@ fn u64_at(bytes: &[u8], offset: usize) -> u64 {
     u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap())
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 mod segment {
     use super::*;
-    use std::ffi::CString;
     use std::sync::atomic::AtomicU32;
 
     /// A client's mapping of one segment.
@@ -78,35 +77,85 @@ mod segment {
     // The mapping is only touched through &mut Reader, under its mutex.
     unsafe impl Send for Segment {}
 
+    #[cfg(unix)]
+    fn map(name: &str, size: usize) -> Result<*mut u8, String> {
+        let c_name = std::ffi::CString::new(name).map_err(|e| e.to_string())?;
+        // SAFETY: plain libc calls on a valid C string.
+        unsafe {
+            let fd = libc::shm_open(c_name.as_ptr(), libc::O_RDWR, 0);
+            if fd < 0 {
+                return Err(format!("could not open {name}: {}", std::io::Error::last_os_error()));
+            }
+            let mapped = libc::mmap(std::ptr::null_mut(), size, libc::PROT_READ | libc::PROT_WRITE, libc::MAP_SHARED, fd, 0);
+            libc::close(fd);
+            if mapped == libc::MAP_FAILED {
+                return Err(format!("could not map {name}: {}", std::io::Error::last_os_error()));
+            }
+            Ok(mapped as *mut u8)
+        }
+    }
+
+    #[cfg(unix)]
+    fn unmap(base: *mut u8, size: usize) {
+        // SAFETY: a mapping made by map.
+        unsafe {
+            libc::munmap(base as *mut libc::c_void, size);
+        }
+    }
+
+    #[cfg(windows)]
+    mod kernel32 {
+        use std::ffi::c_void;
+        pub const FILE_MAP_ALL_ACCESS: u32 = 0x000F_001F;
+        #[link(name = "kernel32")]
+        extern "system" {
+            pub fn OpenFileMappingA(desired_access: u32, inherit_handle: i32, name: *const i8) -> *mut c_void;
+            pub fn MapViewOfFile(mapping: *mut c_void, desired_access: u32, offset_high: u32, offset_low: u32, bytes: usize) -> *mut c_void;
+            pub fn UnmapViewOfFile(base: *const c_void) -> i32;
+            pub fn CloseHandle(handle: *mut c_void) -> i32;
+        }
+    }
+
+    #[cfg(windows)]
+    fn map(name: &str, size: usize) -> Result<*mut u8, String> {
+        let c_name = std::ffi::CString::new(name).map_err(|e| e.to_string())?;
+        // SAFETY: Win32 calls on a valid C string. The handle is closed once the view is mapped, so the
+        // name goes with the server's handle; the view keeps the memory.
+        unsafe {
+            let mapping = kernel32::OpenFileMappingA(kernel32::FILE_MAP_ALL_ACCESS, 0, c_name.as_ptr() as *const i8);
+            if mapping.is_null() {
+                return Err(format!("could not open {name}: {}", std::io::Error::last_os_error()));
+            }
+            let view = kernel32::MapViewOfFile(mapping, kernel32::FILE_MAP_ALL_ACCESS, 0, 0, size);
+            let error = std::io::Error::last_os_error();
+            kernel32::CloseHandle(mapping);
+            if view.is_null() {
+                return Err(format!("could not map {name}: {error}"));
+            }
+            Ok(view as *mut u8)
+        }
+    }
+
+    #[cfg(windows)]
+    fn unmap(base: *mut u8, _size: usize) {
+        // SAFETY: a view made by map.
+        unsafe {
+            kernel32::UnmapViewOfFile(base as *const std::ffi::c_void);
+        }
+    }
+
     impl Segment {
         pub fn open(name: &str, size: usize) -> Result<Segment, String> {
-            let c_name = CString::new(name).map_err(|e| e.to_string())?;
-            // SAFETY: plain libc calls on a valid C string; the mapping is checked before use.
-            unsafe {
-                let fd = libc::shm_open(c_name.as_ptr(), libc::O_RDWR, 0);
-                if fd < 0 {
-                    return Err(format!("could not open {name}: {}", std::io::Error::last_os_error()));
-                }
-                let mapped = libc::mmap(
-                    std::ptr::null_mut(),
-                    size,
-                    libc::PROT_READ | libc::PROT_WRITE,
-                    libc::MAP_SHARED,
-                    fd,
-                    0,
-                );
-                libc::close(fd);
-                if mapped == libc::MAP_FAILED {
-                    return Err(format!("could not map {name}: {}", std::io::Error::last_os_error()));
-                }
-                let segment = Segment { base: mapped as *mut u8, size };
-                let header = segment.bytes(0, HEADER_SIZE);
-                if &header[0..8] != SEGMENT_MAGIC || u32_at(header, 8) != VERSION {
-                    return Err(format!("{name} has a layout this client does not know"));
-                }
-                segment.atomic(ATTACHED_OFFSET).store(1, Ordering::Release);
-                Ok(segment)
+            if size < HEADER_SIZE {
+                return Err(format!("{name} is announced as {size} bytes, too small for its header"));
             }
+            let segment = Segment { base: map(name, size)?, size };
+            let header = segment.bytes(0, HEADER_SIZE);
+            if &header[0..8] != SEGMENT_MAGIC || u32_at(header, 8) != VERSION {
+                return Err(format!("{name} has a layout this client does not know"));
+            }
+            segment.atomic(ATTACHED_OFFSET).store(1, Ordering::Release);
+            Ok(segment)
         }
 
         pub fn bytes(&self, offset: usize, length: usize) -> &[u8] {
@@ -124,10 +173,7 @@ mod segment {
 
     impl Drop for Segment {
         fn drop(&mut self) {
-            // SAFETY: the mapping made in open.
-            unsafe {
-                libc::munmap(self.base as *mut libc::c_void, self.size);
-            }
+            unmap(self.base, self.size);
         }
     }
 }
@@ -135,7 +181,7 @@ mod segment {
 /// Puts one stream's shared-memory payloads back into its messages.
 #[derive(Default)]
 pub struct Reader {
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     segments: Vec<(String, segment::Segment)>,
 }
 
@@ -161,7 +207,7 @@ impl Reader {
         }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn segment(&mut self, name: &str, size: usize) -> Result<&segment::Segment, Status> {
         if let Some(index) = self.segments.iter().position(|(n, _)| n == name) {
             return Ok(&self.segments[index].1);
@@ -173,14 +219,14 @@ impl Reader {
         Ok(&self.segments[0].1)
     }
 
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     fn segment(&mut self, _name: &str, _size: usize) -> Result<(), Status> {
         Err(Status::unavailable("no shared memory on this platform"))
     }
 
     /// Replaces each reference in message with the payload it names, and frees its slot.
     pub fn restore<T: SharedMemoryMessage>(&mut self, message: &mut T) -> Result<(), Status> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             let mut released = None;
             for field in message.shared_memory_fields() {
@@ -219,7 +265,7 @@ impl Reader {
                 segment.atomic(entry).store(0, Ordering::Release);
             }
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         let _ = message;
         Ok(())
     }

@@ -1,6 +1,7 @@
 # Shared-memory transport for sensor payloads — plan
 
-Status: **phases 2 and 3 (clients) built**: Linux and macOS server; Python, Rust and C++ clients. On
+Status: **phases 2 and 3 built**: Linux, macOS and Windows server; Python, Rust and C++ clients. The
+Windows code is written but has not been compiled or run on Windows yet. On
 the target Linux GPU machine, transport was more than 5% of total time, which was enough to go ahead.
 The server half is `TempoCore/.../TempoSharedMemory.{h,cpp}`, whose header documents the wire layout.
 The client halves are `tempo_sim/_shared_memory.py`, `tempo_sim::shared_memory` and the C++ client's
@@ -285,7 +286,10 @@ through their RMW without Tempo's involvement.
 2. **Done: shared memory, Linux and macOS, Python first.** Field option, negotiation, ring, reflection
    envelope, Python runtime and codegen, `Tempo.WriteStats` counters for slot hits and inline fallbacks,
    and a `write_wait.py` A/B (`TEMPO_SHARED_MEMORY=0/1`).
-3. **Done: Rust and C++ clients.** Then Windows.
+3. **Done: Rust and C++ clients, and Windows** (named file mappings in the `Local\` namespace,
+   committed whole when created, so running out fails at creation rather than on a write; a
+   mapping's name goes once the server and client have both closed their handles, which each does
+   right after mapping its view). Not yet built or run on Windows.
 4. **Write straight into the slot.** A `FTempoServer` payload-allocation call lets readback decode into
    the slot directly, removing copy 1. Sensor code changes here, not before.
 5. **Optional zero-copy client APIs** (`memoryview`, borrowed slices) for clients that want them.

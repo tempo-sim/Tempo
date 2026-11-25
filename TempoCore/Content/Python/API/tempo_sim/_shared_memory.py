@@ -17,6 +17,7 @@ later stream in this process asks again.
 import mmap
 import os
 import struct
+import sys
 import warnings
 from typing import AsyncIterator, Callable, Optional, Sequence, Tuple
 
@@ -51,10 +52,17 @@ def enabled() -> bool:
     """Whether new streams ask for shared memory."""
     if os.environ.get("TEMPO_SHARED_MEMORY", "1") == "0" or _unavailable_reason is not None:
         return False
-    return _posixshmem is not None or os.path.isdir("/dev/shm")
+    return sys.platform == "win32" or _posixshmem is not None or os.path.isdir("/dev/shm")
 
 
 def _open_segment(name: str, size: int) -> mmap.mmap:
+    if sys.platform == "win32":
+        # A named file mapping. mmap makes a new, empty one if the name is not there, which the caller's
+        # check of the segment's magic number refuses.
+        try:
+            return mmap.mmap(-1, size, tagname=name)
+        except (OSError, ValueError) as e:
+            raise Unavailable(f"could not map shared-memory segment {name}: {e}") from e
     try:
         if _posixshmem is not None:
             fd = _posixshmem.shm_open(name, os.O_RDWR, mode=0o600)

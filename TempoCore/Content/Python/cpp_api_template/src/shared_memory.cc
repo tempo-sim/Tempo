@@ -7,14 +7,19 @@
 #include <cstring>
 #include <iostream>
 
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
 #include <cerrno>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
-#define TEMPO_HAS_SHARED_MEMORY 1
-#else
-#define TEMPO_HAS_SHARED_MEMORY 0
 #endif
 
 namespace tempo {
@@ -39,49 +44,32 @@ T read_le(const uint8_t* at) {
 }
 
 // The slot and attachment words are shared with the server, which uses atomics on them too.
-#if TEMPO_HAS_SHARED_MEMORY
-uint32_t load_acquire(uint32_t* word) { return __atomic_load_n(word, __ATOMIC_ACQUIRE); }
-void store_release(uint32_t* word, uint32_t value) { __atomic_store_n(word, value, __ATOMIC_RELEASE); }
-#else
+#if defined(_WIN32)
 uint32_t load_acquire(uint32_t* word) { return std::atomic_ref<uint32_t>(*word).load(std::memory_order_acquire); }
 void store_release(uint32_t* word, uint32_t value) { std::atomic_ref<uint32_t>(*word).store(value, std::memory_order_release); }
+#else
+uint32_t load_acquire(uint32_t* word) { return __atomic_load_n(word, __ATOMIC_ACQUIRE); }
+void store_release(uint32_t* word, uint32_t value) { __atomic_store_n(word, value, __ATOMIC_RELEASE); }
 #endif
 
-std::string metadata_value(const std::multimap<grpc::string_ref, grpc::string_ref>& metadata, const char* key) {
-	const auto found = metadata.find(key);
-	return found == metadata.end() ? std::string() : std::string(found->second.data(), found->second.size());
-}
-
-}  // namespace
-
-bool SharedMemoryReader::enabled() {
-	if (!TEMPO_HAS_SHARED_MEMORY || g_unavailable.load(std::memory_order_relaxed)) {
-		return false;
+// Maps the segment named name, size bytes long. Returns null, with *error set, if it cannot.
+uint8_t* map_segment(const std::string& name, size_t size, std::string* error) {
+#if defined(_WIN32)
+	HANDLE mapping = OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, name.c_str());
+	if (mapping == nullptr) {
+		*error = "could not open " + name + ": error " + std::to_string(GetLastError());
+		return nullptr;
 	}
-	const char* setting = std::getenv("TEMPO_SHARED_MEMORY");
-	return setting == nullptr || std::strcmp(setting, "0") != 0;
-}
-
-SharedMemoryReader::~SharedMemoryReader() {
-	close();
-}
-
-void SharedMemoryReader::close() {
-#if TEMPO_HAS_SHARED_MEMORY
-	for (const Segment& segment : segments_) {
-		munmap(segment.base, segment.size);
+	// Closing the handle once the view is mapped lets the name go with the server's; the view keeps the memory.
+	void* view = MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, size);
+	const DWORD map_error = GetLastError();
+	CloseHandle(mapping);
+	if (view == nullptr) {
+		*error = "could not map " + name + ": error " + std::to_string(map_error);
+		return nullptr;
 	}
-#endif
-	segments_.clear();
-}
-
-const SharedMemoryReader::Segment* SharedMemoryReader::segment(const std::string& name, size_t size, std::string* error) {
-	for (const Segment& segment : segments_) {
-		if (segment.name == name) {
-			return &segment;
-		}
-	}
-#if TEMPO_HAS_SHARED_MEMORY
+	return static_cast<uint8_t*>(view);
+#else
 	const int fd = shm_open(name.c_str(), O_RDWR, 0);
 	if (fd < 0) {
 		*error = "could not open " + name + ": " + std::strerror(errno);
@@ -93,9 +81,61 @@ const SharedMemoryReader::Segment* SharedMemoryReader::segment(const std::string
 		*error = "could not map " + name + ": " + std::strerror(errno);
 		return nullptr;
 	}
-	uint8_t* base = static_cast<uint8_t*>(mapped);
-	if (size < kHeaderSize || std::memcmp(base, kSegmentMagic, 8) != 0 || read_le<uint32_t>(base + 8) != kVersion) {
-		munmap(base, size);
+	return static_cast<uint8_t*>(mapped);
+#endif
+}
+
+void unmap_segment(uint8_t* base, size_t size) {
+#if defined(_WIN32)
+	(void)size;
+	UnmapViewOfFile(base);
+#else
+	munmap(base, size);
+#endif
+}
+
+std::string metadata_value(const std::multimap<grpc::string_ref, grpc::string_ref>& metadata, const char* key) {
+	const auto found = metadata.find(key);
+	return found == metadata.end() ? std::string() : std::string(found->second.data(), found->second.size());
+}
+
+}  // namespace
+
+bool SharedMemoryReader::enabled() {
+	if (g_unavailable.load(std::memory_order_relaxed)) {
+		return false;
+	}
+	const char* setting = std::getenv("TEMPO_SHARED_MEMORY");
+	return setting == nullptr || std::strcmp(setting, "0") != 0;
+}
+
+SharedMemoryReader::~SharedMemoryReader() {
+	close();
+}
+
+void SharedMemoryReader::close() {
+	for (const Segment& segment : segments_) {
+		unmap_segment(segment.base, segment.size);
+	}
+	segments_.clear();
+}
+
+const SharedMemoryReader::Segment* SharedMemoryReader::segment(const std::string& name, size_t size, std::string* error) {
+	for (const Segment& segment : segments_) {
+		if (segment.name == name) {
+			return &segment;
+		}
+	}
+	if (size < kHeaderSize) {
+		*error = name + " is announced as too small for its header";
+		return nullptr;
+	}
+	uint8_t* base = map_segment(name, size, error);
+	if (base == nullptr) {
+		return nullptr;
+	}
+	if (std::memcmp(base, kSegmentMagic, 8) != 0 || read_le<uint32_t>(base + 8) != kVersion) {
+		unmap_segment(base, size);
 		*error = name + " has a layout this client does not know";
 		return nullptr;
 	}
@@ -104,11 +144,6 @@ const SharedMemoryReader::Segment* SharedMemoryReader::segment(const std::string
 	close();
 	segments_.push_back(Segment{name, base, size});
 	return &segments_.back();
-#else
-	(void)size;
-	*error = "no shared memory on this platform";
-	return nullptr;
-#endif
 }
 
 bool SharedMemoryReader::attach(const std::multimap<grpc::string_ref, grpc::string_ref>& initial_metadata) {
