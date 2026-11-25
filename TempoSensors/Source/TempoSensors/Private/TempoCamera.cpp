@@ -2083,6 +2083,15 @@ void UTempoCamera::RenderCapture()
 			ShowFlags.SetParticles(false);
 			ShowFlags.SetAntiAliasing(false);
 			ShowFlags.SetTemporalAA(false);
+			ShowFlags.SetNaniteMeshes(false);
+			ShowFlags.SetInstancedStaticMeshes(false);
+			ShowFlags.SetInstancedFoliage(false);
+			ShowFlags.SetInstancedGrass(false);
+			ShowFlags.SetCloud(false);
+			ShowFlags.SetDecals(false);
+			ShowFlags.SetBSP(false);
+			ShowFlags.SetPaper2DSprites(false);
+			ShowFlags.SetTextRender(false);
 
 			// But wait! Lighting actually has to be on in order for exposure bias to be read back on the cpu
 			ShowFlags.SetLighting(true);
