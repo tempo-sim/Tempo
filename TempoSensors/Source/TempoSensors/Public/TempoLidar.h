@@ -366,9 +366,12 @@ public:
 
 	// Begin ITempoSensorInterface
 	virtual TOptional<TFuture<void>> SendMeasurements() override;
+	virtual void WaitForDecodes() override;
 	// End ITempoSensorInterface
 
 	void RequestMeasurement(const TempoSensors::LidarScanRequest& Request, const TResponseDelegate<TempoSensors::LidarScanSegment>& ResponseContinuation);
+
+	bool IsColorEnabled() const { return bColorEnabled; }
 
 	// USceneCaptureComponent::AddReferencedObjects only walks the inherited ViewStates indirect
 	// array; our per-tile FSceneViewStateReference members aren't in that array, so the MIDPool
@@ -382,12 +385,20 @@ public:
 protected:
 	// UTempoSceneCaptureComponent2D hooks: the lidar manages its own single readback from the packed
 	// SharedTextureTarget and drives its own timer; it never calls CaptureScene() on itself.
-	virtual bool HasPendingRequests() const override { return !PendingRequests.IsEmpty(); }
+	virtual bool HasPendingRequests() const override;
 	virtual int32 GetNumActiveTiles() const override;
 	virtual void InitRenderTarget() override;
 	virtual void RenderCapture() override;
 
-	TFuture<void> DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> TextureReads, bool bWithColor);
+	// Splits Read into its slices, decodes them and responds to Requests, on a task. Under RequestsMutex.
+	TFuture<void> DecodeAndRespond_Locked(TSharedPtr<FTextureRead> Read, TArray<FLidarScanRequest> Requests, double TransmissionTime);
+
+	// The readback watcher's thread, through the lidar's launch handle, right after it read Read: launch
+	// its decode now, with the requests waiting for it, instead of at the game thread's next poll, which
+	// is the end of the step the client is running.
+	void LaunchDecodeForRead_AnyThread(const TSharedRef<FTextureRead>& Read);
+
+	virtual void BeginDestroy() override;
 
 	// Initialize the shared packed render target and ring of staging textures. Also assigns each
 	// active tile its SliceDestOffsetX and the packed dimensions. Format depends on bColorEnabled.
@@ -594,7 +605,27 @@ protected:
 	uint64 LastFrameWithoutColor = MAX_uint64;
 	static constexpr int32 ColorOffDebounceFrames = 30;
 
+	// Guards PendingRequests and the state the readback watcher's launch shares with the game thread.
+	mutable FCriticalSection RequestsMutex;
 	TArray<FLidarScanRequest> PendingRequests;
+	// Decodes of this lidar in flight, from either thread: a stream's segments stay in sweep order
+	// because a decode is launched only when this is zero.
+	TSharedRef<std::atomic<int32>> DecodesInFlight = MakeShared<std::atomic<int32>>(0);
+	// The decodes the readback watcher launched, waited for by WaitForDecodes.
+	TArray<TFuture<void>> WatcherDecodes;
+	// World time at the game thread's last send, the transmission time of a decode the watcher launches.
+	double LastSendTimeSeconds = 0.0;
+	// Whether a decode the watcher launched answered a color request since the game thread's last send.
+	bool bColorRequestedSinceSend = false;
+	// The lidar's liveness for the readback watcher: each read holds it weakly and the watcher launches
+	// the decode through it; BeginDestroy clears Lidar under the lock, so a launch in progress finishes
+	// before the lidar goes.
+	struct FLaunchHandle
+	{
+		FCriticalSection Lock;
+		UTempoLidar* Lidar = nullptr;
+	};
+	TSharedRef<FLaunchHandle> LaunchHandle = MakeShared<FLaunchHandle>();
 
 	// Tile slots (fixed size: L=0, C=1, R=2). Stable storage — indices are never invalidated
 	// and held addresses remain valid across reconfigures. Transient: runtime-only state.
