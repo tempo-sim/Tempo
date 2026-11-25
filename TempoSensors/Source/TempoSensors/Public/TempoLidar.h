@@ -371,6 +371,8 @@ public:
 
 	void RequestMeasurement(const TempoSensors::LidarScanRequest& Request, const TResponseDelegate<TempoSensors::LidarScanSegment>& ResponseContinuation);
 
+	bool IsColorEnabled() const { return bColorEnabled; }
+
 	// USceneCaptureComponent::AddReferencedObjects only walks the inherited ViewStates indirect
 	// array; our per-tile FSceneViewStateReference members aren't in that array, so the MIDPool
 	// each view state holds (UMaterialInstanceDynamic instances created on demand by
