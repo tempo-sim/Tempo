@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include "TempoServiceProvider.h"
+#include "TempoWriteStats.h"
 
 // gRPC's port_platform.h includes <windows.h> directly. Route it through Unreal's MinWindows.h
 // first so the Windows headers are trimmed and their macros are scrubbed afterwards. gRPC's
@@ -361,6 +362,11 @@ public:
 		bool bResponded;
 		{
 			FScopeLock Lock(&Base::Gate->Mutex);
+			if (WriteIssuedSeconds >= 0.0)
+			{
+				FTempoWriteStats::RecordWriteCompleted(FPlatformTime::Seconds() - WriteIssuedSeconds);
+				WriteIssuedSeconds = -1.0;
+			}
 			TPair<ResponseType, grpc::Status> ResponseItem;
 			bResponded = ResponseQueue.Dequeue(ResponseItem);
 			if (bResponded)
@@ -392,6 +398,10 @@ protected:
 		}
 		else
 		{
+			if (FTempoWriteStats::IsEnabled())
+			{
+				FTempoWriteStats::RecordQueuedResponse();
+			}
 			ResponseQueue.Enqueue(TPair<ResponseType, grpc::Status>(Response, Result));
 		}
 	}
@@ -407,11 +417,23 @@ protected:
 			return;
 		}
 		Base::State = FRequestManager::EState::RESPONDING;
+		if (!FTempoWriteStats::IsEnabled())
+		{
+			Base::Responder.Write(Response, &(Base::Tag));
+			return;
+		}
+		const int64 Bytes = static_cast<int64>(Response.ByteSizeLong());
+		WriteIssuedSeconds = FPlatformTime::Seconds();
 		Base::Responder.Write(Response, &(Base::Tag));
+		FTempoWriteStats::RecordWrite(Bytes, FPlatformTime::Seconds() - WriteIssuedSeconds);
 	}
 
 	// Under the gate's lock.
 	TQueue<TPair<ResponseType, grpc::Status>> ResponseQueue;
+
+	// When the write in flight was issued, while write stats are recording; otherwise negative. Under
+	// the gate's lock.
+	double WriteIssuedSeconds = -1.0;
 };
 
 /**

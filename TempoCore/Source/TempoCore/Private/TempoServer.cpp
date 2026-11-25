@@ -7,6 +7,7 @@
 #include "TempoServerEndpoint.h"
 #include "TempoServiceProvider.h"
 #include "TempoWorldSettings.h"
+#include "TempoWriteStats.h"
 #include "TempoCore.h"
 
 #include "HAL/IConsoleManager.h"
@@ -14,6 +15,7 @@
 #include "Misc/App.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
+#include "Misc/ScopeExit.h"
 
 #include "grpcpp/impl/service_type.h"
 #if PLATFORM_WINDOWS
@@ -27,6 +29,8 @@
 
 FTempoServer::FTempoServer()
 {
+	FTempoWriteStats::Initialize();
+
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
 	OnPostEngineInitHandle = FCoreDelegates::GetOnPostEngineInit().AddRaw(this, &FTempoServer::Initialize);
 #else
@@ -392,6 +396,8 @@ void FTempoServer::TickInternal()
 
 	bool bProcessedPendingEvents = false;
 	const double Start = FPlatformTime::Seconds();
+	// When the queue first went idle with writes still unflushed: from there on, this tick is waiting on them.
+	double WriteWaitStart = -1.0;
 	while (!bProcessedPendingEvents)
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoServerLoop);
@@ -405,6 +411,7 @@ void FTempoServer::TickInternal()
 		int32* Tag;
 		bool bOk;
 		const gpr_timespec MaxEventWaitTime {0, MaxEventWaitTimeNanoSeconds, GPR_TIMESPAN};
+		const double NextStart = FPlatformTime::Seconds();
 		switch (grpc::CompletionQueue::NextStatus Status = CompletionQueue->AsyncNext(reinterpret_cast<void**>(&Tag), &bOk, MaxEventWaitTime))
 		{
 		case grpc::CompletionQueue::GOT_EVENT:
@@ -427,6 +434,10 @@ void FTempoServer::TickInternal()
 				if (TimeMode == ETimeMode::FixedStep)
 				{
 					bProcessedPendingEvents = !HasUnflushedWork();
+					if (!bProcessedPendingEvents && WriteWaitStart < 0.0)
+					{
+						WriteWaitStart = NextStart;
+					}
 					if (!bProcessedPendingEvents && FPlatformTime::Seconds() - Start > GetWriteStallTimeoutSeconds())
 					{
 						MarkStalledWrites();
@@ -440,6 +451,11 @@ void FTempoServer::TickInternal()
 				break;
 			}
 		}
+	}
+
+	if (WriteWaitStart >= 0.0 && FTempoWriteStats::IsEnabled())
+	{
+		FTempoWriteStats::RecordWait(FPlatformTime::Seconds() - WriteWaitStart);
 	}
 }
 
@@ -532,6 +548,10 @@ void FTempoServer::MarkStalledWrites()
 		if (Elem.Value->HasUnflushedWork() && !StalledTags.Contains(Elem.Key))
 		{
 			StalledTags.Add(Elem.Key);
+			if (FTempoWriteStats::IsEnabled())
+			{
+				FTempoWriteStats::RecordStall();
+			}
 			UE_LOG(LogTempoCore, Warning, TEXT("A %s request's response was not accepted by its client within %.0f ms. ")
 				TEXT("Not waiting on it again until it is (Tempo.WriteStallTimeoutMs). A client that stops reading a ")
 				TEXT("stream should cancel it."),
@@ -551,7 +571,15 @@ void FTempoServer::FinishWrites()
 
 	const int32 MaxEventWaitTimeNanoSeconds = GetDefault<UTempoCoreSettings>()->GetMaxEventWaitTime();
 	const gpr_timespec MaxEventWaitTime {0, MaxEventWaitTimeNanoSeconds, GPR_TIMESPAN};
-	const double DeadlineSeconds = FPlatformTime::Seconds() + GetWriteStallTimeoutSeconds();
+	const double WaitStart = FPlatformTime::Seconds();
+	const double DeadlineSeconds = WaitStart + GetWriteStallTimeoutSeconds();
+	ON_SCOPE_EXIT
+	{
+		if (FTempoWriteStats::IsEnabled() && FPlatformTime::Seconds() > WaitStart)
+		{
+			FTempoWriteStats::RecordWait(FPlatformTime::Seconds() - WaitStart);
+		}
+	};
 	while (HasUnflushedWork())
 	{
 		// A write completes only once its client has room for it. One that never reads the stream again
