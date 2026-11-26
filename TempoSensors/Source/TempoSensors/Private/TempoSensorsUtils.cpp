@@ -76,7 +76,6 @@ void OptimizeShowFlagsForNoColor(FEngineShowFlags& ShowFlags)
 	ShowFlags.SetVolumetricFog(false);
 	ShowFlags.SetFog(false);
 	ShowFlags.SetShaderPrint(false);
-	ShowFlags.SetVirtualShadowMapPersistentData(false);
 
 	ShowFlags.SetLensDistortion(false);
 	ShowFlags.SetMegaLights(false);
