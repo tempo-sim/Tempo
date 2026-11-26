@@ -133,6 +133,37 @@ namespace
 		return IsExtendedLuminanceRangeEnabled() ? FMath::Log2(Luminance / LuminanceMax) : Luminance;
 	}
 
+	// The exposure compensation the engine gives a view whose histogram averages AverageLuminance
+	// through its bias curve: GetAutoExposureCompensationFromCurve, or by default the curve baked to a
+	// LUT (r.EyeAdaptation.ExposureCompensationCurveLUT) and sampled with linear filtering, as
+	// EyeAdaptationCommon does.
+	float GetExposureCompensationFromCurve(const UCurveFloat* Curve, float AverageLuminance, float LuminanceMax)
+	{
+		if (!Curve || AverageLuminance <= 0.0f)
+		{
+			return 1.0f;
+		}
+		const float EV100 = FMath::Log2(AverageLuminance / 0.18f / LuminanceMax);
+
+		static const IConsoleVariable* LUTCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.EyeAdaptation.ExposureCompensationCurveLUT"));
+		if (!LUTCVar || !LUTCVar->GetBool())
+		{
+			return FMath::Exp2(Curve->GetFloatValue(EV100));
+		}
+		static const IConsoleVariable* NumSamplesCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.EyeAdaptation.ExposureCompensationCurveLUT.NumSamples"));
+		static const IConsoleVariable* MinXCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.EyeAdaptation.ExposureCompensationCurveLUT.MinX"));
+		static const IConsoleVariable* MaxXCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.EyeAdaptation.ExposureCompensationCurveLUT.MaxX"));
+		const int32 NumSamples = FMath::Max(2, NumSamplesCVar ? NumSamplesCVar->GetInt() : 64);
+		const float MinX = MinXCVar ? MinXCVar->GetFloat() : -10.0f;
+		const float MaxX = MaxXCVar ? MaxXCVar->GetFloat() : 20.0f;
+		const float Delta = (MaxX - MinX) / (NumSamples - 1);
+		const float Sample = FMath::Clamp((EV100 - MinX) / Delta, 0.0f, static_cast<float>(NumSamples - 1));
+		const int32 Index = FMath::Min(FMath::FloorToInt32(Sample), NumSamples - 2);
+		const float Lower = FMath::Exp2(Curve->GetFloatValue(MinX + Delta * Index));
+		const float Upper = FMath::Exp2(Curve->GetFloatValue(MinX + Delta * (Index + 1)));
+		return FMath::Lerp(Lower, Upper, Sample - Index);
+	}
+
 	// How densely a tile's perspective render (at UpsamplingFactor 1) samples its output, from the
 	// singular values of the Jacobian of the output->render pixel mapping. At an output pixel, the
 	// render supplies Sigma render pixels per output pixel along each principal direction, so an
@@ -2099,8 +2130,9 @@ void UTempoCamera::RenderCapture()
 			// Pin the proxy to an exposure of exactly 1 so it only tonemaps: the tiles already carry
 			// the camera's exposure (UpdateSharedExposure, metered by ExposureMeter). A histogram
 			// method with an empty brightness range makes the engine force that one exposure every
-			// frame with no smoothing; the exposure it reports back is folded in as ProxyGain. The
-			// camera's own range, speed and bias settings are applied by the controller instead.
+			// frame with no smoothing, times the bias curve, which UpdateSharedExposure divides out as
+			// ProxyGain. The camera's own range, speed, bias and bias curve settings are applied by the
+			// controller instead.
 			FPostProcessSettings& ProxyPP = PostProcessSettings;
 			const uint8 SavedOverrideMethod = ProxyPP.bOverride_AutoExposureMethod;
 			const uint8 SavedOverrideMinBrightness = ProxyPP.bOverride_AutoExposureMinBrightness;
@@ -2706,12 +2738,6 @@ void UTempoCamera::UpdateSharedExposure(bool bSingleTileFastPath, FTempoCameraTi
 		return;
 	}
 
-	FSceneViewStateInterface* ProxyViewState = GetViewState(0);
-	if (!ProxyViewState)
-	{
-		return;
-	}
-
 	TArray<FTempoCameraExposureMeter::FMeasurement> Measurements;
 	ExposureMeter->Consume(Measurements);
 
@@ -2725,6 +2751,7 @@ void UTempoCamera::UpdateSharedExposure(bool bSingleTileFastPath, FTempoCameraTi
 	// in capture order, adapting over the sim time between their captures. A capture the GPU hasn't
 	// finished metering is consumed on a later one; none is ever divided by another's exposure.
 	float SceneLuminance = -1.0f;
+	float MeteredLuminance = -1.0f;
 	for (const FTempoCameraExposureMeter::FMeasurement& Measurement : Measurements)
 	{
 		if (Measurement.CaptureId <= ExposureMeterSeedCaptureId)
@@ -2735,6 +2762,7 @@ void UTempoCamera::UpdateSharedExposure(bool bSingleTileFastPath, FTempoCameraTi
 		// The meter measured the stitched image, which already carries the bias its tiles rendered
 		// with. Undo that to recover the scene luminance the engine's rules are written against.
 		SceneLuminance = Measurement.MeasuredLuminance / TileExposureFromBias(Measurement.AppliedBias);
+		MeteredLuminance = Measurement.MeasuredLuminance;
 		const float TargetLuminance = FMath::Clamp(SceneLuminance, MinWhitePointLuminance * MiddleGrey, MaxWhitePointLuminance * MiddleGrey) / MiddleGrey;
 
 		// The engine snaps to the target on a camera cut, with an empty range, or with invalid speeds.
@@ -2783,10 +2811,13 @@ void UTempoCamera::UpdateSharedExposure(bool bSingleTileFastPath, FTempoCameraTi
 
 	const float ExposureScale = FMath::Exp2(Bias) / FMath::Max(SmoothedSceneLuminance, 0.0001f);
 
-	// The proxy is pinned to an exposure of 1. Fold in whatever it actually reports so that, say, a
-	// partial PostProcessBlendWeight cannot double-expose the output.
-	const float ProxyExposure = ProxyViewState->GetLastEyeAdaptationExposure();
-	const float ProxyGain = ProxyExposure > 0.0f ? ProxyExposure : 1.0f;
+	// The proxy is pinned to an exposure of 1, but the engine still multiplies that by the bias curve,
+	// keyed on the proxy's own histogram of the stitched image; a null override cannot clear a
+	// volume's curve, since FSceneView::OverridePostProcessSettings ignores null curves. The proxy
+	// histograms the same image this meter measured, with the same settings, so take that gain from
+	// the measurement. The proxy's own exposure readback is not tied to a capture, and which capture
+	// it reflects depends on GPU timing.
+	const float ProxyGain = GetExposureCompensationFromCurve(AE.BiasCurve, MeteredLuminance, LuminanceMax);
 
 	SharedExposureBias = BiasFromTileExposure(ExposureScale / ProxyGain);
 }
