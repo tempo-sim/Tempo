@@ -143,6 +143,7 @@ enum class ETempoLidarSamplingStrategy : uint8
 };
 
 class UTempoLidar;
+class FTempoCustomDepthSkipViewExtension;
 class FTempoLidarParticipatingMediaViewExtension;
 
 // Which echo a beam reports when it detects more than one, e.g. a dust cloud in front of a wall.
@@ -403,6 +404,10 @@ protected:
 	// created on first use.
 	FTempoLidarParticipatingMediaViewExtension* GetOrCreateMediaExtension();
 
+	// The view extension that skips this lidar's custom depth pass while no client wants labels,
+	// created on first use.
+	FTempoCustomDepthSkipViewExtension* GetOrCreateCustomDepthSkipExtension();
+
 	// Begin UTempoTiledSceneCaptureComponent tile interface
 	virtual void SyncTiles() override;
 	virtual bool HasDetectedParameterChange() const override;
@@ -615,6 +620,15 @@ protected:
 	// The participating media passes' view extension, created on first use; see
 	// GetOrCreateMediaExtension. Released on unregister.
 	TSharedPtr<FTempoLidarParticipatingMediaViewExtension, ESPMode::ThreadSafe> MediaExtension;
+
+	// See GetOrCreateCustomDepthSkipExtension. Released on unregister.
+	TSharedPtr<FTempoCustomDepthSkipViewExtension, ESPMode::ThreadSafe> CustomDepthSkipExtension;
+
+	// The last frame a request without exclude_labels was seen. Labels stay on for
+	// LabelOffDebounceFrames after it, the same allowance as color for a streaming client's gap
+	// between a response and its next request.
+	uint64 LastLabelRequestFrame = 0;
+	static constexpr int32 LabelOffDebounceFrames = 30;
 
 	// Staging ring for the participating media results, sized like the atlas. Allocated only while
 	// participating media are simulated.

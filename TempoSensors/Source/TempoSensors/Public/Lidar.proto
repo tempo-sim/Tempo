@@ -97,4 +97,7 @@ message LidarScanRequest {
   // (drains in-flight reads, swaps the render path); the mode is held until no pending request
   // sets this flag. The toggle has a real GPU cost — color mode uses Lumen + ray tracing.
   bool include_color = 3;
+  // When true, this client does not read `labels` or `second_labels`. While every pending request
+  // sets this flag, the lidar skips its custom depth pass and surface returns carry label 0.
+  bool exclude_labels = 4;
 }
