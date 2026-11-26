@@ -820,6 +820,7 @@ async fn stream_lidar(sensor: AvailableSensor) {
         owner: sensor.owner,
         sensor: sensor.name,
         include_color: false,
+        ..Default::default()
     };
     let mut stream =
         match tempo_sensors::stream_lidar_scans_async(request).await {

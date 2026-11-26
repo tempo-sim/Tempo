@@ -8,6 +8,7 @@
 
 #include "TempoConversion.h"
 #include "TempoCoreUtils.h"
+#include "TempoCustomDepthSkipViewExtension.h"
 #include "TempoLidarParticipatingMediaViewExtension.h"
 #include "TempoMotionVectorRewarpViewExtension.h"
 #include "TempoMultiViewCapture.h"
@@ -210,7 +211,22 @@ void UTempoLidar::OnUnregister()
 		MediaExtension->ReleaseResources();
 		MediaExtension.Reset();
 	}
+	CustomDepthSkipExtension.Reset();
 	MediaStagingRing.Release();
+}
+
+FTempoCustomDepthSkipViewExtension* UTempoLidar::GetOrCreateCustomDepthSkipExtension()
+{
+	if (!CustomDepthSkipExtension.IsValid())
+	{
+		const UWorld* World = GetWorld();
+		if (!GEngine || !World || !World->Scene)
+		{
+			return nullptr;
+		}
+		CustomDepthSkipExtension = FSceneViewExtensions::NewExtension<FTempoCustomDepthSkipViewExtension>(World->Scene);
+	}
+	return CustomDepthSkipExtension.Get();
 }
 
 FTempoLidarParticipatingMediaViewExtension* UTempoLidar::GetOrCreateMediaExtension()
@@ -656,6 +672,10 @@ void UTempoLidar::RequestMeasurement(const TempoSensors::LidarScanRequest& Reque
 		}
 	}
 	PendingRequests.Add({ Request, ResponseContinuation});
+	if (!Request.exclude_labels())
+	{
+		LastLabelRequestFrame = GFrameCounter;
+	}
 }
 
 void SelectLidarReturns(ETempoLidarReturnMode Mode, const FTempoLidarEcho& Surface, const FTempoLidarEcho& Medium,
@@ -1595,9 +1615,20 @@ void UTempoLidar::RenderCapture()
 	{
 		MediaExt->SetActive(true);
 	}
+	// Labels come only from the custom depth pass; skip it while no client has asked for them.
+	const bool bLabelsNeeded = GFrameCounter - LastLabelRequestFrame <= static_cast<uint64>(LabelOffDebounceFrames);
+	FTempoCustomDepthSkipViewExtension* CustomDepthSkip = bLabelsNeeded ? nullptr : GetOrCreateCustomDepthSkipExtension();
+	if (CustomDepthSkip)
+	{
+		CustomDepthSkip->SetActive(true);
+	}
 	{
 		TempoMultiViewCapture::FScopedVolumetricFogHistoryRescale ScopedFogHistory(MaxExtrapolationFactor);
 		TempoMultiViewCapture::RenderTiles(Scene, this, SharedTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorLDR);
+	}
+	if (CustomDepthSkip)
+	{
+		CustomDepthSkip->SetActive(false);
 	}
 	if (bMedia)
 	{
