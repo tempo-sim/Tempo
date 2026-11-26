@@ -18,6 +18,9 @@ class FRunnableThread;
 // next frame's captures, or while the game thread ticks that frame, is otherwise read at the next
 // poll, one capture's encode or one step later.
 //
+// The fence wait spins (see below), so the thread first sleeps through most of the time a sensor's
+// fence has been taking to signal, and waits only for the rest.
+//
 // The thread waits through FRHIGPUFence::Wait. On Vulkan and D3D12 that processes the RHI's
 // completed GPU work on the calling thread, under the RHI's own lock, the way the RHI's interrupt
 // thread does on machines where it runs one, and the staging texture of a signalled fence is mapped
@@ -49,7 +52,14 @@ private:
 	FTempoReadbackWatcher();
 	virtual ~FTempoReadbackWatcher() override;
 
-	TQueue<TWeakPtr<FTextureRead>, EQueueMode::Mpsc> Incoming;
+	struct FWatched
+	{
+		TWeakPtr<FTextureRead> Read;
+		// FPlatformTime::Seconds() when the render thread handed the read over.
+		double WatchedAt = 0.0;
+	};
+
+	TQueue<FWatched, EQueueMode::Mpsc> Incoming;
 	FEvent* WakeEvent;
 	FRunnableThread* Thread = nullptr;
 	std::atomic<bool> bStop = false;
