@@ -49,6 +49,10 @@ public:
 	virtual void ExecutePendingCapture() override;
 	// End ITempoSensorInterface
 
+	// Clears the pending capture and returns true if ExecutePendingCapture would render now, for a
+	// caller that renders the capture itself.
+	bool ConsumePendingCapture();
+
 protected:
 	// The capture timer marks a capture pending, for ExecutePendingCapture to run once the frame's
 	// transforms are final.

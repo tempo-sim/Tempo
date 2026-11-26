@@ -12,6 +12,13 @@
 
 #include "TempoSensorServiceSubsystem.generated.h"
 
+class FSceneInterface;
+class FSceneViewStateInterface;
+class ITempoSensorInterface;
+class UTempoCamera;
+class UTextureRenderTarget2D;
+struct FTempoCameraPreparedCapture;
+
 namespace TempoCore
 {
 	class Empty;
@@ -101,4 +108,38 @@ protected:
 
 	template <typename RequestType, typename ResponseType>
 	void RequestImages(const RequestType& Request, const TResponseDelegate<ResponseType>& ResponseContinuation) const;
+
+	// Renders the fast-path cameras of an actor that sit close together as the views of shared view
+	// families of up to MaxViews views (UTempoSensorsSettings::MaxCamerasPerViewFamily), each view
+	// copied back to its camera's target; every other capture renders as it always has.
+	void RenderCapturesGrouped(FSceneInterface* Scene, TConstArrayView<ITempoSensorInterface*> Sensors, int32 MaxViews);
+	void RenderFamily(FSceneInterface* Scene, int32 GroupIndex, TConstArrayView<UTempoCamera*> Cameras, int32 MaxViews);
+	static bool CanShareFamily(UTempoCamera* Primary, UTempoCamera* Camera, const FTempoCameraPreparedCapture& PrimaryPrepared, const FTempoCameraPreparedCapture& Prepared);
+	UTextureRenderTarget2D* GetGroupAtlas(int32 GroupIndex, const UTextureRenderTarget2D* Like, const FIntPoint& Size);
+	// Makes Camera's views trace Owner's Lumen scene (nullptr: their own).
+	void SetLumenSceneOwner(UTempoCamera* Camera, FSceneViewStateInterface* Owner);
+	void ResetLumenSceneOwners();
+
+	struct FCameraGroup
+	{
+		TWeakObjectPtr<AActor> Owner;
+		TWeakObjectPtr<UTempoCamera> First;
+		int32 NumSlots = 0;
+	};
+	TArray<FCameraGroup> Groups;
+
+	struct FGroupSlot
+	{
+		int32 Group = INDEX_NONE;
+		int32 Slot = 0;
+	};
+	TMap<TWeakObjectPtr<UTempoCamera>, FGroupSlot> GroupSlots;
+	int32 LastMaxViews = -1;
+
+	UPROPERTY(Transient)
+	TMap<int32, TObjectPtr<UTextureRenderTarget2D>> GroupAtlases;
+
+	// The cameras whose views trace another view state's Lumen scene (see
+	// TempoMultiViewCapture::SetLumenSceneOwner), with that view state.
+	TMap<TWeakObjectPtr<UTempoCamera>, FSceneViewStateInterface*> LumenSceneOwners;
 };

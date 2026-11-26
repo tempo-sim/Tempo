@@ -13,6 +13,7 @@
 
 class FScene;
 class FSceneInterface;
+class ISceneRenderBuilder;
 class IConsoleVariable;
 class FSceneUniformBuffer;
 class FSceneView;
@@ -30,9 +31,19 @@ namespace TempoMultiViewCapture
 	struct FViewSetup
 	{
 		// Per-view scene view state (TAA history). Must be valid per view so that tiles don't share
-		// history. Exposure state is deliberately shared: every view is pointed at the first view's
-		// state for eye adaptation.
+		// history.
 		FSceneViewStateInterface* ViewState = nullptr;
+
+		// The view state whose eye adaptation (exposure buffer, PreExposure, histogram history) the
+		// view uses. Null uses the first view's, so the tiles of one camera share one exposure. Views
+		// of different cameras rendered in one family pass their own camera's state, so each keeps
+		// its own exposure.
+		FSceneViewStateInterface* ExposureViewState = nullptr;
+
+		// The component the view's own capture settings come from: view owner, hidden and show-only
+		// lists, view distance, LOD factor, ray tracing flag, lighting channels, clip plane and
+		// skylight scale. Null uses the family's primary component.
+		USceneCaptureComponent2D* OwnerComponent = nullptr;
 
 		// Per-view post-process settings (holds the distortion PPM blendable + AE bias).
 		// Pointer aliases a caller-owned FPostProcessSettings; must outlive the RenderTiles call.
@@ -82,6 +93,58 @@ namespace TempoMultiViewCapture
 		ESceneCaptureSource CaptureSource,
 		float ResolutionFraction = 1.0f);
 
+	// A rect of the atlas copied to another render target of the same format once the family has
+	// rendered, inside the same render graph.
+	struct FAtlasRectCopy
+	{
+		FIntRect SourceRect;
+		UTextureRenderTarget2D* Destination = nullptr;
+	};
+
+	// RenderTiles without executing: the family's renderer is added to Builder, so it renders when
+	// the caller executes the builder, in order with whatever else the builder holds, and shares the
+	// scene update with the other renderers there. Copies, if any, run right after the render.
+	// Returns false if nothing was added.
+	TEMPOSENSORS_API bool AddTilesRenderer(
+		ISceneRenderBuilder& Builder,
+		FSceneInterface* Scene,
+		USceneCaptureComponent2D* PrimaryComponent,
+		UTextureRenderTarget2D* AtlasRT,
+		TArrayView<const FViewSetup> Views,
+		ESceneCaptureSource CaptureSource,
+		float ResolutionFraction = 1.0f,
+		TArrayView<const FAtlasRectCopy> Copies = {});
+
+	// Where a capture's render work goes. Without a builder, straight to the render thread as the
+	// capture issues it: each family renders through its own builder, executed at once, and every
+	// command runs immediately. With one, the families are added to the builder and the commands
+	// become builder commands, run in order with its renders when the caller executes it: the
+	// render thread sees the same sequence, and the builder's renders share one scene update.
+	class TEMPOSENSORS_API FCaptureSink
+	{
+	public:
+		FCaptureSink() = default;
+		explicit FCaptureSink(ISceneRenderBuilder* InBuilder) : Builder(InBuilder) {}
+
+		ISceneRenderBuilder* GetBuilder() const { return Builder; }
+
+		// Game thread work that enqueues render commands (canvas draws, staging copies, ...).
+		void Command(TUniqueFunction<void()>&& Function);
+
+		// RenderTiles, or AddTilesRenderer into the builder.
+		void RenderTiles(
+			FSceneInterface* Scene,
+			USceneCaptureComponent2D* PrimaryComponent,
+			UTextureRenderTarget2D* AtlasRT,
+			TArrayView<const FViewSetup> Views,
+			ESceneCaptureSource CaptureSource,
+			float ResolutionFraction = 1.0f,
+			TArrayView<const FAtlasRectCopy> Copies = {});
+
+	private:
+		ISceneRenderBuilder* Builder = nullptr;
+	};
+
 	// Render thread. The scene velocity and resolved depth textures a view is being rendered into,
 	// and the rect it occupies in them, for view extension hooks whose scene texture uniform buffer
 	// doesn't yet expose what they need (the base pass hook's lacks velocity). Reaches into the
@@ -110,6 +173,12 @@ namespace TempoMultiViewCapture
 	// binds its cleared fallback wherever the custom depth or stencil is sampled.
 	TEMPOSENSORS_API void SkipCustomDepthPass(FSceneView& View);
 
+	// Game thread. Makes ViewState's views use Owner's Lumen scene (surface cache, cards) instead of their
+	// own, or their own again with a null Owner; ordered with the render commands that follow. A family's
+	// Lumen scene update runs on its first view's scene only, while each view traces the scene its own
+	// state resolves to, so the views of one family must all resolve to the first view's.
+	TEMPOSENSORS_API void SetLumenSceneOwner(FSceneViewStateInterface* ViewState, FSceneViewStateInterface* Owner);
+
 	// Game thread. Rescales the volumetric fog history blend for the renders issued while it lives.
 	//
 	// The engine blends each render's fog grid with the previous render's by a fixed weight
@@ -130,6 +199,9 @@ namespace TempoMultiViewCapture
 	{
 	public:
 		explicit FScopedVolumetricFogHistoryRescale(float TicksSinceLastRender);
+		// Scoped to the commands added to Builder while it lives instead: the weight is set and
+		// restored by builder commands around them.
+		FScopedVolumetricFogHistoryRescale(float TicksSinceLastRender, ISceneRenderBuilder* Builder);
 		~FScopedVolumetricFogHistoryRescale();
 
 		FScopedVolumetricFogHistoryRescale(const FScopedVolumetricFogHistoryRescale&) = delete;
@@ -138,5 +210,7 @@ namespace TempoMultiViewCapture
 	private:
 		IConsoleVariable* HistoryWeight = nullptr;
 		float OriginalWeight = 0.0f;
+		ISceneRenderBuilder* Builder = nullptr;
+		TSharedPtr<float> BuilderOriginalWeight;
 	};
 }
