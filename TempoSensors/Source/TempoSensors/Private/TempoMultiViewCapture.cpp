@@ -58,6 +58,7 @@
 #include "SceneRendering.h"
 #include "ScenePrivate.h"
 #include "SceneCore.h"
+#include "SceneViewState.h"
 #undef private
 
 namespace TempoMultiViewCapture
@@ -78,18 +79,29 @@ namespace
 		ViewFamily.FrameNumber = ViewFamily.Scene->GetFrameNumber();
 		ViewFamily.FrameCounter = GFrameCounter;
 
-		// Owner-level hide/show lists, computed once.
-		TSet<FPrimitiveComponentId> HiddenPrimitives;
-		TOptional<TSet<FPrimitiveComponentId>> ShowOnlyPrimitives;
+		// Owner-level hide/show lists and first-person parameters, computed once per owner.
+		struct FOwnerSettings
 		{
-			for (const TWeakObjectPtr<UPrimitiveComponent>& WeakPrim : PrimaryComponent->HiddenComponents)
+			TSet<FPrimitiveComponentId> HiddenPrimitives;
+			TOptional<TSet<FPrimitiveComponentId>> ShowOnlyPrimitives;
+			FFirstPersonParameters FirstPersonParams;
+		};
+		TMap<const USceneCaptureComponent2D*, FOwnerSettings> OwnerSettingsMap;
+		auto GetOwnerSettings = [&OwnerSettingsMap](USceneCaptureComponent2D* Owner) -> const FOwnerSettings&
+		{
+			if (const FOwnerSettings* Found = OwnerSettingsMap.Find(Owner))
+			{
+				return *Found;
+			}
+			FOwnerSettings& Settings = OwnerSettingsMap.Add(Owner);
+			for (const TWeakObjectPtr<UPrimitiveComponent>& WeakPrim : Owner->HiddenComponents)
 			{
 				if (UPrimitiveComponent* Prim = WeakPrim.Get())
 				{
-					HiddenPrimitives.Add(Prim->GetPrimitiveSceneId());
+					Settings.HiddenPrimitives.Add(Prim->GetPrimitiveSceneId());
 				}
 			}
-			for (AActor* Actor : PrimaryComponent->HiddenActors)
+			for (AActor* Actor : Owner->HiddenActors)
 			{
 				if (Actor)
 				{
@@ -97,23 +109,23 @@ namespace
 					{
 						if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(ActorComp))
 						{
-							HiddenPrimitives.Add(PrimComp->GetPrimitiveSceneId());
+							Settings.HiddenPrimitives.Add(PrimComp->GetPrimitiveSceneId());
 						}
 					}
 				}
 			}
 
-			if (PrimaryComponent->PrimitiveRenderMode == ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList)
+			if (Owner->PrimitiveRenderMode == ESceneCapturePrimitiveRenderMode::PRM_UseShowOnlyList)
 			{
-				ShowOnlyPrimitives.Emplace();
-				for (const TWeakObjectPtr<UPrimitiveComponent>& WeakPrim : PrimaryComponent->ShowOnlyComponents)
+				Settings.ShowOnlyPrimitives.Emplace();
+				for (const TWeakObjectPtr<UPrimitiveComponent>& WeakPrim : Owner->ShowOnlyComponents)
 				{
 					if (UPrimitiveComponent* Prim = WeakPrim.Get())
 					{
-						ShowOnlyPrimitives->Add(Prim->GetPrimitiveSceneId());
+						Settings.ShowOnlyPrimitives->Add(Prim->GetPrimitiveSceneId());
 					}
 				}
-				for (AActor* Actor : PrimaryComponent->ShowOnlyActors)
+				for (AActor* Actor : Owner->ShowOnlyActors)
 				{
 					if (Actor)
 					{
@@ -121,23 +133,21 @@ namespace
 						{
 							if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(ActorComp))
 							{
-								ShowOnlyPrimitives->Add(PrimComp->GetPrimitiveSceneId());
+								Settings.ShowOnlyPrimitives->Add(PrimComp->GetPrimitiveSceneId());
 							}
 						}
 					}
 				}
 			}
-		}
 
-		FFirstPersonParameters FirstPersonParams;
-		{
 			FMinimalViewInfo ViewInfo;
-			PrimaryComponent->GetCameraView(0.0f, ViewInfo);
-			FirstPersonParams = FFirstPersonParameters(
+			Owner->GetCameraView(0.0f, ViewInfo);
+			Settings.FirstPersonParams = FFirstPersonParameters(
 				ViewInfo.CalculateFirstPersonFOVCorrectionFactor(),
 				ViewInfo.FirstPersonScale,
 				ViewInfo.bUseFirstPersonParameters);
-		}
+			return Settings;
+		};
 
 		TArray<FSceneView*> ViewPtrArray;
 		ViewPtrArray.Reserve(Views.Num());
@@ -146,16 +156,18 @@ namespace
 		{
 			const FViewSetup& Setup = Views[ViewIndex];
 			check(Setup.PostProcessSettings);
+			USceneCaptureComponent2D* Owner = Setup.OwnerComponent ? Setup.OwnerComponent : PrimaryComponent;
+			const FOwnerSettings& OwnerSettings = GetOwnerSettings(Owner);
 
 			FSceneViewInitOptions ViewInitOptions;
 			ViewInitOptions.SetViewRectangle(Setup.ViewRect);
 			ViewInitOptions.ViewFamily = &ViewFamily;
-			ViewInitOptions.ViewActor = PrimaryComponent->GetViewOwner();
+			ViewInitOptions.ViewActor = Owner->GetViewOwner();
 			ViewInitOptions.ViewLocation = Setup.ViewLocation;
 			ViewInitOptions.ViewOrigin = Setup.ViewLocation;
 			ViewInitOptions.ViewRotationMatrix = Setup.ViewRotationMatrix;
 			ViewInitOptions.BackgroundColor = FLinearColor::Black;
-			ViewInitOptions.OverrideFarClippingPlaneDistance = PrimaryComponent->MaxViewDistanceOverride;
+			ViewInitOptions.OverrideFarClippingPlaneDistance = Owner->MaxViewDistanceOverride;
 			ViewInitOptions.StereoPass = EStereoscopicPass::eSSP_FULL;
 			ViewInitOptions.StereoViewIndex = INDEX_NONE;
 			ViewInitOptions.ProjectionMatrix = Setup.ProjectionMatrix;
@@ -177,13 +189,13 @@ namespace
 
 			// Per-tile view state: critical for TAA history independence per tile.
 			ViewInitOptions.SceneViewStateInterface = Setup.ViewState;
-			// One eye adaptation state for the whole family, the engine's own facility for tiled
-			// rendering (Movie Render Queue's high-resolution tiles use it). Every tile's exposure
+			// By default one eye adaptation state for the whole family, the engine's own facility for
+			// tiled rendering (Movie Render Queue's high-resolution tiles use it). Every tile's exposure
 			// buffer and PreExposure then come from the same view state, so tiles cannot drift apart
 			// even through a readback race. Tiles run manual exposure, so no per-tile histogram is
-			// lost by sharing.
-			ViewInitOptions.ExposureSceneViewStateInterface = Views[0].ViewState;
-			ViewInitOptions.LODDistanceFactor = FMath::Clamp(PrimaryComponent->LODDistanceFactor, .01f, 100.0f);
+			// lost by sharing. Views of different cameras name their own camera's state instead.
+			ViewInitOptions.ExposureSceneViewStateInterface = Setup.ExposureViewState ? Setup.ExposureViewState : Views[0].ViewState;
+			ViewInitOptions.LODDistanceFactor = FMath::Clamp(Owner->LODDistanceFactor, .01f, 100.0f);
 			// Hack to pass Lumen's LUMEN_MAX_VIEWS=2 family-level gate (Lumen.cpp:239). The cube
 			// path in LumenSceneRendering.cpp:3099 is semantically honest for us: all tiles share
 			// the rig origin, and Lumen uses a single omnidirectional origin from Views[0] — which
@@ -197,18 +209,18 @@ namespace
 			// Engine's SetupViewFamilyForSceneCapture consults GRayTracingSceneCaptures (a Renderer-
 			// private CVar used only for debug overrides). We don't link Renderer (see Build.cs note),
 			// so just honor the primary's flag.
-			ViewInitOptions.bSceneCaptureUsesRayTracing = PrimaryComponent->bUseRayTracingIfEnabled;
-			ViewInitOptions.bExcludeFromSceneTextureExtents = PrimaryComponent->bExcludeFromSceneTextureExtents;
-			ViewInitOptions.FirstPersonParams = FirstPersonParams;
+			ViewInitOptions.bSceneCaptureUsesRayTracing = Owner->bUseRayTracingIfEnabled;
+			ViewInitOptions.bExcludeFromSceneTextureExtents = Owner->bExcludeFromSceneTextureExtents;
+			ViewInitOptions.FirstPersonParams = OwnerSettings.FirstPersonParams;
 #if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
 			// New in UE 5.8: per-view skylight scale, sourced from the capture component (the engine's
 			// SetupViewFamilyForSceneCapture does the same). Defaults to white when unset.
-			ViewInitOptions.SkylightScale = PrimaryComponent->SkylightScale;
+			ViewInitOptions.SkylightScale = Owner->SkylightScale;
 #endif
 
 			FSceneView* View = new FSceneView(ViewInitOptions);
-			View->HiddenPrimitives = HiddenPrimitives;
-			View->ShowOnlyPrimitives = ShowOnlyPrimitives;
+			View->HiddenPrimitives = OwnerSettings.HiddenPrimitives;
+			View->ShowOnlyPrimitives = OwnerSettings.ShowOnlyPrimitives;
 
 			ViewFamily.Views.Add(View);
 			ViewPtrArray.Add(View);
@@ -266,15 +278,15 @@ namespace
 
 			View->EndFinalPostprocessSettings(ViewInitOptions);
 
-			View->ViewLightingChannelMask = PrimaryComponent->ViewLightingChannels.GetMaskForStruct();
+			View->ViewLightingChannelMask = Owner->ViewLightingChannels.GetMaskForStruct();
 
 			View->bCameraCut = Setup.bCameraCut;
 
-			if (PrimaryComponent->bEnableClipPlane)
+			if (Owner->bEnableClipPlane)
 			{
 				View->GlobalClippingPlane = FPlane(
-					PrimaryComponent->ClipPlaneBase,
-					PrimaryComponent->ClipPlaneNormal.GetSafeNormal());
+					Owner->ClipPlaneBase,
+					Owner->ClipPlaneNormal.GetSafeNormal());
 				View->bAllowTemporalJitter = false;
 			}
 		}
@@ -309,19 +321,52 @@ void RenderTiles(
 	float ResolutionFraction)
 {
 	check(IsInGameThread());
+	check(Scene);
+
+	TUniquePtr<ISceneRenderBuilder> Builder = ISceneRenderBuilder::Create(Scene);
+	if (!Builder.IsValid())
+	{
+		return;
+	}
+	if (AddTilesRenderer(*Builder, Scene, PrimaryComponent, AtlasRT, Views, CaptureSource, ResolutionFraction))
+	{
+		Builder->Execute();
+	}
+}
+
+bool AddTilesRenderer(
+	ISceneRenderBuilder& Builder,
+	FSceneInterface* Scene,
+	USceneCaptureComponent2D* PrimaryComponent,
+	UTextureRenderTarget2D* AtlasRT,
+	TArrayView<const FViewSetup> Views,
+	ESceneCaptureSource CaptureSource,
+	float ResolutionFraction,
+	TArrayView<const FAtlasRectCopy> Copies)
+{
+	check(IsInGameThread());
 	check(Scene && PrimaryComponent && AtlasRT);
 	check(!Views.IsEmpty());
 
 	FTextureRenderTargetResource* AtlasResource = AtlasRT->GameThread_GetRenderTargetResource();
 	if (!AtlasResource)
 	{
-		return;
+		return false;
 	}
 
-	TUniquePtr<ISceneRenderBuilder> Builder = ISceneRenderBuilder::Create(Scene);
-	if (!Builder.IsValid())
+	struct FCopyTarget
 	{
-		return;
+		FIntRect SourceRect;
+		FTextureRenderTargetResource* Resource = nullptr;
+	};
+	TArray<FCopyTarget> CopyTargets;
+	for (const FAtlasRectCopy& Copy : Copies)
+	{
+		FTextureRenderTargetResource* Resource = Copy.Destination ? Copy.Destination->GameThread_GetRenderTargetResource() : nullptr;
+		if (Resource && Copy.SourceRect.Area() > 0)
+		{
+			CopyTargets.Add({ Copy.SourceRect, Resource });
+		}
 	}
 
 	const bool bCaptureSceneColor =
@@ -385,7 +430,7 @@ void RenderTiles(
 
 	SetupViewExtensions(ViewFamily, FamilyViews);
 
-	FSceneRenderer* SceneRenderer = Builder->CreateSceneRenderer(&ViewFamily);
+	FSceneRenderer* SceneRenderer = Builder.CreateSceneRenderer(&ViewFamily);
 	check(SceneRenderer);
 
 	// Per-view Lumen scene data hookup. Engine does this against a single view state; we repeat
@@ -417,10 +462,10 @@ void RenderTiles(
 	// before renderer writes each view's ViewRect. Safer than relying on tile rects tiling exactly.
 	const FIntPoint AtlasSize(AtlasRT->SizeX, AtlasRT->SizeY);
 
-	Builder->AddRenderer(
+	Builder.AddRenderer(
 		SceneRenderer,
 		TEXT("TempoTilesMultiView"),
-		[AtlasResource, AtlasSize](FRDGBuilder& GraphBuilder, const FSceneRenderFunctionInputs& Inputs) -> bool
+		[AtlasResource, AtlasSize, CopyTargets = MoveTemp(CopyTargets)](FRDGBuilder& GraphBuilder, const FSceneRenderFunctionInputs& Inputs) -> bool
 		{
 			FRDGTextureRef AtlasTexture = RegisterExternalTexture(
 				GraphBuilder,
@@ -438,11 +483,58 @@ void RenderTiles(
 
 			Inputs.Renderer->Render(GraphBuilder, Inputs.SceneUpdateInputs);
 
+			// Same format on both sides, so each copy moves the rendered bytes unchanged.
+			for (const FCopyTarget& Copy : CopyTargets)
+			{
+				FRDGTextureRef Destination = RegisterExternalTexture(
+					GraphBuilder,
+					Copy.Resource->GetRenderTargetTexture(),
+					TEXT("TempoMultiViewCopyDestination"));
+				FRHICopyTextureInfo CopyInfo;
+				CopyInfo.SourcePosition = FIntVector(Copy.SourceRect.Min.X, Copy.SourceRect.Min.Y, 0);
+				CopyInfo.Size = FIntVector(Copy.SourceRect.Width(), Copy.SourceRect.Height(), 1);
+				AddCopyTexturePass(GraphBuilder, AtlasTexture, Destination, CopyInfo);
+				GraphBuilder.SetTextureAccessFinal(Destination, ERHIAccess::SRVMask);
+			}
+
 			GraphBuilder.SetTextureAccessFinal(AtlasTexture, ERHIAccess::SRVMask);
 			return true;
 		});
 
-	Builder->Execute();
+	return true;
+}
+
+void FCaptureSink::Command(TUniqueFunction<void()>&& Function)
+{
+	if (Builder)
+	{
+		Builder->AddCommand(MoveTemp(Function));
+	}
+	else
+	{
+		Function();
+	}
+}
+
+void FCaptureSink::RenderTiles(
+	FSceneInterface* Scene,
+	USceneCaptureComponent2D* PrimaryComponent,
+	UTextureRenderTarget2D* AtlasRT,
+	TArrayView<const FViewSetup> Views,
+	ESceneCaptureSource CaptureSource,
+	float ResolutionFraction,
+	TArrayView<const FAtlasRectCopy> Copies)
+{
+	if (Builder)
+	{
+		AddTilesRenderer(*Builder, Scene, PrimaryComponent, AtlasRT, Views, CaptureSource, ResolutionFraction, Copies);
+		return;
+	}
+	TUniquePtr<ISceneRenderBuilder> OwnBuilder = ISceneRenderBuilder::Create(Scene);
+	if (OwnBuilder.IsValid() && AddTilesRenderer(*OwnBuilder, Scene, PrimaryComponent, AtlasRT, Views, CaptureSource, ResolutionFraction, Copies))
+	{
+		OwnBuilder->Execute();
+	}
 }
 
 bool GetViewParticipatingMediaInputs(const FSceneView& View, FTempoLidarMediaPassInputs& OutInputs)
@@ -592,8 +684,49 @@ FScopedVolumetricFogHistoryRescale::FScopedVolumetricFogHistoryRescale(float Tic
 	HistoryWeight->SetWithCurrentPriority(FMath::Pow(Weight, TicksSinceLastRender), NAME_None, ECVF_SetByConsole, ECVF_SetByScalability);
 }
 
+FScopedVolumetricFogHistoryRescale::FScopedVolumetricFogHistoryRescale(float TicksSinceLastRender, ISceneRenderBuilder* InBuilder)
+	: FScopedVolumetricFogHistoryRescale(InBuilder ? 1.0f : TicksSinceLastRender)
+{
+	check(IsInGameThread());
+	if (!InBuilder || TicksSinceLastRender <= 1.0f)
+	{
+		return;
+	}
+	IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(TEXT("r.VolumetricFog.HistoryWeight"));
+	if (!Variable)
+	{
+		return;
+	}
+	// The builder runs its commands on the game thread in order with its renders, so the weight is
+	// set right before the renders added inside the scope are enqueued and restored right after.
+	Builder = InBuilder;
+	BuilderOriginalWeight = MakeShared<float>(-1.0f);
+	Builder->AddCommand([Variable, TicksSinceLastRender, Saved = BuilderOriginalWeight]()
+	{
+		const float Weight = Variable->GetFloat();
+		if (Weight <= 0.0f || Weight >= 1.0f)
+		{
+			return;
+		}
+		*Saved = Weight;
+		Variable->SetWithCurrentPriority(FMath::Pow(Weight, TicksSinceLastRender), NAME_None, ECVF_SetByConsole, ECVF_SetByScalability);
+	});
+	HistoryWeight = Variable;
+}
+
 FScopedVolumetricFogHistoryRescale::~FScopedVolumetricFogHistoryRescale()
 {
+	if (Builder)
+	{
+		Builder->AddCommand([Variable = HistoryWeight, Saved = BuilderOriginalWeight]()
+		{
+			if (*Saved >= 0.0f)
+			{
+				Variable->SetWithCurrentPriority(*Saved, NAME_None, ECVF_SetByConsole, ECVF_SetByScalability);
+			}
+		});
+		return;
+	}
 	if (HistoryWeight)
 	{
 		HistoryWeight->SetWithCurrentPriority(OriginalWeight, NAME_None, ECVF_SetByConsole, ECVF_SetByScalability);
@@ -617,6 +750,22 @@ bool GetRenderedViewSceneTextures(const FSceneView& View, FRDGTextureRef& OutVel
 	OutSceneDepth = SceneTextures->Depth.Resolve;
 	OutViewRect = static_cast<const FViewInfo&>(View).ViewRect;
 	return OutVelocity != nullptr && OutSceneDepth != nullptr;
+}
+
+void SetLumenSceneOwner(FSceneViewStateInterface* ViewState, FSceneViewStateInterface* Owner)
+{
+	check(IsInGameThread());
+	if (!ViewState)
+	{
+		return;
+	}
+	ENQUEUE_RENDER_COMMAND(TempoSetLumenSceneOwner)([ViewState, Owner](FRHICommandListImmediate&)
+	{
+		// Lumen finds a view's scene data by the share-origin key (FScene::FindLumenSceneData); it is the
+		// view state's own key unless the state was allocated to share another's origin.
+		FSceneViewState* State = static_cast<FSceneViewState*>(ViewState);
+		State->ShareOriginUniqueID = Owner ? static_cast<FSceneViewState*>(Owner)->UniqueID : State->UniqueID;
+	});
 }
 
 void SkipCustomDepthPass(FSceneView& View)

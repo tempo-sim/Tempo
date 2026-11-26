@@ -69,6 +69,7 @@ public:
 	void SetPipelinedRendering(bool bPipelinedRenderingIn);
 	bool GetLimitGPUFramesInFlight() const { return bLimitGPUFramesInFlight; }
 	int32 GetMaxGPUFramesInFlight() const { return MaxGPUFramesInFlight; }
+	int32 GetMaxCamerasPerViewFamily() const { return MaxCamerasPerViewFamily; }
 	FTempoSensorsLabelSettingsChanged TempoSensorsLabelSettingsChangedEvent;
 	FTempoSensorsLabelOverridesChanged TempoSensorsLabelOverridesChangedEvent;
 
@@ -227,6 +228,17 @@ private:
 	// simulation frame the data corresponds to.
 	UPROPERTY(EditAnywhere, Config, Category="Advanced")
 	bool bPipelinedRendering = false;
+
+	// Render the single-view cameras of one actor that sit close together (within 10 m) as the views of
+	// one view family of up to this many cameras, so the scene and family setup (scene update, ray
+	// tracing scene, shadow maps, Lumen scene) are done once per family instead of once per camera.
+	// 0 (default): every camera renders its own family. A family's views other than the first can
+	// differ slightly from the same camera rendered alone: several engine shaders seed per-pixel noise
+	// with absolute positions in the scene textures, where every view but the first is offset. Families
+	// of exactly two cameras are not formed while Lumen radiosity is hardware ray traced (see
+	// UTempoSensorServiceSubsystem's GetMinViewsPerFamily).
+	UPROPERTY(EditAnywhere, Config, Category="Advanced", meta=(ClampMin=0, ClampMax=16, UIMin=0, UIMax=16))
+	int32 MaxCamerasPerViewFamily = 0;
 
 	// Whether to cap how many render-thread frames the GPU may fall behind. A windowed process gets
 	// this cap from the viewport present; one rendering off-screen has no present and so no cap, and

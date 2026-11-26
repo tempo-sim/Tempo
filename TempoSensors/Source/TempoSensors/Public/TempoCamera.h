@@ -5,6 +5,7 @@
 #include <atomic>
 
 #include "TempoSensors/Camera.pb.h"
+#include "TempoMultiViewCapture.h"
 #include "TempoTiledSceneCaptureComponent.h"
 #include "TempoServer.h"
 #include "TempoSensorsConstants.h"
@@ -15,6 +16,8 @@
 #include "Engine/Scene.h"
 #include "SceneTypes.h"
 #include "ShowFlags.h"
+
+class FTextureRenderTargetResource;
 
 #include "TempoCamera.generated.h"
 
@@ -330,6 +333,22 @@ struct FTempoCameraTile
 	double LastCaptureWorldTime = -1.0;
 };
 
+// One capture of a camera, set up for rendering: its views and everything its render and the work
+// after it need. Its views point at FastPathPP, so it must stay where it was prepared.
+struct FTempoCameraPreparedCapture
+{
+	TArray<TempoMultiViewCapture::FViewSetup> ViewSetups;
+	FPostProcessSettings FastPathPP;
+	FTempoCameraTile* SingleActiveTile = nullptr;
+	FTextureRenderTargetResource* SharedRTResource = nullptr;
+	FSceneInterface* Scene = nullptr;
+	float ResolutionFraction = 1.0f;
+	float MaxExtrapolationFactor = 1.0f;
+	bool bSingleTileFastPath = false;
+	bool bAnyTileNeedsRewarp = false;
+	bool bLabelsNeeded = false;
+};
+
 UCLASS(Blueprintable, BlueprintType, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class TEMPOSENSORS_API UTempoCamera : public UTempoTiledSceneCaptureComponent
 {
@@ -392,6 +411,30 @@ public:
 	// still hold raw pointers to their FMaterialRenderProxy and fatal in CacheUniformExpressions.
 	// Forward each tile's view state to the collector to keep its MIDPool reachable.
 	static void AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector);
+
+	// The capture, in phases, for a caller that renders several cameras' views as one view family
+	// (UTempoSensorServiceSubsystem). RenderCapture is PrepareCapture then RenderPreparedCapture with
+	// a sink that renders immediately.
+	//
+	// Game thread. Sets up this frame's capture. Returns false if there is nothing to render.
+	bool PrepareCapture(FTempoCameraPreparedCapture& Prepared);
+	// Renders a prepared capture and everything after it through Sink.
+	void RenderPreparedCapture(FTempoCameraPreparedCapture& Prepared, TempoMultiViewCapture::FCaptureSink& Sink);
+	// Everything after the views have rendered into the final target: the read, the exposure
+	// controller, the staging copy. For a capture whose views another family rendered (a single
+	// tile on the fast path) and copied into GetFinalTextureTarget.
+	void FinishCapture(FTempoCameraPreparedCapture& Prepared, TempoMultiViewCapture::FCaptureSink& Sink);
+	// Lets the camera's view extensions (motion vector rewarp, custom depth skip) be gathered into
+	// the family set up while they are active. With bOwnViewsOnly the custom depth skip acts only
+	// on this camera's views, for a family other cameras' views share.
+	void SetCaptureExtensionsActive(const FTempoCameraPreparedCapture& Prepared, bool bActive, bool bOwnViewsOnly);
+	// Whether the camera's capture renders on the single-tile fast path: one view, straight into
+	// GetFinalTextureTarget.
+	bool IsSingleTileFastPath() const;
+	// Calls Callback with each of the camera's view states.
+	void ForEachViewState(TFunctionRef<void(FSceneViewStateInterface*)> Callback);
+	// The target the fast path renders into and the readback copies from.
+	UTextureRenderTarget2D* GetFinalTextureTarget() const { return SharedFinalTextureTarget; }
 
 protected:
 	// Whether to capture this frame: a request is waiting, or one has been since the last capture. See
