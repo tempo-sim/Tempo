@@ -1664,25 +1664,53 @@ int32 UTempoCamera::GetNumActiveTiles() const
 
 void UTempoCamera::RenderCapture()
 {
+	FTempoCameraPreparedCapture Prepared;
+	if (PrepareCapture(Prepared))
+	{
+		TempoMultiViewCapture::FCaptureSink Sink;
+		RenderPreparedCapture(Prepared, Sink);
+	}
+}
+
+bool UTempoCamera::IsSingleTileFastPath() const
+{
+	return GetNumActiveTiles() == 1 && !bDepthEnabled && UpsamplingFactor == 1.0f;
+}
+
+void UTempoCamera::ForEachViewState(TFunctionRef<void(FSceneViewStateInterface*)> Callback)
+{
+	for (FTempoCameraTile& Tile : Tiles)
+	{
+		if (FSceneViewStateInterface* ViewState = Tile.ViewState.GetReference())
+		{
+			Callback(ViewState);
+		}
+	}
+}
+
+bool UTempoCamera::PrepareCapture(FTempoCameraPreparedCapture& P)
+{
 	// Camera-specific guard: the fast path renders directly to SharedFinalTextureTarget and the
 	// multi-tile path reads back from it; either way its resource must be valid.
 	if (!SharedFinalTextureTarget)
 	{
-		return;
+		return false;
 	}
 
 	FTextureRenderTargetResource* SharedRTResource = SharedFinalTextureTarget->GameThread_GetRenderTargetResource();
 	if (!SharedRTResource)
 	{
-		return;
+		return false;
 	}
 
 	UWorld* World = GetWorld();
 	FSceneInterface* Scene = World ? World->Scene : nullptr;
 	if (!Scene)
 	{
-		return;
+		return false;
 	}
+	P.SharedRTResource = SharedRTResource;
+	P.Scene = Scene;
 
 	// The multi-view tile path below renders via its own FSceneRenderer and never calls
 	// UpdateSceneCaptureContents, so it must expand FRayTracingScene's readback rings itself. This
@@ -1697,15 +1725,6 @@ void UTempoCamera::RenderCapture()
 	// silently re-expose the release race.
 	PinRayTracingSceneUsedThisFrame(Scene);
 
-	int32 NumActiveTiles = 0;
-	for (const FTempoCameraTile& Tile : Tiles)
-	{
-		if (Tile.bActive)
-		{
-			++NumActiveTiles;
-		}
-	}
-
 	// Single-tile fast path: when there's exactly one active tile, depth packing isn't needed,
 	// and no upsampling is requested, render with full post-process (bloom/AE/tonemap on)
 	// directly to SharedFinalTextureTarget, skipping the aux unpack, proxy tonemap capture, and
@@ -1713,7 +1732,8 @@ void UTempoCamera::RenderCapture()
 	// viable for !bDepthEnabled because the depth-with-label encoding bit-packs into HDR alpha
 	// and can't survive LDR quantization, and only for UpsamplingFactor == 1 because the fast
 	// path writes straight to the 1× final RT with no place to do the K→1 downsample.
-	const bool bSingleTileFastPath = (NumActiveTiles == 1) && !bDepthEnabled && UpsamplingFactor == 1.0f;
+	P.bSingleTileFastPath = IsSingleTileFastPath();
+	const bool bSingleTileFastPath = P.bSingleTileFastPath;
 
 	// Force camera cut on path-mode transition: the active tile's TAA/AE history was conditioned
 	// on a different show-flag set, so reusing it would alias.
@@ -1752,7 +1772,7 @@ void UTempoCamera::RenderCapture()
 	// PPM and the manual-AE override used in multi-tile mode). Strip the proxy tonemap PPM (which
 	// samples SharedTextureTarget — unused in fast-path) and layer the tile's distortion PPM on top.
 	// Stack-local so it lives until RenderTiles returns; FViewSetup holds a pointer.
-	FPostProcessSettings FastPathPP;
+	FPostProcessSettings& FastPathPP = P.FastPathPP;
 	if (bSingleTileFastPath)
 	{
 		FastPathPP = PostProcessSettings;
@@ -1769,9 +1789,11 @@ void UTempoCamera::RenderCapture()
 	// (the atlas) via TempoMultiViewCapture::RenderTiles. Each tile contributes its own view state
 	// (TAA/AE history) and post-process; they share the family's shadow setup, scene uniform
 	// buffer, Lumen/RT wire-up, and GPU scene update.
-	TArray<TempoMultiViewCapture::FViewSetup> ViewSetups;
-	ViewSetups.Reserve(NumActiveTiles);
-	FTempoCameraTile* SingleActiveTile = nullptr;
+	TArray<TempoMultiViewCapture::FViewSetup>& ViewSetups = P.ViewSetups;
+	ViewSetups.Reset();
+	ViewSetups.Reserve(GetNumActiveTiles());
+	FTempoCameraTile*& SingleActiveTile = P.SingleActiveTile;
+	SingleActiveTile = nullptr;
 
 	// Motion vector rewarp: the object-motion part of a tile's velocity vectors spans one scene tick
 	// (the engine advances previous transforms once per engine tick, from the engine loop) while its
@@ -1789,15 +1811,16 @@ void UTempoCamera::RenderCapture()
 		FScopeLock RequestsLock(&RequestsMutex);
 		bLabelsPending = !PendingLabelImageRequests.IsEmpty() || !PendingBoundingBoxesRequests.IsEmpty();
 	}
-	const bool bLabelsNeeded = bLabelsPending || GFrameCounter - LastLabelRequestFrame <= static_cast<uint64>(LabelOffDebounceFrames);
-	FTempoCustomDepthSkipViewExtension* CustomDepthSkip = GetOrCreateCustomDepthSkipExtension();
+	P.bLabelsNeeded = bLabelsPending || GFrameCounter - LastLabelRequestFrame <= static_cast<uint64>(LabelOffDebounceFrames);
 	const double CaptureWorldTime = World->GetTimeSeconds();
 	const double SceneTickDeltaSeconds = World->GetDeltaSeconds();
-	bool bAnyTileNeedsRewarp = false;
+	bool& bAnyTileNeedsRewarp = P.bAnyTileNeedsRewarp;
+	bAnyTileNeedsRewarp = false;
 	// The volumetric fog history blend is rescaled by the same factor (see
 	// FScopedVolumetricFogHistoryRescale); it is one setting for the family, so the largest tile
 	// factor is used. Tiles capture together, so they only differ when one was just activated.
-	float MaxExtrapolationFactor = 1.0f;
+	float& MaxExtrapolationFactor = P.MaxExtrapolationFactor;
+	MaxExtrapolationFactor = 1.0f;
 	for (FTempoCameraTile& Tile : Tiles)
 	{
 		if (!Tile.bActive)
@@ -1925,18 +1948,53 @@ void UTempoCamera::RenderCapture()
 		Setup.FOV = Tile.FOVAngle;
 	}
 
-	const float ResolutionFraction = bEnableScreenPercentage
+	P.ResolutionFraction = bEnableScreenPercentage
 		? FMath::Clamp(ScreenPercentage / 100.0f, 0.25f, 2.0f)
 		: 1.0f;
+	return !ViewSetups.IsEmpty();
+}
+
+void UTempoCamera::SetCaptureExtensionsActive(const FTempoCameraPreparedCapture& P, bool bActive, bool bOwnViewsOnly)
+{
+	if (P.bAnyTileNeedsRewarp && bRewarpMotionVectors)
+	{
+		GetOrCreateMotionVectorRewarpExtension()->SetActive(bActive);
+	}
+	if (!P.bLabelsNeeded)
+	{
+		FTempoCustomDepthSkipViewExtension* CustomDepthSkip = GetOrCreateCustomDepthSkipExtension();
+		if (bActive)
+		{
+			TArray<const FSceneViewStateInterface*> OwnViewStates;
+			if (bOwnViewsOnly)
+			{
+				for (const TempoMultiViewCapture::FViewSetup& Setup : P.ViewSetups)
+				{
+					OwnViewStates.Add(Setup.ViewState);
+				}
+			}
+			CustomDepthSkip->SetViewStateFilter(MoveTemp(OwnViewStates));
+		}
+		CustomDepthSkip->SetActive(bActive);
+	}
+}
+
+void UTempoCamera::RenderPreparedCapture(FTempoCameraPreparedCapture& P, TempoMultiViewCapture::FCaptureSink& Sink)
+{
+	FSceneInterface* Scene = P.Scene;
+	const bool bSingleTileFastPath = P.bSingleTileFastPath;
+	const TArray<TempoMultiViewCapture::FViewSetup>& ViewSetups = P.ViewSetups;
+	const float ResolutionFraction = P.ResolutionFraction;
+	const float MaxExtrapolationFactor = P.MaxExtrapolationFactor;
 
 	if (bSingleTileFastPath)
 	{
 		// Single tile, full post-process: render straight to the final RT in LDR. The distortion
 		// PPM packs label/255 into alpha; RGBA8 quantization preserves the byte exactly.
-		FScopedMotionVectorRewarp ScopedRewarp(bAnyTileNeedsRewarp ? RewarpExtension : nullptr);
-		FScopedCustomDepthSkip ScopedCustomDepthSkip(bLabelsNeeded ? nullptr : CustomDepthSkip);
-		TempoMultiViewCapture::FScopedVolumetricFogHistoryRescale ScopedFogHistory(MaxExtrapolationFactor);
-		TempoMultiViewCapture::RenderTiles(Scene, this, SharedFinalTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorLDR, ResolutionFraction);
+		TempoMultiViewCapture::FScopedVolumetricFogHistoryRescale ScopedFogHistory(MaxExtrapolationFactor, Sink.GetBuilder());
+		SetCaptureExtensionsActive(P, true, false);
+		Sink.RenderTiles(Scene, this, SharedFinalTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorLDR, ResolutionFraction);
+		SetCaptureExtensionsActive(P, false, false);
 	}
 	else
 	{
@@ -1946,51 +2004,75 @@ void UTempoCamera::RenderCapture()
 		// remain set for the tiles: the engine only honors their AutoExposureBias, and only computes
 		// a PreExposure for them, while it is. Manual exposure is what stops them from adapting.
 		const FEngineShowFlags SavedShowFlags = ShowFlags;
-		ShowFlags.SetLocalExposure(false);
-		ShowFlags.SetMotionBlur(false);
-		ShowFlags.SetLensFlares(false);
-		ShowFlags.SetBloom(false);
-		ShowFlags.SetColorGrading(false);
-		ShowFlags.SetVignette(false);
-		ShowFlags.SetDepthOfField(false);
+		ApplyTileShowFlags();
 
 		{
-			FScopedMotionVectorRewarp ScopedRewarp(bAnyTileNeedsRewarp ? RewarpExtension : nullptr);
-			FScopedCustomDepthSkip ScopedCustomDepthSkip(bLabelsNeeded ? nullptr : CustomDepthSkip);
-			TempoMultiViewCapture::FScopedVolumetricFogHistoryRescale ScopedFogHistory(MaxExtrapolationFactor);
-			TempoMultiViewCapture::RenderTiles(Scene, this, SharedTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorHDR, ResolutionFraction);
+			TempoMultiViewCapture::FScopedVolumetricFogHistoryRescale ScopedFogHistory(MaxExtrapolationFactor, Sink.GetBuilder());
+			SetCaptureExtensionsActive(P, true, false);
+			Sink.RenderTiles(Scene, this, SharedTextureTarget, ViewSetups, ESceneCaptureSource::SCS_FinalColorHDR, ResolutionFraction);
+			SetCaptureExtensionsActive(P, false, false);
 		}
 
 		ShowFlags = SavedShowFlags;
 
-		// Stitch + feather pass: resolves the per-tile distorted atlas into a single equidistant
-		// HDR image (SharedStitchHDRTextureTarget, sized SizeXY). The resolve map drives where to
-		// sample the atlas and how to blend across overlapping tile coverage near seams. The proxy
-		// capture below reads this RT (via HDRColorRT) as scene color before bloom/AE/tonemap.
-		if (SharedStitchHDRTextureTarget)
-		{
-			if (UMaterialInstanceDynamic* StitchMID = GetOrCreateStitchColorMID())
-			{
-				UCanvas* Canvas = nullptr;
-				FVector2D CanvasSize(0.0, 0.0);
-				FDrawToRenderTargetContext Ctx;
-				UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(this, SharedStitchHDRTextureTarget, Canvas, CanvasSize, Ctx);
-
-				FCanvasTileItem Item(
-					FVector2D::ZeroVector,
-					StitchMID->GetRenderProxy(),
-					FVector2D(SizeXY.X, SizeXY.Y),
-					FVector2D(0.0, 0.0),
-					FVector2D(1.0, 1.0));
-				Item.BlendMode = SE_BLEND_Opaque;
-				Canvas->DrawItem(Item);
-
-				UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(this, Ctx);
-
-				EnqueueExposureMeter();
-			}
-		}
+		AddStitch(Sink);
 	}
+
+	FinishCapture(P, Sink);
+}
+
+void UTempoCamera::ApplyTileShowFlags()
+{
+	ShowFlags.SetLocalExposure(false);
+	ShowFlags.SetMotionBlur(false);
+	ShowFlags.SetLensFlares(false);
+	ShowFlags.SetBloom(false);
+	ShowFlags.SetColorGrading(false);
+	ShowFlags.SetVignette(false);
+	ShowFlags.SetDepthOfField(false);
+}
+
+void UTempoCamera::AddStitch(TempoMultiViewCapture::FCaptureSink& Sink)
+{
+	// Stitch + feather pass: resolves the per-tile distorted atlas into a single equidistant
+	// HDR image (SharedStitchHDRTextureTarget, sized SizeXY). The resolve map drives where to
+	// sample the atlas and how to blend across overlapping tile coverage near seams. The proxy
+	// capture below reads this RT (via HDRColorRT) as scene color before bloom/AE/tonemap.
+	if (SharedStitchHDRTextureTarget)
+	{
+		Sink.Command([this]()
+		{
+		if (UMaterialInstanceDynamic* StitchMID = GetOrCreateStitchColorMID())
+		{
+			UCanvas* Canvas = nullptr;
+			FVector2D CanvasSize(0.0, 0.0);
+			FDrawToRenderTargetContext Ctx;
+			UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(this, SharedStitchHDRTextureTarget, Canvas, CanvasSize, Ctx);
+
+			FCanvasTileItem Item(
+				FVector2D::ZeroVector,
+				StitchMID->GetRenderProxy(),
+				FVector2D(SizeXY.X, SizeXY.Y),
+				FVector2D(0.0, 0.0),
+				FVector2D(1.0, 1.0));
+			Item.BlendMode = SE_BLEND_Opaque;
+			Canvas->DrawItem(Item);
+
+			UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(this, Ctx);
+
+			EnqueueExposureMeter();
+		}
+		});
+	}
+}
+
+void UTempoCamera::FinishCapture(FTempoCameraPreparedCapture& P, TempoMultiViewCapture::FCaptureSink& Sink)
+{
+	const bool bSingleTileFastPath = P.bSingleTileFastPath;
+	FTempoCameraTile* SingleActiveTile = P.SingleActiveTile;
+	FTextureRenderTargetResource* SharedRTResource = P.SharedRTResource;
+	const bool bLabelsNeeded = P.bLabelsNeeded;
+	FTempoCustomDepthSkipViewExtension* CustomDepthSkip = GetOrCreateCustomDepthSkipExtension();
 
 	// Build the FTextureRead for the stitched output, sized to the camera's final SizeXY.
 	TMap<uint8, uint8> InstanceToSemanticMap;
@@ -2043,6 +2125,8 @@ void UTempoCamera::RenderCapture()
 		// differ.
 		if (SharedAuxTextureTarget)
 		{
+			Sink.Command([this]()
+			{
 			if (UMaterialInstanceDynamic* AuxMID = GetOrCreateAuxAtlasMID())
 			{
 				UCanvas* Canvas = nullptr;
@@ -2061,6 +2145,7 @@ void UTempoCamera::RenderCapture()
 
 				UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(this, Ctx);
 			}
+			});
 		}
 
 		// Proxy scene capture: the PPM (appended to PostProcessSettings.WeightedBlendables by
@@ -2145,6 +2230,7 @@ void UTempoCamera::RenderCapture()
 			bUseRayTracingIfEnabled = false;
 
 			{
+				CustomDepthSkip->SetViewStateFilter({});
 				FScopedCustomDepthSkip ScopedProxyCustomDepthSkip(CustomDepthSkip);
 				CaptureScene();
 			}
@@ -2168,13 +2254,18 @@ void UTempoCamera::RenderCapture()
 		}
 	}
 
-	UpdateSharedExposure(bSingleTileFastPath, SingleActiveTile);
+	Sink.Command([this, bSingleTileFastPath, SingleActiveTile]()
+	{
+		UpdateSharedExposure(bSingleTileFastPath, SingleActiveTile);
+	});
 
 	if (!bSingleTileFastPath)
 	{
 		// Merge pass: a single full-screen Canvas draw that samples the proxy's tonemapped
 		// TextureTarget (via MergeMID's "ColorRT" parameter) and SharedAuxTextureTarget through
 		// the merge material and writes to SharedFinalTextureTarget.
+		Sink.Command([this]()
+		{
 		if (UMaterialInstanceDynamic* MergeMaterialInstance = GetOrCreateStitchMergeMID())
 		{
 			UCanvas* Canvas = nullptr;
@@ -2193,21 +2284,28 @@ void UTempoCamera::RenderCapture()
 
 			UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(this, Ctx);
 		}
+		});
 	}
 
 	// Staging copy + fence: lands behind the Canvas stitch in the render-thread FIFO.
-	FTextureRead::EnqueueStagingCopy(NewRead, SharedRTResource);
+	Sink.Command([NewRead, SharedRTResource]()
+	{
+		FTextureRead::EnqueueStagingCopy(NewRead, SharedRTResource);
+	});
 
 	// Publish the captured frame's id to the render thread for the video encoder. Queued behind the
 	// RT draws above, so by the time it runs SharedFinalTextureTarget holds this capture and
 	// OnRenderCompleted (also on the render thread) reads CapturedVideoSequenceId coherently — instead
 	// of the game-thread SequenceId, which races and could name a capture not yet rendered.
 	const int32 CapturedVideoSequenceIdThisFrame = SequenceId - 1;
-	ENQUEUE_RENDER_COMMAND(TempoCameraPublishVideoSequenceId)(
-		[this, CapturedVideoSequenceIdThisFrame](FRHICommandListImmediate&)
-		{
-			CapturedVideoSequenceId = CapturedVideoSequenceIdThisFrame;
-		});
+	Sink.Command([this, CapturedVideoSequenceIdThisFrame]()
+	{
+		ENQUEUE_RENDER_COMMAND(TempoCameraPublishVideoSequenceId)(
+			[this, CapturedVideoSequenceIdThisFrame](FRHICommandListImmediate&)
+			{
+				CapturedVideoSequenceId = CapturedVideoSequenceIdThisFrame;
+			});
+	});
 
 	TextureReadQueue.Enqueue(MoveTemp(NewRead));
 }

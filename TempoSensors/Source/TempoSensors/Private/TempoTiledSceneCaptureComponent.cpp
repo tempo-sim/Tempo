@@ -198,19 +198,27 @@ void UTempoTiledSceneCaptureComponent::MaybeMarkPendingCapture()
 
 void UTempoTiledSceneCaptureComponent::ExecutePendingCapture()
 {
+	if (ConsumePendingCapture())
+	{
+		RenderCapture();
+	}
+}
+
+bool UTempoTiledSceneCaptureComponent::ConsumePendingCapture()
+{
 	if (!bNeedsCapture)
 	{
-		return;
+		return false;
 	}
 	// Final guard: a property may have changed between MaybeMarkPendingCapture (which set
 	// bNeedsCapture) and this call. Keep bNeedsCapture set so the next frame's
 	// ExecutePendingCapture picks it up once ReconfigureTilesNow has resynced.
 	if (HasDetectedParameterChange())
 	{
-		return;
+		return false;
 	}
 	bNeedsCapture = false;
-	RenderCapture();
+	return true;
 }
 
 int32 UTempoTiledSceneCaptureComponent::GetMaxTextureQueueSize() const

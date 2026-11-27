@@ -6,6 +6,7 @@
 #include "SceneViewExtension.h"
 
 class FSceneInterface;
+class FSceneViewStateInterface;
 
 // Skips the custom depth pass of the captures rendered while it is active.
 //
@@ -28,6 +29,11 @@ public:
 	// the render whose custom depth pass should be skipped.
 	void SetActive(bool bInActive) { bActive = bInActive; }
 
+	// Game thread. Restricts the skip to the views of these view states, for a family that renders
+	// other cameras' views too. Empty: every view of the family. Ordered with the render commands
+	// that follow.
+	void SetViewStateFilter(TArray<const FSceneViewStateInterface*>&& ViewStates);
+
 	// Begin ISceneViewExtension
 	virtual void PreRenderView_RenderThread(FRDGBuilder& GraphBuilder, FSceneView& InView) override;
 	virtual void PreRenderBasePass_RenderThread(FRDGBuilder& GraphBuilder, bool bDepthBufferIsPopulated) override;
@@ -44,4 +50,10 @@ private:
 	// Render thread only. The views of the family being rendered, collected before visibility and
 	// marked after it.
 	TArray<FSceneView*> Views_RenderThread;
+
+	// Game thread copy, to skip re-sending an unchanged filter.
+	TArray<const FSceneViewStateInterface*> ViewStateFilter;
+
+	// Render thread only.
+	TArray<const FSceneViewStateInterface*> ViewStateFilter_RenderThread;
 };
