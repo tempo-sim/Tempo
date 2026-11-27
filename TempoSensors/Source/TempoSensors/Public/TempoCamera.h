@@ -758,9 +758,10 @@ protected:
 	// Queue the stitched HDR image just drawn for metering, tagged with the bias it rendered with.
 	void EnqueueExposureMeter();
 
-	// Step the exposure controller once per capture: from the light meter's readings in the
-	// multi-tile path, or seeded from the tile's own auto exposure in the fast path so a later switch
-	// into the multi-tile path starts at the exposure the scene already has.
+	// Step the exposure controller once per capture: before a multi-tile capture renders, from the
+	// light meter's readings through the capture before the previous one, or after a fast path
+	// capture, seeded from the tile's own auto exposure so a later switch into the multi-tile path
+	// starts at the exposure the scene already has.
 	void UpdateSharedExposure(bool bSingleTileFastPath, FTempoCameraTile* SingleActiveTile);
 
 	// Push the per-tile exposure settings (manual method at the shared bias, no physical camera,

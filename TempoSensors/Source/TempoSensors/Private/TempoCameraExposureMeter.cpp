@@ -3,6 +3,7 @@
 #include "TempoCameraExposureMeter.h"
 
 #include "Misc/ScopeLock.h"
+#include "RenderCommandFence.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 #include "RenderingThread.h"
@@ -38,7 +39,7 @@ void FTempoCameraExposureMeter::Enqueue(FTextureRenderTargetResource* Target, in
 	ENQUEUE_RENDER_COMMAND(TempoCameraExposureMeter)(
 		[Self = AsShared(), Target, Measurement, Settings](FRHICommandListImmediate& RHICmdList)
 		{
-			Self->Poll_RenderThread(Measurement.CaptureId);
+			Self->ReadBack_RenderThread(RHICmdList, Measurement.CaptureId - 1, Measurement.CaptureId);
 
 			FRHITexture* TargetTexture = Target->GetRenderTargetTexture();
 			if (!TargetTexture || Self->Pending.Num() >= MaxPending)
@@ -68,25 +69,28 @@ void FTempoCameraExposureMeter::Enqueue(FTextureRenderTargetResource* Target, in
 		});
 }
 
-void FTempoCameraExposureMeter::Poll_RenderThread(int64 NewestCaptureId)
+void FTempoCameraExposureMeter::ReadBack_RenderThread(FRHICommandListImmediate& RHICmdList, int64 ThroughCaptureId, int64 NewestCaptureId)
 {
 	check(IsInRenderingThread());
-
-	// Readbacks complete in submission order; stop at the first that hasn't.
 	int32 NumDone = 0;
 	for (; NumDone < Pending.Num(); ++NumDone)
 	{
 		FPending& Entry = Pending[NumDone];
-		if (!Entry.Readback->IsReady())
+		if (Entry.Measurement.CaptureId > ThroughCaptureId)
 		{
 			break;
 		}
-
+		if (!Entry.Readback->IsReady())
+		{
+			// Usually already done on the GPU (the capture rendered a capture period ago); polling
+			// alone may not see it until the RHI next processes completed work.
+			TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraExposureMeterWait);
+			Entry.Readback->Wait(RHICmdList, FRHIGPUMask::All());
+		}
 		const uint32* Histogram = static_cast<const uint32*>(Entry.Readback->Lock(TempoExposureHistogramSize * sizeof(uint32)));
 		float Luminance = 0.0f;
 		const bool bValid = Histogram && AverageLuminance(Histogram, Entry.Settings, Luminance);
 		Entry.Readback->Unlock();
-
 		if (bValid)
 		{
 			Entry.Measurement.MeasuredLuminance = Luminance;
@@ -97,13 +101,38 @@ void FTempoCameraExposureMeter::Poll_RenderThread(int64 NewestCaptureId)
 		FreeReadbacks.Add(Entry.Readback);
 	}
 	Pending.RemoveAt(0, NumDone, EAllowShrinking::No);
+	if (ThroughCaptureId > ReadBackThroughCaptureId.load())
+	{
+		ReadBackThroughCaptureId.store(ThroughCaptureId);
+	}
 }
 
-void FTempoCameraExposureMeter::Consume(TArray<FMeasurement>& Out)
+void FTempoCameraExposureMeter::ConsumeThrough(int64 CaptureId, TArray<FMeasurement>& Out)
 {
+	check(IsInGameThread());
+	if (ReadBackThroughCaptureId.load() < CaptureId)
+	{
+		// The render thread hasn't metered the capture after CaptureId yet; read back through it now.
+		TRACE_CPUPROFILER_EVENT_SCOPE(TempoCameraExposureMeterConsumeWait);
+		ENQUEUE_RENDER_COMMAND(TempoCameraExposureMeterReadBack)(
+			[Self = AsShared(), CaptureId](FRHICommandListImmediate& RHICmdList)
+			{
+				Self->ReadBack_RenderThread(RHICmdList, CaptureId, CaptureId);
+			});
+		FRenderCommandFence Fence;
+		Fence.BeginFence();
+		Fence.Wait();
+	}
+
 	FScopeLock Lock(&CompletedLock);
-	Out = MoveTemp(Completed);
-	Completed.Reset();
+	int32 Num = 0;
+	while (Num < Completed.Num() && Completed[Num].CaptureId <= CaptureId)
+	{
+		++Num;
+	}
+	Out.Reset();
+	Out.Append(Completed.GetData(), Num);
+	Completed.RemoveAt(0, Num, EAllowShrinking::No);
 }
 
 bool FTempoCameraExposureMeter::AverageLuminance(const uint32* Histogram, const FSettings& Settings, float& OutLuminance)

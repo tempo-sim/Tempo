@@ -4,8 +4,10 @@
 
 #include "CoreMinimal.h"
 #include "HAL/CriticalSection.h"
+#include <atomic>
 #include "TempoExposureHistogram.h"
 
+class FRHICommandListImmediate;
 class FRHIGPUBufferReadback;
 class FTextureRenderTargetResource;
 
@@ -18,8 +20,12 @@ class FTextureRenderTargetResource;
 // assumed capture is wrong whenever the assumption is, and at a fast adaptation speed oscillates.
 // Here every measurement carries the exposure its image was rendered with.
 //
-// Enqueue and Consume are game thread calls; the readbacks are created, polled and read on the
-// render thread only. Render commands hold a reference, so the meter outlives any in flight.
+// Readings are consumed at a fixed lag: each capture's metering first reads back every earlier
+// capture's, waiting for the GPU if it has to, so a caller asking for the readings through a capture
+// before the newest gets exactly those, however far the GPU and the render thread have got.
+//
+// Enqueue and ConsumeThrough are game thread calls; the readbacks are created, waited on and read on
+// the render thread only. Render commands hold a reference, so the meter outlives any in flight.
 class FTempoCameraExposureMeter : public TSharedFromThis<FTempoCameraExposureMeter, ESPMode::ThreadSafe>
 {
 public:
@@ -50,8 +56,10 @@ public:
 	// order, so it measures whatever was drawn into Target before this call.
 	void Enqueue(FTextureRenderTargetResource* Target, int64 CaptureId, float AppliedBias, double CaptureTime, const FSettings& Settings);
 
-	// Move out every measurement read back since the last call, oldest first.
-	void Consume(TArray<FMeasurement>& Out);
+	// Move out the measurements of every capture up to and including CaptureId not yet moved out,
+	// oldest first. If the render thread hasn't read them all back yet, waits for it to. A capture that
+	// was not metered, or whose histogram was empty, has none.
+	void ConsumeThrough(int64 CaptureId, TArray<FMeasurement>& Out);
 
 	// ComputeAverageLuminanceWithoutOutlier over a read-back histogram.
 	static bool AverageLuminance(const uint32* Histogram, const FSettings& Settings, float& OutLuminance);
@@ -64,8 +72,9 @@ private:
 		FSettings Settings;
 	};
 
-	// Read back every finished histogram, in order. Render thread.
-	void Poll_RenderThread(int64 NewestCaptureId);
+	// Read back the histograms of every capture up to and including ThroughCaptureId, in order,
+	// waiting for the GPU to finish any that it hasn't. Render thread.
+	void ReadBack_RenderThread(FRHICommandListImmediate& RHICmdList, int64 ThroughCaptureId, int64 NewestCaptureId);
 
 	// Render thread only.
 	TArray<FPending> Pending;
@@ -76,4 +85,6 @@ private:
 
 	FCriticalSection CompletedLock;
 	TArray<FMeasurement> Completed;
+	// Every capture up to this one has been read back (or will never be). Written on the render thread.
+	std::atomic<int64> ReadBackThroughCaptureId = 0;
 };
