@@ -160,10 +160,12 @@ void UTempoSensorServiceSubsystem::OnWorldTickEnd(UWorld* World, ELevelTick Tick
 	// stepping between frames waits for a between-frames poll, whose command joins the render FIFO
 	// behind every capture of this frame, as long as the whole frame takes to encode.
 	EnqueueReadbackPoll(Sensors);
-	const int32 MaxViewsPerFamily = GetDefault<UTempoSensorsSettings>()->GetMaxCamerasPerViewFamily();
-	if (MaxViewsPerFamily >= 2 && World->Scene)
+	const UTempoSensorsSettings* SensorsSettings = GetDefault<UTempoSensorsSettings>();
+	const int32 MaxViewsPerFamily = SensorsSettings->GetMaxCamerasPerViewFamily();
+	const int32 MaxTiledCamerasPerFamily = SensorsSettings->GetMaxTiledCamerasPerViewFamily();
+	if ((MaxViewsPerFamily >= 2 || MaxTiledCamerasPerFamily >= 2) && World->Scene)
 	{
-		RenderCapturesGrouped(World->Scene, Sensors, MaxViewsPerFamily);
+		RenderCapturesGrouped(World->Scene, Sensors, MaxViewsPerFamily, MaxTiledCamerasPerFamily);
 	}
 	else
 	{
@@ -212,6 +214,10 @@ namespace
 	constexpr int32 GroupSlotAlignment = 128;
 	constexpr int32 GroupSlotGuard = 64;
 	constexpr int32 GroupAtlasColumns = 2;
+
+	// Multi-tile cameras' tile atlases are blocks of their family's atlas, packed left to right in rows
+	// no wider than this (a wider block gets a row of its own), at offsets aligned like the slots.
+	constexpr int32 TiledGroupAtlasMaxRowWidth = 4096;
 
 	// Smallest family to form. With exactly two views Lumen keeps one view origin per view, and in
 	// 5.8 hardware-ray-traced radiosity then traces the second view's surface cache tiles in that
@@ -297,25 +303,48 @@ void UTempoSensorServiceSubsystem::ResetLumenSceneOwners()
 	LumenSceneOwners.Reset();
 }
 
-void UTempoSensorServiceSubsystem::RenderCapturesGrouped(FSceneInterface* Scene, TConstArrayView<ITempoSensorInterface*> Sensors, int32 MaxViews)
+void UTempoSensorServiceSubsystem::RenderCapturesGrouped(FSceneInterface* Scene, TConstArrayView<ITempoSensorInterface*> Sensors, int32 MaxViews, int32 MaxTiledCameras)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(TempoSensorsRenderCapturesGrouped);
-	if (MaxViews != LastMaxViews)
+	if (MaxViews != LastMaxViews || MaxTiledCameras != LastMaxTiledCameras)
 	{
 		// Slots, and with them atlas sizes, depend on the family size.
 		LastMaxViews = MaxViews;
+		LastMaxTiledCameras = MaxTiledCameras;
 		GroupSlots.Reset();
 		Groups.Reset();
+	}
+	// A camera that switched between the single-tile and the multi-tile path since it was grouped
+	// would land in a group of the other kind; start the groups over.
+	for (ITempoSensorInterface* Sensor : Sensors)
+	{
+		UTempoCamera* Camera = Cast<UTempoCamera>(Sensor);
+		const FGroupSlot* Slot = Camera ? GroupSlots.Find(Camera) : nullptr;
+		if (Slot && Groups[Slot->Group].bTiled == Camera->IsSingleTileFastPath())
+		{
+			GroupSlots.Reset();
+			Groups.Reset();
+			break;
+		}
 	}
 
 	// A camera keeps its group and slot from frame to frame, so its view keeps its place in the
 	// scene textures (its temporal history depends on it). A camera joins the newest group of its
 	// actor that has room, if that group's first camera is close enough, or starts a new one.
+	// Single-tile cameras and multi-tile cameras group separately: a single-tile camera is one view
+	// rendered straight into its final target, a multi-tile camera all of its tiles rendered into its
+	// HDR tile atlas.
 	TArray<UTempoCamera*> Candidates;
 	for (ITempoSensorInterface* Sensor : Sensors)
 	{
 		UTempoCamera* Camera = Cast<UTempoCamera>(Sensor);
-		if (!Camera || !Sensor->HasPendingCapture() || !Camera->IsSingleTileFastPath() || !Camera->GetOwner())
+		if (!Camera || !Sensor->HasPendingCapture() || !Camera->GetOwner())
+		{
+			continue;
+		}
+		const bool bTiled = !Camera->IsSingleTileFastPath();
+		const int32 MaxSlots = bTiled ? MaxTiledCameras : MaxViews;
+		if (MaxSlots < 2 || (bTiled && !Camera->GetTilesTextureTarget()))
 		{
 			continue;
 		}
@@ -325,10 +354,10 @@ void UTempoSensorServiceSubsystem::RenderCapturesGrouped(FSceneInterface* Scene,
 			for (int32 Index = Groups.Num() - 1; Index >= 0; --Index)
 			{
 				const FCameraGroup& Group = Groups[Index];
-				if (Group.Owner.Get() == Camera->GetOwner())
+				if (Group.Owner.Get() == Camera->GetOwner() && Group.bTiled == bTiled)
 				{
 					const UTempoCamera* First = Group.First.Get();
-					if (Group.NumSlots < MaxViews && First
+					if (Group.NumSlots < MaxSlots && First
 						&& FVector::Dist(First->GetComponentLocation(), Camera->GetComponentLocation()) <= MaxGroupedCameraSeparation)
 					{
 						GroupIndex = Index;
@@ -342,13 +371,17 @@ void UTempoSensorServiceSubsystem::RenderCapturesGrouped(FSceneInterface* Scene,
 				FCameraGroup& NewGroup = Groups.AddDefaulted_GetRef();
 				NewGroup.Owner = Camera->GetOwner();
 				NewGroup.First = Camera;
+				NewGroup.bTiled = bTiled;
 			}
-			GroupSlots.Add(Camera, { GroupIndex, Groups[GroupIndex].NumSlots++ });
+			FCameraGroup& Group = Groups[GroupIndex];
+			GroupSlots.Add(Camera, { GroupIndex, Group.NumSlots++ });
+			Group.Members.Add(Camera);
 		}
 		Candidates.Add(Camera);
 	}
 
-	// The cameras that render in a family this frame: at least GetMinViewsPerFamily of a group.
+	// The cameras that render in a family this frame: at least GetMinViewsPerFamily of a single-tile
+	// group, at least two of a multi-tile group (which RenderTiledFamily checks for enough views).
 	const int32 MinViews = GetMinViewsPerFamily();
 	TMap<int32, TArray<UTempoCamera*>> Families;
 	for (UTempoCamera* Camera : Candidates)
@@ -357,7 +390,7 @@ void UTempoSensorServiceSubsystem::RenderCapturesGrouped(FSceneInterface* Scene,
 	}
 	for (auto It = Families.CreateIterator(); It; ++It)
 	{
-		if (It.Value().Num() < MinViews)
+		if (It.Value().Num() < (Groups[It.Key()].bTiled ? 2 : MinViews))
 		{
 			It.RemoveCurrent();
 		}
@@ -377,9 +410,9 @@ void UTempoSensorServiceSubsystem::RenderCapturesGrouped(FSceneInterface* Scene,
 		TArray<UTempoCamera*>* Family = Slot ? Families.Find(Slot->Group) : nullptr;
 		if (!Family)
 		{
-			if (Camera && Camera->IsSingleTileFastPath())
+			if (Camera && (Camera->IsSingleTileFastPath() || LumenSceneOwners.Contains(Camera)))
 			{
-				// Its view state may still trace another camera's Lumen scene from an earlier family render.
+				// Its view states may still trace another camera's Lumen scene from an earlier family render.
 				SetLumenSceneOwner(Camera, nullptr);
 			}
 			Sensor->ExecutePendingCapture();
@@ -391,7 +424,14 @@ void UTempoSensorServiceSubsystem::RenderCapturesGrouped(FSceneInterface* Scene,
 			continue;
 		}
 		Rendered.Add(Slot->Group);
-		RenderFamily(Scene, Slot->Group, *Family, MaxViews);
+		if (Groups[Slot->Group].bTiled)
+		{
+			RenderTiledFamily(Scene, Slot->Group, *Family);
+		}
+		else
+		{
+			RenderFamily(Scene, Slot->Group, *Family, MaxViews);
+		}
 		EnqueueReadbackPoll(Sensors);
 	}
 }
@@ -480,6 +520,206 @@ void UTempoSensorServiceSubsystem::RenderFamily(FSceneInterface* Scene, int32 Gr
 		Member.Camera->FinishCapture(*Member.Prepared, Sink);
 	}
 	Builder->Execute();
+}
+
+bool UTempoSensorServiceSubsystem::CanShareTiledFamily(UTempoCamera* Primary, UTempoCamera* Camera, const FTempoCameraPreparedCapture& PrimaryPrepared, const FTempoCameraPreparedCapture& Prepared)
+{
+	// As CanShareFamily, for the cameras' tile atlases (their sizes may differ: each is its own block).
+	const UTextureRenderTarget2D* A = Primary->GetTilesTextureTarget();
+	const UTextureRenderTarget2D* B = Camera->GetTilesTextureTarget();
+	return A && B
+		&& !PrimaryPrepared.bSingleTileFastPath && !Prepared.bSingleTileFastPath
+		&& A->GetFormat() == B->GetFormat()
+		&& A->TargetGamma == B->TargetGamma
+		&& A->IsSRGB() == B->IsSRGB()
+		&& FMath::IsNearlyEqual(PrimaryPrepared.ResolutionFraction, Prepared.ResolutionFraction)
+		&& Primary->ShowFlags.ToString() == Camera->ShowFlags.ToString()
+		&& Primary->CompositeMode == Camera->CompositeMode
+		&& Primary->bCaptureEveryFrame == Camera->bCaptureEveryFrame
+		&& Primary->bAlwaysPersistRenderingState == Camera->bAlwaysPersistRenderingState
+		&& Primary->bUseRayTracingIfEnabled == Camera->bUseRayTracingIfEnabled
+		&& Primary->SceneViewExtensions.IsEmpty() && Camera->SceneViewExtensions.IsEmpty()
+		&& !Primary->IsUnlit() && !Camera->IsUnlit()
+		&& FVector::Dist(Primary->GetComponentLocation(), Camera->GetComponentLocation()) <= MaxGroupedCameraSeparation;
+}
+
+void UTempoSensorServiceSubsystem::RenderTiledFamily(FSceneInterface* Scene, int32 GroupIndex, TConstArrayView<UTempoCamera*> Cameras)
+{
+	TUniquePtr<ISceneRenderBuilder> Builder = ISceneRenderBuilder::Create(Scene);
+	if (!Builder.IsValid())
+	{
+		return;
+	}
+
+	struct FMember
+	{
+		UTempoCamera* Camera = nullptr;
+		TUniquePtr<FTempoCameraPreparedCapture> Prepared;
+	};
+	TArray<FMember> Members;
+	TArray<FMember> Alone;
+	int32 NumViews = 0;
+	for (UTempoCamera* Camera : Cameras)
+	{
+		if (!Camera->ConsumePendingCapture())
+		{
+			continue;
+		}
+		TUniquePtr<FTempoCameraPreparedCapture> Prepared = MakeUnique<FTempoCameraPreparedCapture>();
+		if (!Camera->PrepareCapture(*Prepared))
+		{
+			continue;
+		}
+		if (Prepared->bSingleTileFastPath || (!Members.IsEmpty() && !CanShareTiledFamily(Members[0].Camera, Camera, *Members[0].Prepared, *Prepared)))
+		{
+			Alone.Add({ Camera, MoveTemp(Prepared) });
+			continue;
+		}
+		NumViews += Prepared->ViewSetups.Num();
+		Members.Add({ Camera, MoveTemp(Prepared) });
+	}
+	if (Members.Num() < 2 || NumViews < GetMinViewsPerFamily())
+	{
+		Alone.Append(MoveTemp(Members));
+		Members.Reset();
+	}
+	for (FMember& Member : Alone)
+	{
+		// Renders alone, as it would without grouping.
+		SetLumenSceneOwner(Member.Camera, nullptr);
+		TempoMultiViewCapture::FCaptureSink Immediate;
+		Member.Camera->RenderPreparedCapture(*Member.Prepared, Immediate);
+	}
+	if (Members.IsEmpty())
+	{
+		return;
+	}
+
+	// The family's Lumen scene is its first view's: Lumen places it at that view and updates it for
+	// that view alone (a family of more than two views takes its single-origin path), and every view
+	// traces it. A camera whose view is not first can differ from its own render where it sees
+	// surfaces lit from that scene, so the first camera is the one nearest to all the others: the
+	// member whose farthest fellow member is closest (the earliest slot among equals).
+	const TArray<TWeakObjectPtr<UTempoCamera>>& GroupMembers = Groups[GroupIndex].Members;
+	const UTempoCamera* Central = nullptr;
+	{
+		double BestFarthest = TNumericLimits<double>::Max();
+		for (const TWeakObjectPtr<UTempoCamera>& Weak : GroupMembers)
+		{
+			const UTempoCamera* Camera = Weak.Get();
+			if (!Camera)
+			{
+				continue;
+			}
+			double Farthest = 0.0;
+			for (const TWeakObjectPtr<UTempoCamera>& Other : GroupMembers)
+			{
+				if (const UTempoCamera* OtherCamera = Other.Get())
+				{
+					Farthest = FMath::Max(Farthest, FVector::Dist(Camera->GetComponentLocation(), OtherCamera->GetComponentLocation()));
+				}
+			}
+			if (Farthest < BestFarthest)
+			{
+				BestFarthest = Farthest;
+				Central = Camera;
+			}
+		}
+	}
+	if (const int32 CentralIndex = Members.IndexOfByPredicate([Central](const FMember& Member) { return Member.Camera == Central; }); CentralIndex > 0)
+	{
+		Members.Swap(0, CentralIndex);
+	}
+
+	// Each camera's tile atlas is one block of the family's atlas, placed by the group's members,
+	// whether or not they capture this frame, so a camera's block stays where it is: the first camera's
+	// at the origin, then the others in slot order.
+	TMap<const UTempoCamera*, FIntPoint> Offsets;
+	FIntPoint AtlasSize = FIntPoint::ZeroValue;
+	{
+		TArray<const UTempoCamera*> Order;
+		if (Central)
+		{
+			Order.Add(Central);
+		}
+		for (const TWeakObjectPtr<UTempoCamera>& Weak : GroupMembers)
+		{
+			if (const UTempoCamera* Camera = Weak.Get(); Camera && Camera != Central)
+			{
+				Order.Add(Camera);
+			}
+		}
+		FIntPoint Cursor = FIntPoint::ZeroValue;
+		int32 RowHeight = 0;
+		for (const UTempoCamera* Camera : Order)
+		{
+			const UTextureRenderTarget2D* Tiles = Camera->GetTilesTextureTarget();
+			if (!Tiles)
+			{
+				continue;
+			}
+			const FIntPoint Size(Tiles->SizeX, Tiles->SizeY);
+			if (Cursor.X > 0 && Cursor.X + Size.X > TiledGroupAtlasMaxRowWidth)
+			{
+				Cursor = FIntPoint(0, Cursor.Y + RowHeight);
+				RowHeight = 0;
+			}
+			Offsets.Add(Camera, Cursor);
+			AtlasSize = AtlasSize.ComponentMax(Cursor + Size);
+			Cursor.X += Align(Size.X + GroupSlotGuard, GroupSlotAlignment);
+			RowHeight = FMath::Max(RowHeight, Align(Size.Y + GroupSlotGuard, GroupSlotAlignment));
+		}
+	}
+	UTextureRenderTarget2D* Atlas = GetGroupAtlas(GroupIndex, Members[0].Camera->GetTilesTextureTarget(), AtlasSize);
+
+	TArray<TempoMultiViewCapture::FViewSetup> Views;
+	TArray<TempoMultiViewCapture::FAtlasRectCopy> Copies;
+	TArray<FEngineShowFlags> SavedShowFlags;
+	FSceneViewStateInterface* LumenOwner = Members[0].Prepared->ViewSetups[0].ViewState;
+	float MaxExtrapolationFactor = 1.0f;
+	for (FMember& Member : Members)
+	{
+		const FIntPoint Offset = Offsets.FindRef(Member.Camera);
+		// A camera's tiles share its first tile's exposure, as when it renders alone.
+		FSceneViewStateInterface* ExposureViewState = Member.Prepared->ViewSetups[0].ViewState;
+		for (const TempoMultiViewCapture::FViewSetup& Setup : Member.Prepared->ViewSetups)
+		{
+			TempoMultiViewCapture::FViewSetup& View = Views.Add_GetRef(Setup);
+			View.ViewRect += Offset;
+			View.ExposureViewState = ExposureViewState;
+			View.OwnerComponent = Member.Camera;
+		}
+		UTextureRenderTarget2D* Tiles = Member.Camera->GetTilesTextureTarget();
+		Copies.Add({ FIntRect(Offset, Offset + FIntPoint(Tiles->SizeX, Tiles->SizeY)), Tiles });
+		// Lumen updates only the first view's scene in a family; every view traces that one.
+		SetLumenSceneOwner(Member.Camera, LumenOwner);
+		MaxExtrapolationFactor = FMath::Max(MaxExtrapolationFactor, Member.Prepared->MaxExtrapolationFactor);
+		SavedShowFlags.Add(Member.Camera->ShowFlags);
+		Member.Camera->ApplyTileShowFlags();
+		Member.Camera->SetCaptureExtensionsActive(*Member.Prepared, true, true);
+	}
+	{
+		TempoMultiViewCapture::FScopedVolumetricFogHistoryRescale ScopedFogHistory(MaxExtrapolationFactor, Builder.Get());
+		TempoMultiViewCapture::AddTilesRenderer(*Builder, Scene, Members[0].Camera, Atlas, Views, ESceneCaptureSource::SCS_FinalColorHDR,
+			Members[0].Prepared->ResolutionFraction, Copies);
+	}
+	for (int32 Index = 0; Index < Members.Num(); ++Index)
+	{
+		Members[Index].Camera->SetCaptureExtensionsActive(*Members[Index].Prepared, false, true);
+		Members[Index].Camera->ShowFlags = SavedShowFlags[Index];
+	}
+	Builder->Execute();
+
+	// Then each camera's stitch, exposure meter, proxy and read, in that order, as when it renders
+	// alone. A multi-tile camera renders its proxy at once, not through a sink, so the stitch it
+	// reads must already be queued behind the family's render.
+	Members.Sort([&Cameras](const FMember& A, const FMember& B) { return Cameras.IndexOfByKey(A.Camera) < Cameras.IndexOfByKey(B.Camera); });
+	for (FMember& Member : Members)
+	{
+		TempoMultiViewCapture::FCaptureSink Immediate;
+		Member.Camera->AddStitch(Immediate);
+		Member.Camera->FinishCapture(*Member.Prepared, Immediate);
+	}
 }
 
 void UTempoSensorServiceSubsystem::OnWorldTickStart(UWorld* World, ELevelTick TickType, float DeltaSeconds)

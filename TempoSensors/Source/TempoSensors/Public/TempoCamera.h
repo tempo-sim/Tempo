@@ -435,6 +435,13 @@ public:
 	void ForEachViewState(TFunctionRef<void(FSceneViewStateInterface*)> Callback);
 	// The target the fast path renders into and the readback copies from.
 	UTextureRenderTarget2D* GetFinalTextureTarget() const { return SharedFinalTextureTarget; }
+	// The multi-tile path's pieces, for a caller that renders several multi-tile cameras' tiles as the
+	// views of one family: the HDR atlas the tiles render into, the show flags they render with (the
+	// camera's own, minus the effects the proxy applies once to the stitched image), and the stitch of
+	// the atlas into the camera's HDR image with its exposure meter.
+	UTextureRenderTarget2D* GetTilesTextureTarget() const { return SharedTextureTarget; }
+	void ApplyTileShowFlags();
+	void AddStitch(TempoMultiViewCapture::FCaptureSink& Sink);
 
 protected:
 	// Whether to capture this frame: a request is waiting, or one has been since the last capture. See

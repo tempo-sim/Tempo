@@ -2004,13 +2004,7 @@ void UTempoCamera::RenderPreparedCapture(FTempoCameraPreparedCapture& P, TempoMu
 		// remain set for the tiles: the engine only honors their AutoExposureBias, and only computes
 		// a PreExposure for them, while it is. Manual exposure is what stops them from adapting.
 		const FEngineShowFlags SavedShowFlags = ShowFlags;
-		ShowFlags.SetLocalExposure(false);
-		ShowFlags.SetMotionBlur(false);
-		ShowFlags.SetLensFlares(false);
-		ShowFlags.SetBloom(false);
-		ShowFlags.SetColorGrading(false);
-		ShowFlags.SetVignette(false);
-		ShowFlags.SetDepthOfField(false);
+		ApplyTileShowFlags();
 
 		{
 			TempoMultiViewCapture::FScopedVolumetricFogHistoryRescale ScopedFogHistory(MaxExtrapolationFactor, Sink.GetBuilder());
@@ -2021,39 +2015,55 @@ void UTempoCamera::RenderPreparedCapture(FTempoCameraPreparedCapture& P, TempoMu
 
 		ShowFlags = SavedShowFlags;
 
-		// Stitch + feather pass: resolves the per-tile distorted atlas into a single equidistant
-		// HDR image (SharedStitchHDRTextureTarget, sized SizeXY). The resolve map drives where to
-		// sample the atlas and how to blend across overlapping tile coverage near seams. The proxy
-		// capture below reads this RT (via HDRColorRT) as scene color before bloom/AE/tonemap.
-		if (SharedStitchHDRTextureTarget)
-		{
-			Sink.Command([this]()
-			{
-			if (UMaterialInstanceDynamic* StitchMID = GetOrCreateStitchColorMID())
-			{
-				UCanvas* Canvas = nullptr;
-				FVector2D CanvasSize(0.0, 0.0);
-				FDrawToRenderTargetContext Ctx;
-				UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(this, SharedStitchHDRTextureTarget, Canvas, CanvasSize, Ctx);
-
-				FCanvasTileItem Item(
-					FVector2D::ZeroVector,
-					StitchMID->GetRenderProxy(),
-					FVector2D(SizeXY.X, SizeXY.Y),
-					FVector2D(0.0, 0.0),
-					FVector2D(1.0, 1.0));
-				Item.BlendMode = SE_BLEND_Opaque;
-				Canvas->DrawItem(Item);
-
-				UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(this, Ctx);
-
-				EnqueueExposureMeter();
-			}
-			});
-		}
+		AddStitch(Sink);
 	}
 
 	FinishCapture(P, Sink);
+}
+
+void UTempoCamera::ApplyTileShowFlags()
+{
+	ShowFlags.SetLocalExposure(false);
+	ShowFlags.SetMotionBlur(false);
+	ShowFlags.SetLensFlares(false);
+	ShowFlags.SetBloom(false);
+	ShowFlags.SetColorGrading(false);
+	ShowFlags.SetVignette(false);
+	ShowFlags.SetDepthOfField(false);
+}
+
+void UTempoCamera::AddStitch(TempoMultiViewCapture::FCaptureSink& Sink)
+{
+	// Stitch + feather pass: resolves the per-tile distorted atlas into a single equidistant
+	// HDR image (SharedStitchHDRTextureTarget, sized SizeXY). The resolve map drives where to
+	// sample the atlas and how to blend across overlapping tile coverage near seams. The proxy
+	// capture below reads this RT (via HDRColorRT) as scene color before bloom/AE/tonemap.
+	if (SharedStitchHDRTextureTarget)
+	{
+		Sink.Command([this]()
+		{
+		if (UMaterialInstanceDynamic* StitchMID = GetOrCreateStitchColorMID())
+		{
+			UCanvas* Canvas = nullptr;
+			FVector2D CanvasSize(0.0, 0.0);
+			FDrawToRenderTargetContext Ctx;
+			UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(this, SharedStitchHDRTextureTarget, Canvas, CanvasSize, Ctx);
+
+			FCanvasTileItem Item(
+				FVector2D::ZeroVector,
+				StitchMID->GetRenderProxy(),
+				FVector2D(SizeXY.X, SizeXY.Y),
+				FVector2D(0.0, 0.0),
+				FVector2D(1.0, 1.0));
+			Item.BlendMode = SE_BLEND_Opaque;
+			Canvas->DrawItem(Item);
+
+			UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(this, Ctx);
+
+			EnqueueExposureMeter();
+		}
+		});
+	}
 }
 
 void UTempoCamera::FinishCapture(FTempoCameraPreparedCapture& P, TempoMultiViewCapture::FCaptureSink& Sink)
