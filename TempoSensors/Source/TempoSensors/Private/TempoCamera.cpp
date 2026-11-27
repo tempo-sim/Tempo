@@ -769,6 +769,7 @@ void TTextureRead<FCameraPixelWithDepth>::RespondToRequests(const TArray<FColorI
 
 UTempoCamera::UTempoCamera()
 {
+	LaunchHandle->Camera = this;
 	PrimaryComponentTick.bCanEverTick = true;
 	MeasurementTypes = { EMeasurementType::COLOR_IMAGE, EMeasurementType::LABEL_IMAGE, EMeasurementType::DEPTH_IMAGE, EMeasurementType::BOUNDING_BOXES, EMeasurementType::VIDEO };
 	bAutoActivate = true;
@@ -1307,8 +1308,8 @@ TFuture<void> UTempoCamera::DecodeAndRespond(TSharedPtr<FTextureRead> TextureRea
 
 void UTempoCamera::LaunchDecodeForCompletedRead_RenderThread()
 {
-	// One decode at a time per camera keeps a stream's responses in capture order; the game thread's
-	// send picks the read up at its next poll if this one is still running.
+	// Render thread or readback watcher. One decode at a time per camera keeps a stream's responses in
+	// capture order; the game thread's send picks the read up at its next poll if this one is still running.
 	if (DecodesInFlight->load() != 0 || !TextureReadQueue.HeadIsReadAndUnclaimed())
 	{
 		return;
@@ -1381,6 +1382,15 @@ void UTempoCamera::WaitForDecodes()
 	{
 		Decode.Wait();
 	}
+}
+
+void UTempoCamera::BeginDestroy()
+{
+	{
+		FScopeLock Lock(&LaunchHandle->Lock);
+		LaunchHandle->Camera = nullptr;
+	}
+	Super::BeginDestroy();
 }
 
 // ------------------------------------------------------------------------------------
@@ -2017,6 +2027,21 @@ void UTempoCamera::RenderCapture()
 	}
 
 	NewRead->StagingTexture = AcquireNextStagingTexture();
+
+	// The readback watcher reads this off the render thread and launches the decode straight away,
+	// through the camera's handle, instead of leaving it to the render thread's next poll or the game
+	// thread's next send. While a client steps, neither runs until the step it is running ends.
+	NewRead->OnReadCompleteOffRenderThread = [Handle = TWeakPtr<FLaunchHandle>(LaunchHandle)](const TSharedRef<FTextureRead>&)
+	{
+		if (const TSharedPtr<FLaunchHandle> Pinned = Handle.Pin())
+		{
+			FScopeLock Lock(&Pinned->Lock);
+			if (Pinned->Camera)
+			{
+				Pinned->Camera->LaunchDecodeForCompletedRead_RenderThread();
+			}
+		}
+	};
 
 	{
 		// SequenceId under the lock: a request can arrive off the game thread (the ROS bridge asks again

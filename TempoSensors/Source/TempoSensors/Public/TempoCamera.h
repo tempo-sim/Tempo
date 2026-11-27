@@ -404,10 +404,13 @@ protected:
 		TArray<FColorImageRequest> ColorRequests, TArray<FLabelImageRequest> LabelRequests,
 		TArray<FDepthImageRequest> DepthRequests, TArray<FBoundingBoxesRequest> BoundingBoxRequests, double TransmissionTime);
 
-	// Render thread, after a read completed: launch its decode now, with the requests waiting for it,
-	// instead of at the game thread's next poll (which is the next step's end while a client steps).
+	// Render thread, or the readback watcher's thread right after it read one of this camera's
+	// reads: launch the decode of the head read now, with the requests waiting for it, instead of at
+	// the game thread's next poll (which is the next step's end while a client steps).
 	void LaunchDecodeForCompletedRead_RenderThread();
 	virtual void WaitForDecodes() override;
+
+	virtual void BeginDestroy() override;
 
 	// Begin UTempoTiledSceneCaptureComponent tile interface
 	virtual void SyncTiles() override;
@@ -598,8 +601,18 @@ protected:
 	// The world time at the game thread's latest send: the transmission time of a decode the render
 	// thread launches before the next one.
 	double LastSendTimeSeconds = 0.0;
-	// Decodes launched from the render thread, waited on by the game thread at the frame's send.
+	// Decodes launched from the render thread or the readback watcher, waited on by the game thread at
+	// the frame's send.
 	TArray<TFuture<void>> RenderThreadDecodes;
+	// The camera's liveness for the readback watcher: each read holds it weakly and the watcher launches
+	// the decode through it; BeginDestroy clears Camera under the lock, so a launch in progress finishes
+	// before the camera goes.
+	struct FLaunchHandle
+	{
+		FCriticalSection Lock;
+		UTempoCamera* Camera = nullptr;
+	};
+	TSharedRef<FLaunchHandle> LaunchHandle = MakeShared<FLaunchHandle>();
 	// Decodes of this camera in flight, from either thread: a stream's responses stay in capture
 	// order because the next decode is launched only when this is zero.
 	TSharedRef<std::atomic<int32>> DecodesInFlight = MakeShared<std::atomic<int32>>(0);
