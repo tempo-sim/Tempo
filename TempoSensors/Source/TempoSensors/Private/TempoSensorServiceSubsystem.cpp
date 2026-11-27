@@ -396,8 +396,10 @@ void UTempoSensorServiceSubsystem::RenderCapturesGrouped(FSceneInterface* Scene,
 		}
 	}
 
-	// Sensors render in their order; a family renders where its first member comes, through a scene
-	// render builder of its own, as every other capture does.
+	// Sensors render in their order, each family through a scene render builder of its own, as every
+	// other capture does. A single-tile family renders where its first member comes. A multi-tile
+	// family renders where its last member comes: it is the largest render of the frame, so the
+	// cameras ordered between its members then reach the GPU ahead of it instead of queueing behind it.
 	TSet<int32> Rendered;
 	for (ITempoSensorInterface* Sensor : Sensors)
 	{
@@ -419,7 +421,7 @@ void UTempoSensorServiceSubsystem::RenderCapturesGrouped(FSceneInterface* Scene,
 			EnqueueReadbackPoll(Sensors);
 			continue;
 		}
-		if (Rendered.Contains(Slot->Group))
+		if (Rendered.Contains(Slot->Group) || (Groups[Slot->Group].bTiled && Camera != Family->Last()))
 		{
 			continue;
 		}
