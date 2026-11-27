@@ -144,11 +144,19 @@ void UTempoSensorServiceSubsystem::OnWorldTickEnd(UWorld* World, ELevelTick Tick
 		}
 	}
 
+	// The lidars without color first, then every other sensor in its usual order. Such a lidar renders
+	// no lighting, so its capture is short on the render thread and the GPU, and a client takes its
+	// sweep as soon as it is read back; recorded behind the cameras, it was read back only after every
+	// camera's frame. It touches none of the lighting state the cameras' captures share, so what each
+	// capture renders, and the order of the cameras among themselves, is unchanged.
 	TArray<ITempoSensorInterface*> Sensors;
-	ForEachActiveSensor([&Sensors](ITempoSensorInterface* Sensor)
+	TArray<ITempoSensorInterface*> OtherSensors;
+	ForEachActiveSensor([&Sensors, &OtherSensors](ITempoSensorInterface* Sensor)
 	{
-		Sensors.Add(Sensor);
+		const UTempoLidar* Lidar = Cast<UTempoLidar>(Sensor);
+		(Lidar && !Lidar->IsColorEnabled() ? Sensors : OtherSensors).Add(Sensor);
 	});
+	Sensors.Append(OtherSensors);
 
 	// Poll the readbacks ahead of this frame's captures and behind each one. A fence that signals while
 	// the render thread works through the captures is then read back between them. Otherwise a client

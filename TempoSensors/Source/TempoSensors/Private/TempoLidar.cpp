@@ -39,6 +39,7 @@ namespace
 
 UTempoLidar::UTempoLidar()
 {
+	LaunchHandle->Lidar = this;
 	PrimaryComponentTick.bCanEverTick = true;
 	MeasurementTypes = { EMeasurementType::LIDAR_SCAN };
 	bAutoActivate = true;
@@ -55,16 +56,11 @@ UTempoLidar::UTempoLidar()
 	bUseRayTracingIfEnabled = false;
 }
 
-TOptional<TFuture<void>> UTempoLidar::SendMeasurements()
+namespace
 {
-	TOptional<TFuture<void>> Future;
-
-	// Snapshot color demand before draining, mirroring TempoCamera's bDepthEnabled flow: if all
-	// pending requests opt out of color, we should flip back off. The post-drain queue may be
-	// empty so we have to read color intent here.
-	const bool bHadColorRequests = [this]
+	bool AnyRequestsColor(const TArray<FLidarScanRequest>& Requests)
 	{
-		for (const FLidarScanRequest& Req : PendingRequests)
+		for (const FLidarScanRequest& Req : Requests)
 		{
 			if (Req.Request.include_color())
 			{
@@ -72,43 +68,48 @@ TOptional<TFuture<void>> UTempoLidar::SendMeasurements()
 			}
 		}
 		return false;
-	}();
+	}
+}
+
+TOptional<TFuture<void>> UTempoLidar::SendMeasurements()
+{
+	TOptional<TFuture<void>> Future;
+
+	// Reads the readback watcher already launched (LaunchDecodeForRead_AnyThread) are done with.
+	TextureReadQueue.PopLaunchedReads();
+
+	// Snapshot color demand before draining, mirroring TempoCamera's bDepthEnabled flow: if all
+	// pending requests opt out of color, we should flip back off. The post-drain queue may be
+	// empty so we have to read color intent here.
+	bool bHadColorRequests;
+	{
+		FScopeLock RequestsLock(&RequestsMutex);
+		bHadColorRequests = AnyRequestsColor(PendingRequests) || bColorRequestedSinceSend;
+		bColorRequestedSinceSend = false;
+		LastSendTimeSeconds = GetWorld()->GetTimeSeconds();
+	}
 
 	if (TextureReadQueue.NextReadComplete())
 	{
-		TSharedPtr<FTextureRead> TextureRead = TextureReadQueue.DequeueIfReadComplete();
-		const FName ReadType = TextureRead->GetType();
-		if (ReadType == TEXT("LidarShared"))
+		// The readback watcher launches decodes too (LaunchDecodeForRead_AnyThread). Both check that
+		// none is in flight, take the read and the requests, and count the decode in flight under
+		// RequestsMutex, so the segments of one sweep never cross another's.
+		FScopeLock RequestsLock(&RequestsMutex);
+		TSharedPtr<FTextureRead> TextureRead = DecodesInFlight->load() == 0 ? TextureReadQueue.DequeueIfReadComplete() : nullptr;
+		if (TextureRead)
 		{
-			auto* SharedRead = static_cast<TLidarSharedTextureRead<FLidarPixel>*>(TextureRead.Get());
-			TArray<TUniquePtr<FTextureRead>> SliceReads = SharedRead->SplitIntoSlices();
-			Future = DecodeAndRespond(MoveTemp(SliceReads), /*bWithColor=*/false);
+			Future = DecodeAndRespond_Locked(MoveTemp(TextureRead), MoveTemp(PendingRequests), GetWorld()->GetTimeSeconds());
 		}
-		else
-		{
-			check(ReadType == TEXT("LidarColorShared"));
-			auto* SharedRead = static_cast<TLidarSharedTextureRead<FLidarPixelWithColor>*>(TextureRead.Get());
-			TArray<TUniquePtr<FTextureRead>> SliceReads = SharedRead->SplitIntoSlices();
-			Future = DecodeAndRespond(MoveTemp(SliceReads), /*bWithColor=*/true);
-		}
-
-		PendingRequests.Empty();
 	}
 
 	// Toggle color mode based on client intent. Use the pre-drain snapshot OR'd with any new
 	// requests pending (either newly arrived during this function or left over because the last
 	// read couldn't satisfy them).
-	const bool bColorNeeded = bHadColorRequests || [this]
+	bool bColorNeeded;
 	{
-		for (const FLidarScanRequest& Req : PendingRequests)
-		{
-			if (Req.Request.include_color())
-			{
-				return true;
-			}
-		}
-		return false;
-	}();
+		FScopeLock RequestsLock(&RequestsMutex);
+		bColorNeeded = bHadColorRequests || AnyRequestsColor(PendingRequests);
+	}
 	if (bColorNeeded)
 	{
 		FramesWithoutColor = 0;
@@ -643,8 +644,15 @@ void UTempoLidar::SyncTiles()
 	}
 }
 
+bool UTempoLidar::HasPendingRequests() const
+{
+	FScopeLock RequestsLock(&RequestsMutex);
+	return !PendingRequests.IsEmpty();
+}
+
 void UTempoLidar::RequestMeasurement(const TempoSensors::LidarScanRequest& Request, const TResponseDelegate<TempoSensors::LidarScanSegment>& ResponseContinuation)
 {
+	FScopeLock RequestsLock(&RequestsMutex);
 	// A stream's handler is re-invoked when its write queue drains, which can happen while a decode
 	// task is still responding with the sweep's later segments; that stream then asks here a second
 	// time for the same request. One entry per stream, or the next sweep would go to it twice.
@@ -1156,19 +1164,22 @@ bool TTextureRead<FLidarPixelWithColor>::Decode(float TransmissionTime, TempoSen
 	return DecodeLidarRead(*this, TransmissionTime, ScanSegmentOut);
 }
 
-TFuture<void> UTempoLidar::DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> TextureReads, bool bWithColor)
+TFuture<void> UTempoLidar::DecodeAndRespond_Locked(TSharedPtr<FTextureRead> Read, TArray<FLidarScanRequest> Requests, double TransmissionTime)
 {
-	const double TransmissionTime = GetWorld()->GetTimeSeconds();
-
+	DecodesInFlight->fetch_add(1);
 	TFuture<void> Future = Async(EAsyncExecution::TaskGraph, [
-		this,
-		TextureReads = MoveTemp(TextureReads),
-		Requests = PendingRequests,
+		Read = MoveTemp(Read),
+		Requests = MoveTemp(Requests),
 		TransmissionTimeCpy = TransmissionTime,
-		bWithColor
+		InFlight = DecodesInFlight
 		]
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TempoLidarDecodeAndRespond);
+
+		const bool bWithColor = Read->GetType() == TEXT("LidarColorShared");
+		TArray<TUniquePtr<FTextureRead>> TextureReads = bWithColor
+			? static_cast<TLidarSharedTextureRead<FLidarPixelWithColor>*>(Read.Get())->SplitIntoSlices()
+			: static_cast<TLidarSharedTextureRead<FLidarPixel>*>(Read.Get())->SplitIntoSlices();
 
 		TArray<TempoSensors::LidarScanSegment> Segments;
 		Segments.SetNum(TextureReads.Num());
@@ -1204,9 +1215,55 @@ TFuture<void> UTempoLidar::DecodeAndRespond(TArray<TUniquePtr<FTextureRead>> Tex
 				Request.ResponseContinuation.ExecuteIfBound(Segments[Index], grpc::Status_OK);
 			}
 		}
+		InFlight->fetch_sub(1);
 	});
 
 	return Future;
+}
+
+void UTempoLidar::LaunchDecodeForRead_AnyThread(const TSharedRef<FTextureRead>& Read)
+{
+	if (DecodesInFlight->load() != 0)
+	{
+		return;
+	}
+
+	// A read is decoded only for the requests waiting for it; with none it is kept for the game
+	// thread's next send, exactly as before.
+	FScopeLock RequestsLock(&RequestsMutex);
+	if (DecodesInFlight->load() != 0 || PendingRequests.IsEmpty())
+	{
+		return;
+	}
+	TSharedPtr<FTextureRead> TextureRead = TextureReadQueue.ClaimIfHead(Read);
+	if (!TextureRead)
+	{
+		return;
+	}
+	bColorRequestedSinceSend |= AnyRequestsColor(PendingRequests);
+	WatcherDecodes.Add(DecodeAndRespond_Locked(MoveTemp(TextureRead), MoveTemp(PendingRequests), LastSendTimeSeconds));
+}
+
+void UTempoLidar::WaitForDecodes()
+{
+	TArray<TFuture<void>> Decodes;
+	{
+		FScopeLock RequestsLock(&RequestsMutex);
+		Decodes = MoveTemp(WatcherDecodes);
+	}
+	for (const TFuture<void>& Decode : Decodes)
+	{
+		Decode.Wait();
+	}
+}
+
+void UTempoLidar::BeginDestroy()
+{
+	{
+		FScopeLock Lock(&LaunchHandle->Lock);
+		LaunchHandle->Lidar = nullptr;
+	}
+	Super::BeginDestroy();
 }
 
 void UTempoLidar::SetColorEnabled(bool bColorEnabledIn)
@@ -1619,6 +1676,20 @@ void UTempoLidar::RenderCapture()
 	}
 
 	NewRead->StagingTexture = AcquireNextStagingTexture();
+
+	// The readback watcher reads this off the render thread and launches the decode straight away,
+	// through the lidar's handle, instead of leaving it to the game thread's next poll.
+	NewRead->OnReadCompleteOffRenderThread = [Handle = TWeakPtr<FLaunchHandle>(LaunchHandle)](const TSharedRef<FTextureRead>& Read)
+	{
+		if (const TSharedPtr<FLaunchHandle> Pinned = Handle.Pin())
+		{
+			FScopeLock Lock(&Pinned->Lock);
+			if (Pinned->Lidar)
+			{
+				Pinned->Lidar->LaunchDecodeForRead_AnyThread(Read);
+			}
+		}
+	};
 
 	if (bMedia)
 	{

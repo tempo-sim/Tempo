@@ -107,6 +107,10 @@ uint32 FTempoReadbackWatcher::Run()
 			Read->RenderFence->Wait(FRHICommandListExecutor::GetImmediateCommandList(), FRHIGPUMask::All());
 		}
 		Read->Read();
+		if (Read->State == FTextureRead::State::EReadComplete && Read->OnReadCompleteOffRenderThread)
+		{
+			Read->OnReadCompleteOffRenderThread(Read.ToSharedRef());
+		}
 	}
 
 	GReadbackWatcherThreadId = 0;
