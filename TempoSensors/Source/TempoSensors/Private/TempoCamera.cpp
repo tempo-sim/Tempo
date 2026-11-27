@@ -1829,6 +1829,11 @@ void UTempoCamera::RenderCapture()
 	// FScopedVolumetricFogHistoryRescale); it is one setting for the family, so the largest tile
 	// factor is used. Tiles capture together, so they only differ when one was just activated.
 	float MaxExtrapolationFactor = 1.0f;
+	if (!bSingleTileFastPath)
+	{
+		// The tiles take the controller's bias, so step it first.
+		UpdateSharedExposure(false, nullptr);
+	}
 	for (FTempoCameraTile& Tile : Tiles)
 	{
 		if (!Tile.bActive)
@@ -2200,7 +2205,10 @@ void UTempoCamera::RenderCapture()
 		}
 	}
 
-	UpdateSharedExposure(bSingleTileFastPath, SingleActiveTile);
+	if (bSingleTileFastPath)
+	{
+		UpdateSharedExposure(true, SingleActiveTile);
+	}
 
 	if (!bSingleTileFastPath)
 	{
@@ -2738,8 +2746,11 @@ void UTempoCamera::UpdateSharedExposure(bool bSingleTileFastPath, FTempoCameraTi
 		return;
 	}
 
+	// Every reading through the capture before the newest one metered. The newest, the previous
+	// capture, is metered behind its render and could only be had by waiting for the GPU to finish
+	// that; taking it whenever it happened to be done made the exposure depend on GPU timing.
 	TArray<FTempoCameraExposureMeter::FMeasurement> Measurements;
-	ExposureMeter->Consume(Measurements);
+	ExposureMeter->ConsumeThrough(ExposureMeterCaptureId - 1, Measurements);
 
 	// GetEyeAdaptationParameters + EyeAdaptationCommon: clamp the metered luminance to the configured
 	// range, adapt toward it, and expose so that it lands on middle grey times the compensation.
@@ -2748,8 +2759,8 @@ void UTempoCamera::UpdateSharedExposure(bool bSingleTileFastPath, FTempoCameraTi
 	const float MinWhitePointLuminance = FMath::Min(BrightnessToLuminance(AE.MinBrightness, LuminanceMax), MaxWhitePointLuminance);
 
 	// Each measurement is divided by the exposure its own image was rendered with, and they are taken
-	// in capture order, adapting over the sim time between their captures. A capture the GPU hasn't
-	// finished metering is consumed on a later one; none is ever divided by another's exposure.
+	// in capture order, adapting over the sim time between their captures; none is ever divided by
+	// another's exposure.
 	float SceneLuminance = -1.0f;
 	float MeteredLuminance = -1.0f;
 	for (const FTempoCameraExposureMeter::FMeasurement& Measurement : Measurements)
